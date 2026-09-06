@@ -29,6 +29,13 @@ Guessing 1 is only clever if nobody else does.
 
 No JavaScript beyond a 20-line countdown; the game itself works without it.
 
+## Learning this from scratch
+
+If you want to rebuild this yourself rather than read the finished code,
+**[LEARNING.md](LEARNING.md)** is a 0–100 roadmap: what to learn in what order,
+which sources are authoritative, and the design questions you should decide for
+yourself. It deliberately withholds the answers.
+
 ## Going live — what's still to do
 
 The app is built, tested and containerised, but **it has never been deployed**.
