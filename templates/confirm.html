@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Confirm your guess &middot; i guess 42{% endblock %}
+
+{% block content %}
+<section class="card confirm">
+  <p class="eyebrow">Round of {{ round_label }}</p>
+  <h1>Are you sure?</h1>
+
+  <p class="bignumber">{{ value_label }}</p>
+
+  <p class="warning">
+    This is your one guess for this round and <strong>it cannot be changed
+    or withdrawn</strong>. Nobody else sees it until the round closes
+    {{ deadline_human }}.
+  </p>
+
+  <form method="post" action="/guess/confirm" class="confirmform">
+    <input type="hidden" name="guess" value="{{ value_raw }}">
+    <input type="hidden" name="round" value="{{ round_key }}">
+    <button type="submit">Yes, lock in {{ value_label }}</button>
+    <a class="cancel" href="/">Cancel</a>
+  </form>
+</section>
+{% endblock %}

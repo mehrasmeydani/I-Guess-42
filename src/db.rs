@@ -191,20 +191,83 @@ pub async fn consume_oauth_state(db: &Db, state: &str) -> Result<bool> {
 
 // ---------------------------------------------------------------- game
 
-pub async fn upsert_guess(db: &Db, round_date: &str, user_id: i64, value: i64) -> Result<()> {
-    sqlx::query(
+/// Records a guess. Returns `false` if this player already had one for the
+/// round, leaving the original untouched.
+///
+/// Guesses are final, so this must never overwrite. `DO NOTHING` makes the
+/// check and the insert one atomic statement: two requests racing each other
+/// cannot both succeed, which a read-then-write pair could not guarantee.
+pub async fn insert_guess(db: &Db, round_date: &str, user_id: i64, value: i64) -> Result<bool> {
+    let inserted = sqlx::query(
         "INSERT INTO guesses (round_date, user_id, value, submitted_at) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(round_date, user_id) DO UPDATE SET
-             value = excluded.value,
-             submitted_at = excluded.submitted_at",
+         ON CONFLICT(round_date, user_id) DO NOTHING",
     )
     .bind(round_date)
     .bind(user_id)
     .bind(value)
     .bind(ts(Utc::now()))
     .execute(db)
+    .await?
+    .rows_affected();
+    Ok(inserted > 0)
+}
+
+/// Every guess in a round, with who made it. Admin/test use only - this is
+/// exactly the information the game hides from players until a round closes.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct GuessRow {
+    pub login: String,
+    pub display_name: String,
+    pub value: i64,
+}
+
+pub async fn round_guesses(db: &Db, round_date: &str) -> Result<Vec<GuessRow>> {
+    let rows = sqlx::query_as::<_, GuessRow>(
+        "SELECT u.login, u.display_name, g.value
+         FROM guesses g JOIN users u ON u.id = g.user_id
+         WHERE g.round_date = ?1
+         ORDER BY g.value ASC",
+    )
+    .bind(round_date)
+    .fetch_all(db)
     .await?;
-    Ok(())
+    Ok(rows)
+}
+
+pub async fn clear_round(db: &Db, round_date: &str) -> Result<u64> {
+    let n = sqlx::query("DELETE FROM guesses WHERE round_date = ?1")
+        .bind(round_date)
+        .execute(db)
+        .await?
+        .rows_affected();
+    Ok(n)
+}
+
+pub async fn user_by_login(db: &Db, login: &str) -> Result<Option<User>> {
+    let user = sqlx::query_as::<_, User>(
+        "SELECT id, login, display_name, image_url FROM users WHERE login = ?1",
+    )
+    .bind(login)
+    .fetch_optional(db)
+    .await?;
+    Ok(user)
+}
+
+/// Creates a stand-in player for testing. Real 42 ids are positive, so
+/// negative ids keep invented players trivially distinguishable from people.
+pub async fn create_test_user(db: &Db, login: &str) -> Result<User> {
+    let (lowest,): (Option<i64>,) = sqlx::query_as("SELECT MIN(id) FROM users")
+        .fetch_one(db)
+        .await?;
+    let id = lowest.unwrap_or(0).min(0) - 1;
+    let display_name = format!("{login} (test)");
+    upsert_user(db, id, login, &display_name, None).await?;
+    Ok(User {
+        id,
+        login: login.to_string(),
+        display_name,
+        image_url: None,
+    })
 }
 
 pub async fn my_guess(db: &Db, round_date: &str, user_id: i64) -> Result<Option<i64>> {
@@ -364,7 +427,7 @@ mod tests {
             )
             .await
             .unwrap();
-            upsert_guess(db, round, *user_id, *value).await.unwrap();
+            insert_guess(db, round, *user_id, *value).await.unwrap();
         }
     }
 
@@ -428,13 +491,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resubmitting_replaces_the_previous_guess() {
+    async fn a_guess_is_final_and_a_second_one_is_refused() {
         let t = temp_db().await;
         seed(&t.db, "2026-09-05", &[(1, 50)]).await;
-        upsert_guess(&t.db, "2026-09-05", 1, 3).await.unwrap();
 
-        assert_eq!(my_guess(&t.db, "2026-09-05", 1).await.unwrap(), Some(3));
+        // The second attempt reports that nothing was written...
+        assert!(!insert_guess(&t.db, "2026-09-05", 1, 3).await.unwrap());
+        // ...and the original number is untouched.
+        assert_eq!(my_guess(&t.db, "2026-09-05", 1).await.unwrap(), Some(50));
         assert_eq!(guess_count(&t.db, "2026-09-05").await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_same_player_may_guess_again_in_a_later_round() {
+        let t = temp_db().await;
+        seed(&t.db, "2026-09-05", &[(1, 50)]).await;
+
+        assert!(insert_guess(&t.db, "2026-09-06", 1, 3).await.unwrap());
+        assert_eq!(my_guess(&t.db, "2026-09-05", 1).await.unwrap(), Some(50));
+        assert_eq!(my_guess(&t.db, "2026-09-06", 1).await.unwrap(), Some(3));
     }
 
     #[tokio::test]

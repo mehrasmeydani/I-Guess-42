@@ -11,7 +11,8 @@ use crate::auth;
 use crate::db::{self, User};
 use crate::round::Round;
 use crate::templates::{
-    self, group_digits, IndexTemplate, Notice, ResultsTemplate, RoundView, UserView,
+    self, group_digits, AdminTemplate, ConfirmTemplate, IndexTemplate, Notice, ResultsTemplate,
+    RoundView, UserView,
 };
 
 const HISTORY_LIMIT: i64 = 60;
@@ -29,9 +30,12 @@ async fn current_user(state: &AppState, jar: &CookieJar) -> Result<Option<User>,
 fn notice_for(code: Option<&str>) -> Option<Notice> {
     Some(match code? {
         "saved" => Notice::ok("Locked in. Come back after 12:42 to see who took it."),
-        "changed" => Notice::ok("Guess updated — the new number is the one that counts."),
+        "already" => {
+            Notice::error("You have already guessed this round, and a guess cannot be changed.")
+        }
         "rolled" => Notice::error(
-            "The round closed while you were deciding, so your number went into the next one.",
+            "The round closed while you were confirming, so nothing was submitted. \
+             The next round is open now.",
         ),
         "empty" => Notice::error("Type a number first."),
         "invalid" => Notice::error("Whole numbers only — no signs, decimals or letters."),
@@ -54,7 +58,7 @@ pub async fn index(
     jar: CookieJar,
     Query(query): Query<IndexQuery>,
 ) -> Result<Response, AppError> {
-    let now = Utc::now();
+    let now = state.now();
     let round = Round::current(now);
     let round_key = round.key();
 
@@ -80,6 +84,7 @@ pub async fn index(
 
     Ok(templates::render(&IndexTemplate {
         user: user.map(UserView::from),
+        test_mode: state.cfg.test_mode(),
         round_key,
         round_label,
         deadline_human: round.deadline_human(),
@@ -93,7 +98,7 @@ pub async fn index(
 }
 
 pub async fn results(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
-    let round_key = Round::current(Utc::now()).key();
+    let round_key = Round::current(state.now()).key();
     let user = current_user(&state, &jar).await?;
 
     let rounds = db::closed_rounds(&state.db, &round_key, HISTORY_LIMIT)
@@ -109,6 +114,7 @@ pub async fn results(State(state): State<AppState>, jar: CookieJar) -> Result<Re
 
     Ok(templates::render(&ResultsTemplate {
         user: user.map(UserView::from),
+        test_mode: state.cfg.test_mode(),
         rounds,
         leaders,
     }))
@@ -144,6 +150,10 @@ fn parse_guess(raw: &str) -> Result<i64, &'static str> {
     }
 }
 
+/// Step one: validate the number and show it back for confirmation. Nothing
+/// is written here — a guess cannot be taken back, so it is worth an extra
+/// click. The confirmation is a real page rather than a JavaScript dialog, so
+/// it still works with scripting turned off.
 pub async fn submit_guess(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -158,22 +168,205 @@ pub async fn submit_guess(
         Err(code) => return Ok(Redirect::to(&format!("/?msg={code}")).into_response()),
     };
 
-    // Recomputed here rather than trusted from the form: the guess always
-    // lands in whichever round is open at this instant.
-    let round_key = Round::current(Utc::now()).key();
-    let had_guess = db::my_guess(&state.db, &round_key, user.id)
-        .await?
-        .is_some();
-    db::upsert_guess(&state.db, &round_key, user.id, value).await?;
+    let round = Round::current(state.now());
+    let round_key = round.key();
 
-    let msg = if form.round != round_key {
-        "rolled"
-    } else if had_guess {
-        "changed"
-    } else {
+    if db::my_guess(&state.db, &round_key, user.id)
+        .await?
+        .is_some()
+    {
+        return Ok(Redirect::to("/?msg=already").into_response());
+    }
+
+    Ok(templates::render(&ConfirmTemplate {
+        user: Some(UserView::from(user)),
+        test_mode: state.cfg.test_mode(),
+        value_label: group_digits(value),
+        // Canonical form, so what gets stored is exactly what was shown:
+        // "007" was displayed as 7 and must be submitted as 7.
+        value_raw: value.to_string(),
+        round_key,
+        round_label: crate::round::format_round_date(&round.key()),
+        deadline_human: round.deadline_human(),
+    }))
+}
+
+/// Step two: actually record it.
+pub async fn confirm_guess(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<GuessForm>,
+) -> Result<Response, AppError> {
+    let Some(user) = current_user(&state, &jar).await? else {
+        return Ok(Redirect::to("/?msg=login_required").into_response());
+    };
+
+    let value = match parse_guess(&form.guess) {
+        Ok(v) => v,
+        Err(code) => return Ok(Redirect::to(&format!("/?msg={code}")).into_response()),
+    };
+
+    // If the deadline passed between the two steps, refuse rather than
+    // quietly committing an irreversible guess to a round they never saw.
+    let round_key = Round::current(state.now()).key();
+    if form.round != round_key {
+        return Ok(Redirect::to("/?msg=rolled").into_response());
+    }
+
+    let msg = if db::insert_guess(&state.db, &round_key, user.id, value).await? {
         "saved"
+    } else {
+        // Lost a race with another tab; the first guess stands.
+        "already"
     };
     Ok(Redirect::to(&format!("/?msg={msg}")).into_response())
+}
+
+// ------------------------------------------------------------------- admin
+//
+// Test-instance tooling: shift the clock past a deadline, invent players, and
+// look at an open round. All of it is gated on ADMIN_LOGINS being set, and
+// every route answers 404 when it is not, so a live deployment gives no sign
+// that any of this exists.
+
+/// `Ok(Some(user))` for a signed-in admin on a test instance, `Ok(None)`
+/// otherwise - callers turn that into a 404.
+async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<Option<User>, AppError> {
+    if !state.cfg.test_mode() {
+        return Ok(None);
+    }
+    Ok(current_user(state, jar)
+        .await?
+        .filter(|u| state.cfg.is_admin(&u.login)))
+}
+
+fn admin_gone() -> Response {
+    error_page(StatusCode::NOT_FOUND, "No such page.")
+}
+
+pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
+    let Some(user) = require_admin(&state, &jar).await? else {
+        return Ok(admin_gone());
+    };
+
+    let now = state.now();
+    let round = Round::current(now);
+    let round_key = round.key();
+    let offset = state.clock_offset();
+
+    let last_round = db::round_summary(
+        &state.db,
+        &round_key,
+        &round.previous_date().format("%Y-%m-%d").to_string(),
+    )
+    .await?
+    .map(RoundView::from);
+
+    Ok(templates::render(&AdminTemplate {
+        user: Some(UserView::from(user)),
+        test_mode: true,
+        real_now: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        game_now: now.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        clock_offset: if offset == 0 {
+            "none".to_string()
+        } else {
+            format!(
+                "{:+} ({})",
+                offset,
+                crate::round::format_duration(offset.abs())
+            )
+        },
+        round_key: round_key.clone(),
+        round_label: crate::round::format_round_date(&round_key),
+        deadline_human: round.deadline_human(),
+        time_left: crate::round::format_duration(round.seconds_left(now)),
+        guesses: db::round_guesses(&state.db, &round_key)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        last_round,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct ClockForm {
+    shift: String,
+}
+
+pub async fn admin_clock(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<ClockForm>,
+) -> Result<Response, AppError> {
+    if require_admin(&state, &jar).await?.is_none() {
+        return Ok(admin_gone());
+    }
+
+    match form.shift.as_str() {
+        "reset" => state.reset_clock(),
+        // Land one second past the deadline, so the round is definitively over.
+        "deadline" => {
+            let now = state.now();
+            state.shift_clock(Round::current(now).seconds_left(now) + 1);
+        }
+        "hour" => state.shift_clock(60 * 60),
+        "day" => state.shift_clock(24 * 60 * 60),
+        "back_day" => state.shift_clock(-24 * 60 * 60),
+        _ => return Ok(Redirect::to("/admin?msg=invalid").into_response()),
+    }
+    Ok(Redirect::to("/admin").into_response())
+}
+
+#[derive(Deserialize)]
+pub struct FakeGuessForm {
+    login: String,
+    guess: String,
+}
+
+/// Adds a guess on behalf of an invented player, so a round can be populated
+/// without recruiting people.
+pub async fn admin_fake_guess(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<FakeGuessForm>,
+) -> Result<Response, AppError> {
+    if require_admin(&state, &jar).await?.is_none() {
+        return Ok(admin_gone());
+    }
+
+    let login = form.login.trim().to_lowercase();
+    if login.is_empty() || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Ok(Redirect::to("/admin?msg=bad_login").into_response());
+    }
+    let Ok(value) = parse_guess(&form.guess) else {
+        return Ok(Redirect::to("/admin?msg=bad_guess").into_response());
+    };
+
+    let player = match db::user_by_login(&state.db, &login).await? {
+        Some(u) => u,
+        None => db::create_test_user(&state.db, &login).await?,
+    };
+
+    let round_key = Round::current(state.now()).key();
+    let msg = if db::insert_guess(&state.db, &round_key, player.id, value).await? {
+        "added"
+    } else {
+        "already"
+    };
+    Ok(Redirect::to(&format!("/admin?msg={msg}")).into_response())
+}
+
+pub async fn admin_clear(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Response, AppError> {
+    if require_admin(&state, &jar).await?.is_none() {
+        return Ok(admin_gone());
+    }
+    let round_key = Round::current(state.now()).key();
+    db::clear_round(&state.db, &round_key).await?;
+    Ok(Redirect::to("/admin?msg=cleared").into_response())
 }
 
 // -------------------------------------------------------------------- auth

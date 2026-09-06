@@ -13,6 +13,10 @@ pub struct Config {
     pub bind_addr: String,
     /// Set the `Secure` flag on the session cookie. Turn off for plain-http local dev.
     pub secure_cookies: bool,
+    /// 42 logins allowed into `/admin`. Empty disables test mode outright, and
+    /// the admin routes then answer 404 rather than 403 so a live deployment
+    /// does not advertise that they exist.
+    pub admin_logins: Vec<String>,
 }
 
 impl Config {
@@ -24,7 +28,22 @@ impl Config {
             database_url: opt("DATABASE_URL", "sqlite://data/game.db"),
             bind_addr: opt("BIND_ADDR", "127.0.0.1:3000"),
             secure_cookies: opt("SECURE_COOKIES", "false") == "true",
+            admin_logins: opt("ADMIN_LOGINS", "")
+                .split(',')
+                .map(|l| l.trim().to_lowercase())
+                .filter(|l| !l.is_empty())
+                .collect(),
         })
+    }
+
+    /// True when this instance is a test instance.
+    pub fn test_mode(&self) -> bool {
+        !self.admin_logins.is_empty()
+    }
+
+    pub fn is_admin(&self, login: &str) -> bool {
+        let login = login.to_lowercase();
+        self.admin_logins.contains(&login)
     }
 }
 

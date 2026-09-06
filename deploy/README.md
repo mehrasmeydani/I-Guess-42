@@ -105,6 +105,47 @@ ssh -i "$KEY_FILE" ubuntu@"$HOST" '
 The site is down for the couple of seconds that takes. To restore, stop the app
 and untar back into the same volume.
 
+## Running a test instance alongside the live one
+
+Keep them completely separate: different domain, different database, different
+compose project name. The only difference in configuration is `ADMIN_LOGINS`,
+which is what turns test mode on.
+
+On the same server, put a second copy in its own directory:
+
+```sh
+ssh -i "$KEY_FILE" ubuntu@"$HOST"
+mkdir -p ~/i_guess_42_test && cd ~/i_guess_42_test
+cp ~/i_guess_42/compose.yml ~/i_guess_42/Caddyfile .
+
+cat > .env <<'EOF'
+SITE_DOMAIN=test.yourdomain.com
+FT_CLIENT_ID=...          # the same 42 app is fine
+FT_CLIENT_SECRET=...
+ADMIN_LOGINS=your-42-login
+EOF
+
+# -p gives it its own volumes and network, so the two never share a database.
+sudo docker compose -p ig42test up -d --no-build
+```
+
+Two things to get right:
+
+1. Add an **A record** for `test.yourdomain.com` pointing at the same IP, and
+   register `https://test.yourdomain.com/auth/callback` as a second redirect
+   URI on the intra application. Caddy will get a separate certificate.
+2. Both stacks want ports 80 and 443, and only one can have them. Either run
+   the test instance behind the *live* Caddy by adding a second site block to
+   its `Caddyfile`, or drop Caddy from the test stack and publish the app on a
+   high port for your own use only.
+
+The simplest version, if the test instance is only ever for you: skip the
+domain entirely, run it locally with `docker compose up`, and reach it at
+`http://localhost:3000`.
+
+**Never set `ADMIN_LOGINS` on the live instance.** With it unset the admin
+routes return 404, so nothing hints they exist.
+
 ## Running it somewhere that is not AWS
 
 Nothing above is AWS-specific past `provision.sh`. On any machine with Docker

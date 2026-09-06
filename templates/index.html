@@ -19,25 +19,29 @@
   {% match user %}
     {% when Some with (_u) %}
       {% match my_guess_label %}
-        {% when Some with (g) %}<p class="yours">Your number: <strong>{{ g }}</strong></p>
+        {% when Some with (g) %}
+          <p class="yours locked">Your number: <strong>{{ g }}</strong></p>
+          <p class="hint">
+            That is final for this round. Come back after 12:42 to see whether
+            it held.
+          </p>
         {% when None %}
+          <form class="guessform" method="post" action="/guess">
+            <input type="hidden" name="round" value="{{ round_key }}">
+            <label for="guess">Pick a whole number, 1 or higher</label>
+            <div class="row">
+              <input id="guess" name="guess" type="text" inputmode="numeric"
+                     pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
+                     placeholder="1" required>
+              <button type="submit">Lock it in</button>
+            </div>
+            <p class="hint">
+              One guess per round, and <strong>it cannot be changed</strong>
+              once you confirm it. Lowest number that exactly one person
+              picked takes the day.
+            </p>
+          </form>
       {% endmatch %}
-      <form class="guessform" method="post" action="/guess">
-        <input type="hidden" name="round" value="{{ round_key }}">
-        <label for="guess">Pick a whole number, 1 or higher</label>
-        <div class="row">
-          <input id="guess" name="guess" type="text" inputmode="numeric"
-                 pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
-                 placeholder="1" required>
-          <button type="submit">
-            {% if my_guess_label.is_some() %}Change it{% else %}Lock it in{% endif %}
-          </button>
-        </div>
-        <p class="hint">
-          You can keep changing it until 12:42. Lowest number that exactly one
-          person picked takes the day.
-        </p>
-      </form>
     {% when None %}
       <p class="signedout">Sign in with your 42 account to put a number in.</p>
       <a class="cta big" href="/login">Sign in with 42</a>

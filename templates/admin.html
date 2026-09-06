@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Admin &middot; i guess 42{% endblock %}
+
+{% block content %}
+<section class="card admin">
+  <p class="eyebrow">Clock</p>
+  <dl class="kv">
+    <dt>Real time</dt><dd>{{ real_now }}</dd>
+    <dt>Game time</dt><dd>{{ game_now }}</dd>
+    <dt>Offset</dt><dd>{{ clock_offset }}</dd>
+    <dt>Open round</dt><dd>{{ round_label }} <span class="login">{{ round_key }}</span></dd>
+    <dt>Closes</dt><dd>{{ deadline_human }} &mdash; in {{ time_left }}</dd>
+  </dl>
+  <form method="post" action="/admin/clock" class="inline">
+    <button type="submit" name="shift" value="hour">+1 hour</button>
+    <button type="submit" name="shift" value="day">+1 day</button>
+    <button type="submit" name="shift" value="deadline">Jump past the deadline</button>
+    <button type="submit" name="shift" value="back_day">&minus;1 day</button>
+    <button type="submit" name="shift" value="reset" class="ghost">Reset</button>
+  </form>
+  <p class="hint">
+    The offset lives in memory and only shifts which round is open. It resets
+    when the process restarts, and never affects session expiry.
+  </p>
+</section>
+
+<section class="card admin">
+  <p class="eyebrow">Add a stand-in player</p>
+  <form method="post" action="/admin/guess" class="guessform">
+    <div class="row">
+      <input name="login" type="text" placeholder="login" autocomplete="off"
+             spellcheck="false" pattern="[a-zA-Z0-9-]+" required>
+      <input name="guess" type="text" inputmode="numeric" pattern="[0-9 ,_]*"
+             placeholder="number" autocomplete="off" required>
+      <button type="submit">Add</button>
+    </div>
+    <p class="hint">
+      Invented players get negative ids, so they never collide with real 42
+      accounts. Their guesses are final, exactly like everyone else's.
+    </p>
+  </form>
+</section>
+
+<section class="card admin">
+  <p class="eyebrow">Open round &mdash; {{ guesses.len() }} guess{% if guesses.len() != 1 %}es{% endif %}</p>
+  {% if guesses.is_empty() %}
+    <p class="empty">Nothing submitted yet.</p>
+  {% else %}
+    <table class="history">
+      <thead><tr><th>Player</th><th class="num">Number</th></tr></thead>
+      <tbody>
+        {% for g in guesses %}
+          <tr>
+            <td class="who">{{ g.display_name }} <span class="login">{{ g.login }}</span></td>
+            <td class="num value">{{ g.value_label }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">
+      Players never see this list until the round closes. It is here so you can
+      check the winner logic against what was actually submitted.
+    </p>
+  {% endif %}
+  <form method="post" action="/admin/clear" class="inline">
+    <button type="submit" class="ghost">Clear this round</button>
+  </form>
+</section>
+
+{% match last_round %}
+  {% when Some with (r) %}
+    <section class="card admin">
+      <p class="eyebrow">Last round &middot; {{ r.date_label }}</p>
+      {% match r.winner %}
+        {% when Some with (w) %}
+          <p class="who">{{ w.display_name }} <span class="login">{{ w.login }}</span></p>
+          <p class="value">{{ w.value_label }}</p>
+        {% when None %}
+          <p class="nowinner">No winner &mdash; every number was duplicated.</p>
+      {% endmatch %}
+      <p class="tally">{{ r.total }} played</p>
+    </section>
+  {% when None %}
+{% endmatch %}
+{% endblock %}

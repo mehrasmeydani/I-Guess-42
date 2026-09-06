@@ -8,8 +8,8 @@ Guessing 1 is only clever if nobody else does.
 
 ## Rules
 
-- One guess per player per round. You can change it as often as you like until
-  the deadline.
+- **One guess per player per round, and it is final.** Submitting shows an
+  "are you sure?" page first, because it cannot be changed or withdrawn.
 - Any whole number from `1` up to `9223372036854775807` (i64 max). There is no
   practical ceiling — the whole game is about going low.
 - A round runs from one 12:42 Europe/Vienna deadline to the next, and is
@@ -28,6 +28,21 @@ Guessing 1 is only clever if nobody else does.
 | Auth | 42 intra OAuth2 authorization code flow, opaque server-side sessions |
 
 No JavaScript beyond a 20-line countdown; the game itself works without it.
+
+## Test mode
+
+Setting `ADMIN_LOGINS` to a comma-separated list of 42 logins turns an instance
+into a **test instance**: those users get `/admin`, every page grows a warning
+banner, and the routes 404 for everyone else. Leave it unset on the live
+instance and the admin routes do not exist at all.
+
+`/admin` lets you shift the game clock past a 12:42 deadline without waiting,
+invent stand-in players so a round has something in it, reveal the open round's
+guesses, and clear a round to start over. The clock offset is in memory only,
+resets on restart, and shifts nothing but which round is open.
+
+See [deploy/README.md](deploy/README.md) for running a test instance alongside
+the live one.
 
 ## Learning this from scratch
 
@@ -174,6 +189,7 @@ runs on any host with Docker, a domain, and ports 80/443 open.
 | `DATABASE_URL` | no | `sqlite://data/game.db` |
 | `BIND_ADDR` | no | `127.0.0.1:3000` |
 | `SECURE_COOKIES` | no | `false` |
+| `ADMIN_LOGINS` | no | empty (test mode off) |
 | `RUST_LOG` | no | `i_guess_42=info,tower_http=warn` |
 
 ## Layout

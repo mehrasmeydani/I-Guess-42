@@ -2,7 +2,7 @@ use askama::Template;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 
-use crate::db::{LeaderboardRow, RoundSummary, User};
+use crate::db::{GuessRow, LeaderboardRow, RoundSummary, User};
 use crate::round;
 
 /// Insert thin separators every three digits, so a 19-digit guess is readable.
@@ -115,6 +115,7 @@ impl Notice {
 #[template(path = "index.html")]
 pub struct IndexTemplate {
     pub user: Option<UserView>,
+    pub test_mode: bool,
     /// `YYYY-MM-DD`, round-tripped through the form's hidden field.
     pub round_key: String,
     pub round_label: String,
@@ -128,18 +129,67 @@ pub struct IndexTemplate {
     pub notice: Option<Notice>,
 }
 
+/// The "are you sure?" step. Carries the value in both a display form and a
+/// canonical raw form for the hidden field.
+#[derive(Template)]
+#[template(path = "confirm.html")]
+pub struct ConfirmTemplate {
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub value_label: String,
+    pub value_raw: String,
+    pub round_key: String,
+    pub round_label: String,
+    pub deadline_human: String,
+}
+
 #[derive(Template)]
 #[template(path = "results.html")]
 pub struct ResultsTemplate {
     pub user: Option<UserView>,
+    pub test_mode: bool,
     pub rounds: Vec<RoundView>,
     pub leaders: Vec<LeaderView>,
+}
+
+pub struct AdminGuessView {
+    pub login: String,
+    pub display_name: String,
+    pub value_label: String,
+}
+
+impl From<GuessRow> for AdminGuessView {
+    fn from(g: GuessRow) -> Self {
+        Self {
+            login: g.login,
+            display_name: g.display_name,
+            value_label: group_digits(g.value),
+        }
+    }
+}
+
+#[derive(Template)]
+#[template(path = "admin.html")]
+pub struct AdminTemplate {
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub real_now: String,
+    pub game_now: String,
+    pub clock_offset: String,
+    pub round_key: String,
+    pub round_label: String,
+    pub deadline_human: String,
+    pub time_left: String,
+    /// The open round's guesses, which players are not allowed to see.
+    pub guesses: Vec<AdminGuessView>,
+    pub last_round: Option<RoundView>,
 }
 
 #[derive(Template)]
 #[template(path = "error.html")]
 pub struct ErrorTemplate {
     pub user: Option<UserView>,
+    pub test_mode: bool,
     pub status: u16,
     pub message: String,
 }

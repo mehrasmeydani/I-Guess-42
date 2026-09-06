@@ -42,20 +42,26 @@ async fn main() -> Result<()> {
         .build()
         .context("building the HTTP client")?;
 
-    let state = AppState {
-        db,
-        cfg: Arc::new(cfg),
-        http,
-    };
+    let cfg = Arc::new(cfg);
+    if cfg.test_mode() {
+        tracing::warn!(admins = ?cfg.admin_logins, "TEST MODE: /admin is reachable");
+    }
+    let state = AppState::new(db, cfg, http);
 
     let router = Router::new()
         .route("/", get(handlers::index))
         .route("/results", get(handlers::results))
         .route("/guess", post(handlers::submit_guess))
+        .route("/guess/confirm", post(handlers::confirm_guess))
         .route("/login", get(handlers::login))
         .route("/auth/callback", get(handlers::callback))
         .route("/logout", post(handlers::logout))
         .route("/healthz", get(handlers::healthz))
+        // 404 unless ADMIN_LOGINS names the signed-in user.
+        .route("/admin", get(handlers::admin))
+        .route("/admin/clock", post(handlers::admin_clock))
+        .route("/admin/guess", post(handlers::admin_fake_guess))
+        .route("/admin/clear", post(handlers::admin_clear))
         .nest_service("/static", ServeDir::new("static"))
         .fallback(handlers::not_found)
         .layer(TraceLayer::new_for_http())

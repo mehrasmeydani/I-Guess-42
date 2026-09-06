@@ -20,8 +20,8 @@ this project is the decisions, and handing those over would waste it.
 Build a website where:
 
 - People sign in with their 42 intra account. No passwords of your own.
-- Each signed-in person submits **one whole number** per round. They may change
-  it until the round closes.
+- Each signed-in person submits **one whole number** per round. It is final:
+  it cannot be changed or withdrawn, so submitting asks for confirmation first.
 - Numbers start at 1 and have **no upper bound** you impose.
 - A round closes every day at **12:42 Europe/Vienna**.
 - The winner is the **lowest number that exactly one person chose**. A number
@@ -230,7 +230,7 @@ as a query or an algorithm. Then handle:
 
 - Nobody wins, because every number was duplicated
 - One player, who trivially wins with whatever they chose
-- Someone changing their guess, which can *un-burn* a number for someone else
+- Two people picking the same number, which burns it for both
 
 Write a test for each of those before you write the logic. They are cheap tests
 and they will all fail interestingly at least once.
@@ -268,9 +268,13 @@ Learn:
 
 **Questions you must answer yourself:**
 
-- How do you store "this person's guess for this round" such that submitting
-  twice *replaces* rather than duplicates? There is a SQL feature for exactly
-  this. Find it.
+- How do you store "this person's guess for this round" such that a second
+  submission is *refused* rather than silently overwriting? Doing it as
+  read-then-write has a race two browser tabs can win. There is a way to make
+  the check and the insert one atomic statement. Find it.
+- An irreversible action deserves a confirmation step. Where does the value
+  live between "review" and "confirm", and what stops someone skipping the
+  review by posting straight to the confirm endpoint?
 - Do you compute the winner when the round closes and store it, or work it out
   every time someone asks? Both are real designs with real trade-offs. Storing
   it means something must run at 12:42 — what, and what if the server was
