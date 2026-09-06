@@ -44,6 +44,12 @@ resets on restart, and shifts nothing but which round is open.
 See [deploy/README.md](deploy/README.md) for running a test instance alongside
 the live one.
 
+## Understanding the code
+
+**[CODE.md](CODE.md)** is a full walkthrough of the codebase: every file, every
+function, and every line that is not self-evident — what it does, why it is
+written that way, and what breaks if it changes.
+
 ## Learning this from scratch
 
 If you want to rebuild this yourself rather than read the finished code,
