@@ -36,10 +36,20 @@ into a **test instance**: those users get `/admin`, every page grows a warning
 banner, and the routes 404 for everyone else. Leave it unset on the live
 instance and the admin routes do not exist at all.
 
-`/admin` lets you shift the game clock past a 12:42 deadline without waiting,
-invent stand-in players so a round has something in it, reveal the open round's
-guesses, and clear a round to start over. The clock offset is in memory only,
-resets on restart, and shifts nothing but which round is open.
+`/admin` gives you four things:
+
+- **End the round now** — shift the game clock past the 12:42 deadline instead
+  of waiting for it, then reset it afterwards. The offset is in memory only and
+  shifts nothing but which round is open.
+- **Demo accounts** — sign in as a stand-in player and walk the real flow,
+  guess form and confirmation included. Your own session is parked and a banner
+  brings you back. Only stand-ins can be used this way; a real 42 account is
+  refused, which matters because classmates can sign in to a test instance too.
+- **Ghost numbers** — enter a number that shows up in the admin view but is
+  left out of the headcount and cannot win or burn anything. Useful for parking
+  numbers in a round to see how it looks without changing the outcome.
+- **Reveal and clear** — see the open round's guesses, which players cannot,
+  and wipe a round to start over.
 
 See [deploy/README.md](deploy/README.md) for running a test instance alongside
 the live one.

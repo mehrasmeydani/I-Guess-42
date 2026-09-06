@@ -62,6 +62,9 @@ async fn main() -> Result<()> {
         .route("/admin/clock", post(handlers::admin_clock))
         .route("/admin/guess", post(handlers::admin_fake_guess))
         .route("/admin/clear", post(handlers::admin_clear))
+        .route("/admin/impersonate", post(handlers::admin_impersonate))
+        // Not admin-gated: the caller is a demo account by the time they need it.
+        .route("/admin/return", post(handlers::admin_return))
         .nest_service("/static", ServeDir::new("static"))
         .fallback(handlers::not_found)
         .layer(TraceLayer::new_for_http())

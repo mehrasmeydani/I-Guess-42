@@ -197,15 +197,23 @@ pub async fn consume_oauth_state(db: &Db, state: &str) -> Result<bool> {
 /// Guesses are final, so this must never overwrite. `DO NOTHING` makes the
 /// check and the insert one atomic statement: two requests racing each other
 /// cannot both succeed, which a read-then-write pair could not guarantee.
-pub async fn insert_guess(db: &Db, round_date: &str, user_id: i64, value: i64) -> Result<bool> {
+pub async fn insert_guess(
+    db: &Db,
+    round_date: &str,
+    user_id: i64,
+    value: i64,
+    participates: bool,
+) -> Result<bool> {
     let inserted = sqlx::query(
-        "INSERT INTO guesses (round_date, user_id, value, submitted_at) VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO guesses (round_date, user_id, value, submitted_at, participates)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(round_date, user_id) DO NOTHING",
     )
     .bind(round_date)
     .bind(user_id)
     .bind(value)
     .bind(ts(Utc::now()))
+    .bind(participates)
     .execute(db)
     .await?
     .rows_affected();
@@ -219,14 +227,15 @@ pub struct GuessRow {
     pub login: String,
     pub display_name: String,
     pub value: i64,
+    pub participates: bool,
 }
 
 pub async fn round_guesses(db: &Db, round_date: &str) -> Result<Vec<GuessRow>> {
     let rows = sqlx::query_as::<_, GuessRow>(
-        "SELECT u.login, u.display_name, g.value
+        "SELECT u.login, u.display_name, g.value, g.participates
          FROM guesses g JOIN users u ON u.id = g.user_id
          WHERE g.round_date = ?1
-         ORDER BY g.value ASC",
+         ORDER BY g.participates DESC, g.value ASC",
     )
     .bind(round_date)
     .fetch_all(db)
@@ -241,6 +250,16 @@ pub async fn clear_round(db: &Db, round_date: &str) -> Result<u64> {
         .await?
         .rows_affected();
     Ok(n)
+}
+
+/// Stand-in players, which are exactly the negative-id users.
+pub async fn demo_users(db: &Db) -> Result<Vec<User>> {
+    let rows = sqlx::query_as::<_, User>(
+        "SELECT id, login, display_name, image_url FROM users WHERE id < 0 ORDER BY login",
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
 }
 
 pub async fn user_by_login(db: &Db, login: &str) -> Result<Option<User>> {
@@ -281,10 +300,11 @@ pub async fn my_guess(db: &Db, round_date: &str, user_id: i64) -> Result<Option<
 }
 
 pub async fn guess_count(db: &Db, round_date: &str) -> Result<i64> {
-    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM guesses WHERE round_date = ?1")
-        .bind(round_date)
-        .fetch_one(db)
-        .await?;
+    let (n,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM guesses WHERE round_date = ?1 AND participates = 1")
+            .bind(round_date)
+            .fetch_one(db)
+            .await?;
     Ok(n)
 }
 
@@ -293,12 +313,12 @@ pub async fn guess_count(db: &Db, round_date: &str) -> Result<i64> {
 const WINNER_CTE: &str = "
     WITH rounds AS (
         SELECT round_date, COUNT(*) AS total
-        FROM guesses WHERE round_date < ?1
+        FROM guesses WHERE round_date < ?1 AND participates = 1
         GROUP BY round_date
     ),
     uniq AS (
         SELECT round_date, value
-        FROM guesses WHERE round_date < ?1
+        FROM guesses WHERE round_date < ?1 AND participates = 1
         GROUP BY round_date, value
         HAVING COUNT(*) = 1
     ),
@@ -320,6 +340,7 @@ pub async fn closed_rounds(db: &Db, open_round: &str, limit: i64) -> Result<Vec<
          FROM rounds r
          LEFT JOIN winners w ON w.round_date = r.round_date
          LEFT JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
+                            AND g.participates = 1
          LEFT JOIN users   u ON u.id = g.user_id
          ORDER BY r.round_date DESC
          LIMIT ?2"
@@ -344,6 +365,7 @@ pub async fn round_summary(db: &Db, open_round: &str, date: &str) -> Result<Opti
          FROM rounds r
          LEFT JOIN winners w ON w.round_date = r.round_date
          LEFT JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
+                            AND g.participates = 1
          LEFT JOIN users   u ON u.id = g.user_id
          WHERE r.round_date = ?2"
     );
@@ -361,6 +383,7 @@ pub async fn leaderboard(db: &Db, open_round: &str, limit: i64) -> Result<Vec<Le
          SELECT u.login, u.display_name, u.image_url, COUNT(*) AS wins
          FROM winners w
          JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
+                        AND g.participates = 1
          JOIN users   u ON u.id = g.user_id
          GROUP BY u.id
          ORDER BY wins DESC, u.login ASC
@@ -427,7 +450,9 @@ mod tests {
             )
             .await
             .unwrap();
-            insert_guess(db, round, *user_id, *value).await.unwrap();
+            insert_guess(db, round, *user_id, *value, true)
+                .await
+                .unwrap();
         }
     }
 
@@ -496,7 +521,7 @@ mod tests {
         seed(&t.db, "2026-09-05", &[(1, 50)]).await;
 
         // The second attempt reports that nothing was written...
-        assert!(!insert_guess(&t.db, "2026-09-05", 1, 3).await.unwrap());
+        assert!(!insert_guess(&t.db, "2026-09-05", 1, 3, true).await.unwrap());
         // ...and the original number is untouched.
         assert_eq!(my_guess(&t.db, "2026-09-05", 1).await.unwrap(), Some(50));
         assert_eq!(guess_count(&t.db, "2026-09-05").await.unwrap(), 1);
@@ -507,7 +532,7 @@ mod tests {
         let t = temp_db().await;
         seed(&t.db, "2026-09-05", &[(1, 50)]).await;
 
-        assert!(insert_guess(&t.db, "2026-09-06", 1, 3).await.unwrap());
+        assert!(insert_guess(&t.db, "2026-09-06", 1, 3, true).await.unwrap());
         assert_eq!(my_guess(&t.db, "2026-09-05", 1).await.unwrap(), Some(50));
         assert_eq!(my_guess(&t.db, "2026-09-06", 1).await.unwrap(), Some(3));
     }
@@ -528,6 +553,83 @@ mod tests {
         let board = leaderboard(&t.db, "2026-09-06", 10).await.unwrap();
         assert_eq!(board.len(), 2);
         assert!(board.iter().all(|r| r.wins == 1));
+    }
+
+    #[tokio::test]
+    async fn ghosts_are_invisible_to_the_game() {
+        let t = temp_db().await;
+        // Real entries: 5 and 8. A ghost 1 would win outright if it counted.
+        seed(&t.db, "2026-09-05", &[(1, 5), (2, 8)]).await;
+        upsert_user(&t.db, -1, "ghosty", "Ghosty", None)
+            .await
+            .unwrap();
+        assert!(insert_guess(&t.db, "2026-09-05", -1, 1, false)
+            .await
+            .unwrap());
+
+        let r = round_summary(&t.db, "2026-09-06", "2026-09-05")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.winning_value, Some(5), "a ghost must not win");
+        assert_eq!(r.total, 2, "a ghost must not be counted");
+        assert_eq!(guess_count(&t.db, "2026-09-05").await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_ghost_cannot_burn_a_real_number() {
+        let t = temp_db().await;
+        // Player 1 picks 3. A ghost also picks 3: if ghosts counted, 3 would be
+        // duplicated and burned, and player 2 would win with 4 instead.
+        seed(&t.db, "2026-09-05", &[(1, 3), (2, 4)]).await;
+        upsert_user(&t.db, -1, "ghosty", "Ghosty", None)
+            .await
+            .unwrap();
+        assert!(insert_guess(&t.db, "2026-09-05", -1, 3, false)
+            .await
+            .unwrap());
+
+        let r = round_summary(&t.db, "2026-09-06", "2026-09-05")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.winning_value, Some(3));
+        assert_eq!(r.winner_login.as_deref(), Some("p1"));
+    }
+
+    #[tokio::test]
+    async fn ghosts_still_show_up_for_an_admin() {
+        let t = temp_db().await;
+        seed(&t.db, "2026-09-07", &[(1, 5)]).await;
+        upsert_user(&t.db, -1, "ghosty", "Ghosty", None)
+            .await
+            .unwrap();
+        insert_guess(&t.db, "2026-09-07", -1, 1, false)
+            .await
+            .unwrap();
+
+        let rows = round_guesses(&t.db, "2026-09-07").await.unwrap();
+        assert_eq!(rows.len(), 2);
+        // Participating entries sort first.
+        assert!(rows[0].participates);
+        assert!(!rows[1].participates);
+        assert_eq!(rows[1].value, 1);
+    }
+
+    #[tokio::test]
+    async fn demo_users_are_the_negative_ids() {
+        let t = temp_db().await;
+        upsert_user(&t.db, 42, "real", "Real Person", None)
+            .await
+            .unwrap();
+        let a = create_test_user(&t.db, "alice").await.unwrap();
+        let b = create_test_user(&t.db, "bob").await.unwrap();
+        assert!(a.id < 0 && b.id < 0 && a.id != b.id);
+
+        let demos = demo_users(&t.db).await.unwrap();
+        assert_eq!(demos.len(), 2);
+        assert!(demos.iter().all(|u| u.id < 0));
+        assert!(!demos.iter().any(|u| u.login == "real"));
     }
 
     #[tokio::test]

@@ -76,6 +76,7 @@ pub fn error_page(status: StatusCode, message: &str) -> Response {
     let body = templates::render(&ErrorTemplate {
         user: None,
         test_mode: false,
+        impersonating: false,
         status: status.as_u16(),
         message: message.to_string(),
     });

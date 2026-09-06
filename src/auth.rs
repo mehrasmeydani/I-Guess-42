@@ -15,6 +15,9 @@ pub const TOKEN_URL: &str = "https://api.intra.42.fr/oauth/token";
 pub const ME_URL: &str = "https://api.intra.42.fr/v2/me";
 
 pub const SESSION_COOKIE: &str = "ig42_session";
+/// Parks an admin's own session token while they browse as a demo account, so
+/// they can get back without signing in through 42 again. Test instances only.
+pub const ADMIN_RETURN_COOKIE: &str = "ig42_admin_return";
 pub const SESSION_TTL_DAYS: i64 = 30;
 
 /// 32 alphanumeric characters from the OS RNG: used for both session tokens
@@ -132,4 +135,24 @@ pub fn clearing_cookie() -> Cookie<'static> {
 
 pub fn session_token(jar: &CookieJar) -> Option<String> {
     jar.get(SESSION_COOKIE).map(|c| c.value().to_string())
+}
+
+pub fn admin_return_cookie(token: String, secure: bool) -> Cookie<'static> {
+    let mut cookie = Cookie::new(ADMIN_RETURN_COOKIE, token);
+    cookie.set_http_only(true);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_secure(secure);
+    cookie.set_path("/");
+    cookie.set_max_age(CookieDuration::days(SESSION_TTL_DAYS));
+    cookie
+}
+
+pub fn clearing_admin_return_cookie() -> Cookie<'static> {
+    let mut cookie = Cookie::new(ADMIN_RETURN_COOKIE, "");
+    cookie.set_path("/");
+    cookie
+}
+
+pub fn admin_return_token(jar: &CookieJar) -> Option<String> {
+    jar.get(ADMIN_RETURN_COOKIE).map(|c| c.value().to_string())
 }

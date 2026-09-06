@@ -1305,9 +1305,71 @@ in a new admin route would be a real bug to watch for.
 }
 ```
 
-Jump to one second **past** the deadline, so the round is definitively closed
-rather than sitting exactly on the boundary — which, per `round.rs`, is already
-the next round, but the extra second removes any doubt.
+"End the round now". Jump to one second **past** the deadline, so the round is
+definitively closed rather than sitting exactly on the boundary — which, per
+`round.rs`, is already the next round, but the extra second removes any doubt.
+
+### Demo accounts
+
+```rust
+let player = match db::user_by_login(&state.db, &login).await? {
+    Some(u) if u.id < 0 => u,
+    // Refuse to become a real person, even on a test box.
+    Some(_) => return Ok(Redirect::to("/admin?msg=not_demo").into_response()),
+    None => db::create_test_user(&state.db, &login).await?,
+};
+```
+
+`admin_impersonate` swaps the session cookie so the admin browses as a
+stand-in. The `Some(u) if u.id < 0` guard is the important line: **only
+negative-id demo accounts can be impersonated.** A test instance uses the same
+42 application as the live one, so real classmates can sign in to it, and
+without this guard an admin could become one of them.
+
+The admin's own token is parked in a second cookie:
+
+```rust
+if auth::admin_return_token(&jar).is_none() {
+    if let Some(mine) = auth::session_token(&jar) {
+        jar = jar.add(auth::admin_return_cookie(mine, state.cfg.secure_cookies));
+    }
+}
+```
+
+The `is_none()` check means impersonating twice in a row does not overwrite the
+parked admin token with a demo one — otherwise the way home would be lost.
+
+`admin_return` deliberately **does not** call `require_admin`:
+
+```rust
+/// Swaps back to the parked admin session. Deliberately does NOT call
+/// require_admin: the caller is currently a demo account, so that check would
+/// 404 and strand them.
+```
+
+It re-verifies that the parked session still resolves to an admin before
+restoring it, so a stale cookie cannot grant anything, and deletes the
+throwaway demo session on the way out.
+
+### Ghost numbers
+
+A ghost is a guess with `participates = 0`. It shows up on `/admin` and nowhere
+else: excluded from `guess_count`, from the `rounds` total, from `uniq` (so it
+cannot burn a real number), and from the join that names a winner. Four filters,
+because missing any one of them would leak ghosts into the game in a different
+way — which is what
+`a_ghost_cannot_burn_a_real_number` and `ghosts_are_invisible_to_the_game` test.
+
+```rust
+/// Present only when the checkbox is ticked; HTML omits unchecked boxes.
+#[serde(default)]
+ghost: Option<String>,
+```
+
+An unchecked HTML checkbox sends **nothing at all**, rather than a false value.
+`#[serde(default)]` plus `Option` is how you read one: absent means unchecked.
+Getting this wrong gives a form that fails to submit whenever the box is
+cleared.
 
 ---
 
@@ -1677,6 +1739,17 @@ CREATE INDEX IF NOT EXISTS idx_guesses_round_value ON guesses(round_date, value)
 The winner query groups by exactly `(round_date, value)`. The index means that
 grouping reads an ordered structure instead of sorting the table.
 
+`0002_ghost_guesses.sql` adds the ghost column to an existing table:
+
+```sql
+ALTER TABLE guesses ADD COLUMN participates INTEGER NOT NULL DEFAULT 1;
+```
+
+The `DEFAULT 1` is what makes this safe on a live database — every row already
+there was a real entry, and SQLite backfills them without a rewrite. This is
+also why it is a **new file** rather than an edit to `0001`: that migration has
+already run on any deployed database and will never run again.
+
 There is deliberately **no `winners` table**. Winners are derived from
 `guesses`, so there is no scheduled job, nothing to run at 12:42, and no way
 for a cached result to disagree with the underlying data. The cost is
@@ -1825,6 +1898,7 @@ certificates.
 | Colours and layout | the `:root` custom properties in `static/style.css` |
 | Session lifetime | `SESSION_TTL_DAYS` in `auth.rs` |
 | Who gets `/admin` | the `ADMIN_LOGINS` environment variable — no code change |
+| Whether ghosts count | the four `participates = 1` filters in `db.rs` |
 | Add a page | a handler in `handlers.rs`, a struct in `templates.rs`, a file in `templates/`, a route in `main.rs` |
 | Add a column | a **new** migration file; never edit `0001_init.sql`, since it has already run on the live database |
 

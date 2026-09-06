@@ -14,7 +14,7 @@
   <form method="post" action="/admin/clock" class="inline">
     <button type="submit" name="shift" value="hour">+1 hour</button>
     <button type="submit" name="shift" value="day">+1 day</button>
-    <button type="submit" name="shift" value="deadline">Jump past the deadline</button>
+    <button type="submit" name="shift" value="deadline">End the round now</button>
     <button type="submit" name="shift" value="back_day">&minus;1 day</button>
     <button type="submit" name="shift" value="reset" class="ghost">Reset</button>
   </form>
@@ -25,7 +25,7 @@
 </section>
 
 <section class="card admin">
-  <p class="eyebrow">Add a stand-in player</p>
+  <p class="eyebrow">Enter a number</p>
   <form method="post" action="/admin/guess" class="guessform">
     <div class="row">
       <input name="login" type="text" placeholder="login" autocomplete="off"
@@ -34,9 +34,47 @@
              placeholder="number" autocomplete="off" required>
       <button type="submit">Add</button>
     </div>
+    <label class="check">
+      <input type="checkbox" name="ghost" value="1">
+      Ghost &mdash; show it here but keep it out of the game
+    </label>
     <p class="hint">
-      Invented players get negative ids, so they never collide with real 42
-      accounts. Their guesses are final, exactly like everyone else's.
+      A normal entry counts: it appears in the headcount and can win. A
+      <strong>ghost</strong> is excluded from both, so you can park numbers in a
+      round to see how it looks without changing who wins. Either way the entry
+      is final, exactly like a real one.
+    </p>
+  </form>
+</section>
+
+<section class="card admin">
+  <p class="eyebrow">Demo accounts</p>
+  {% if demo_users.is_empty() %}
+    <p class="empty">None yet &mdash; entering a number for a new login creates one.</p>
+  {% else %}
+    <ul class="demolist">
+      {% for d in demo_users %}
+        <li>
+          <span class="who">{{ d.display_name }} <span class="login">{{ d.login }}</span></span>
+          <form method="post" action="/admin/impersonate" class="inline">
+            <input type="hidden" name="login" value="{{ d.login }}">
+            <button type="submit" class="ghost">Sign in as</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  <form method="post" action="/admin/impersonate" class="guessform">
+    <div class="row">
+      <input name="login" type="text" placeholder="new demo login" autocomplete="off"
+             spellcheck="false" pattern="[a-zA-Z0-9-]+" required>
+      <button type="submit">Create and sign in</button>
+    </div>
+    <p class="hint">
+      Signs you in as that stand-in so you can play the real flow &mdash; guess
+      form, confirmation, the lot. Your own session is parked, and the banner at
+      the top brings you back. Only stand-ins can be used this way; a real 42
+      account is refused.
     </p>
   </form>
 </section>
@@ -51,15 +89,18 @@
       <tbody>
         {% for g in guesses %}
           <tr>
-            <td class="who">{{ g.display_name }} <span class="login">{{ g.login }}</span></td>
+            <td class="who">
+              {{ g.display_name }} <span class="login">{{ g.login }}</span>
+              {% if g.ghost %}<span class="ghosttag">ghost</span>{% endif %}
+            </td>
             <td class="num value">{{ g.value_label }}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
     <p class="hint">
-      Players never see this list until the round closes. It is here so you can
-      check the winner logic against what was actually submitted.
+      Players never see this list until the round closes. Ghosts are shown here
+      only &mdash; they are left out of the headcount and cannot win.
     </p>
   {% endif %}
   <form method="post" action="/admin/clear" class="inline">

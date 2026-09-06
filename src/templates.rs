@@ -116,6 +116,8 @@ impl Notice {
 pub struct IndexTemplate {
     pub user: Option<UserView>,
     pub test_mode: bool,
+    /// Browsing as a demo account, with an admin session parked to return to.
+    pub impersonating: bool,
     /// `YYYY-MM-DD`, round-tripped through the form's hidden field.
     pub round_key: String,
     pub round_label: String,
@@ -136,6 +138,8 @@ pub struct IndexTemplate {
 pub struct ConfirmTemplate {
     pub user: Option<UserView>,
     pub test_mode: bool,
+    /// Browsing as a demo account, with an admin session parked to return to.
+    pub impersonating: bool,
     pub value_label: String,
     pub value_raw: String,
     pub round_key: String,
@@ -148,6 +152,8 @@ pub struct ConfirmTemplate {
 pub struct ResultsTemplate {
     pub user: Option<UserView>,
     pub test_mode: bool,
+    /// Browsing as a demo account, with an admin session parked to return to.
+    pub impersonating: bool,
     pub rounds: Vec<RoundView>,
     pub leaders: Vec<LeaderView>,
 }
@@ -156,6 +162,9 @@ pub struct AdminGuessView {
     pub login: String,
     pub display_name: String,
     pub value_label: String,
+    /// Entered from /admin to try the round out; excluded from the headcount
+    /// and from deciding a winner.
+    pub ghost: bool,
 }
 
 impl From<GuessRow> for AdminGuessView {
@@ -164,6 +173,7 @@ impl From<GuessRow> for AdminGuessView {
             login: g.login,
             display_name: g.display_name,
             value_label: group_digits(g.value),
+            ghost: !g.participates,
         }
     }
 }
@@ -173,6 +183,8 @@ impl From<GuessRow> for AdminGuessView {
 pub struct AdminTemplate {
     pub user: Option<UserView>,
     pub test_mode: bool,
+    /// Browsing as a demo account, with an admin session parked to return to.
+    pub impersonating: bool,
     pub real_now: String,
     pub game_now: String,
     pub clock_offset: String,
@@ -182,6 +194,8 @@ pub struct AdminTemplate {
     pub time_left: String,
     /// The open round's guesses, which players are not allowed to see.
     pub guesses: Vec<AdminGuessView>,
+    /// Existing stand-in accounts, offered as one-click sign-ins.
+    pub demo_users: Vec<UserView>,
     pub last_round: Option<RoundView>,
 }
 
@@ -190,6 +204,8 @@ pub struct AdminTemplate {
 pub struct ErrorTemplate {
     pub user: Option<UserView>,
     pub test_mode: bool,
+    /// Browsing as a demo account, with an admin session parked to return to.
+    pub impersonating: bool,
     pub status: u16,
     pub message: String,
 }

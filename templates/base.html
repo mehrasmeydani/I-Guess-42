@@ -10,11 +10,18 @@
 <body>
   {% if test_mode %}
   <div class="testbanner">
-    Test instance &mdash; this is not the live game.
-    {% match user %}
-      {% when Some with (_u) %}<a href="/admin">Admin</a>
-      {% when None %}
-    {% endmatch %}
+    {% if impersonating %}
+      Signed in as a demo account.
+      <form method="post" action="/admin/return" class="inline">
+        <button type="submit" class="linkish">Back to my account</button>
+      </form>
+    {% else %}
+      Test instance &mdash; this is not the live game.
+      {% match user %}
+        {% when Some with (_u) %}<a href="/admin">Admin</a>
+        {% when None %}
+      {% endmatch %}
+    {% endif %}
   </div>
   {% endif %}
   <header class="bar">

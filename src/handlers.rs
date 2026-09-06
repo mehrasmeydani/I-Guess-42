@@ -30,6 +30,14 @@ async fn current_user(state: &AppState, jar: &CookieJar) -> Result<Option<User>,
 fn notice_for(code: Option<&str>) -> Option<Notice> {
     Some(match code? {
         "saved" => Notice::ok("Locked in. Come back after 12:42 to see who took it."),
+        "added" => Notice::ok("Added, and it counts towards the round."),
+        "added_ghost" => Notice::ok("Added as a ghost — visible here, but it cannot win."),
+        "cleared" => Notice::ok("Round cleared."),
+        "not_demo" => {
+            Notice::error("That is a real 42 account. Only stand-in players can be signed in as.")
+        }
+        "bad_login" => Notice::error("Logins may only contain letters, digits and hyphens."),
+        "bad_guess" => Notice::error("That is not a whole number of 1 or more."),
         "already" => {
             Notice::error("You have already guessed this round, and a guess cannot be changed.")
         }
@@ -85,6 +93,7 @@ pub async fn index(
     Ok(templates::render(&IndexTemplate {
         user: user.map(UserView::from),
         test_mode: state.cfg.test_mode(),
+        impersonating: auth::admin_return_token(&jar).is_some(),
         round_key,
         round_label,
         deadline_human: round.deadline_human(),
@@ -115,6 +124,7 @@ pub async fn results(State(state): State<AppState>, jar: CookieJar) -> Result<Re
     Ok(templates::render(&ResultsTemplate {
         user: user.map(UserView::from),
         test_mode: state.cfg.test_mode(),
+        impersonating: auth::admin_return_token(&jar).is_some(),
         rounds,
         leaders,
     }))
@@ -181,6 +191,7 @@ pub async fn submit_guess(
     Ok(templates::render(&ConfirmTemplate {
         user: Some(UserView::from(user)),
         test_mode: state.cfg.test_mode(),
+        impersonating: auth::admin_return_token(&jar).is_some(),
         value_label: group_digits(value),
         // Canonical form, so what gets stored is exactly what was shown:
         // "007" was displayed as 7 and must be submitted as 7.
@@ -213,7 +224,7 @@ pub async fn confirm_guess(
         return Ok(Redirect::to("/?msg=rolled").into_response());
     }
 
-    let msg = if db::insert_guess(&state.db, &round_key, user.id, value).await? {
+    let msg = if db::insert_guess(&state.db, &round_key, user.id, value, true).await? {
         "saved"
     } else {
         // Lost a race with another tab; the first guess stands.
@@ -265,6 +276,7 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
     Ok(templates::render(&AdminTemplate {
         user: Some(UserView::from(user)),
         test_mode: true,
+        impersonating: auth::admin_return_token(&jar).is_some(),
         real_now: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
         game_now: now.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
         clock_offset: if offset == 0 {
@@ -284,6 +296,11 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
             .await?
             .into_iter()
             .map(Into::into)
+            .collect(),
+        demo_users: db::demo_users(&state.db)
+            .await?
+            .into_iter()
+            .map(UserView::from)
             .collect(),
         last_round,
     }))
@@ -322,6 +339,9 @@ pub async fn admin_clock(
 pub struct FakeGuessForm {
     login: String,
     guess: String,
+    /// Present only when the checkbox is ticked; HTML omits unchecked boxes.
+    #[serde(default)]
+    ghost: Option<String>,
 }
 
 /// Adds a guess on behalf of an invented player, so a round can be populated
@@ -348,13 +368,95 @@ pub async fn admin_fake_guess(
         None => db::create_test_user(&state.db, &login).await?,
     };
 
+    let participates = form.ghost.is_none();
     let round_key = Round::current(state.now()).key();
-    let msg = if db::insert_guess(&state.db, &round_key, player.id, value).await? {
-        "added"
+    let msg = if db::insert_guess(&state.db, &round_key, player.id, value, participates).await? {
+        if participates {
+            "added"
+        } else {
+            "added_ghost"
+        }
     } else {
         "already"
     };
     Ok(Redirect::to(&format!("/admin?msg={msg}")).into_response())
+}
+
+#[derive(Deserialize)]
+pub struct ImpersonateForm {
+    login: String,
+}
+
+/// Signs the admin in as a demo account so they can play through the real
+/// flow. Only negative-id stand-ins can be impersonated - never a genuine 42
+/// account, which matters because real classmates can sign in to a test
+/// instance too.
+pub async fn admin_impersonate(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<ImpersonateForm>,
+) -> Result<Response, AppError> {
+    if require_admin(&state, &jar).await?.is_none() {
+        return Ok(admin_gone());
+    }
+
+    let login = form.login.trim().to_lowercase();
+    if login.is_empty() || !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Ok(Redirect::to("/admin?msg=bad_login").into_response());
+    }
+
+    let player = match db::user_by_login(&state.db, &login).await? {
+        Some(u) if u.id < 0 => u,
+        // Refuse to become a real person, even on a test box.
+        Some(_) => return Ok(Redirect::to("/admin?msg=not_demo").into_response()),
+        None => db::create_test_user(&state.db, &login).await?,
+    };
+
+    let token = auth::random_token();
+    db::create_session(&state.db, &token, player.id, auth::SESSION_TTL_DAYS).await?;
+
+    // Park the admin's own session so they can come back. Keep whichever one
+    // is already parked, so impersonating twice does not lose the way home.
+    let mut jar = jar;
+    if auth::admin_return_token(&jar).is_none() {
+        if let Some(mine) = auth::session_token(&jar) {
+            jar = jar.add(auth::admin_return_cookie(mine, state.cfg.secure_cookies));
+        }
+    }
+    let jar = jar.add(auth::session_cookie(token, state.cfg.secure_cookies));
+    Ok((jar, Redirect::to("/")).into_response())
+}
+
+/// Swaps back to the parked admin session. Deliberately does NOT call
+/// require_admin: the caller is currently a demo account, so that check would
+/// 404 and strand them.
+pub async fn admin_return(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Response, AppError> {
+    if !state.cfg.test_mode() {
+        return Ok(admin_gone());
+    }
+    let Some(parked) = auth::admin_return_token(&jar) else {
+        return Ok(Redirect::to("/").into_response());
+    };
+
+    // Only restore a session that is still valid and still belongs to an admin.
+    let restores_admin = db::user_for_session(&state.db, &parked)
+        .await?
+        .is_some_and(|u| state.cfg.is_admin(&u.login));
+
+    let jar = jar.remove(auth::clearing_admin_return_cookie());
+    if !restores_admin {
+        return Ok((jar, Redirect::to("/")).into_response());
+    }
+
+    // Drop the throwaway demo session rather than leaving it lying around.
+    if let Some(demo) = auth::session_token(&jar) {
+        db::delete_session(&state.db, &demo).await?;
+    }
+    let jar = jar.add(auth::session_cookie(parked, state.cfg.secure_cookies));
+    Ok((jar, Redirect::to("/admin")).into_response())
 }
 
 pub async fn admin_clear(
