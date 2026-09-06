@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}i guess 42{% endblock %}
+
+{% block content %}
+<section class="card round">
+  <p class="eyebrow">Round of {{ round_label }}</p>
+  <h1 class="countdown" data-seconds="{{ seconds_left }}">{{ time_left }}</h1>
+  <p class="deadline">Closes {{ deadline_human }}</p>
+  <p class="tally">
+    {{ guess_count }} {% if guess_count == 1 %}number{% else %}numbers{% endif %} in.
+    Everyone's guess stays hidden until the round closes.
+  </p>
+
+  {% match notice %}
+    {% when Some with (n) %}<p class="notice {{ n.kind }}">{{ n.text }}</p>
+    {% when None %}
+  {% endmatch %}
+
+  {% match user %}
+    {% when Some with (_u) %}
+      {% match my_guess_label %}
+        {% when Some with (g) %}<p class="yours">Your number: <strong>{{ g }}</strong></p>
+        {% when None %}
+      {% endmatch %}
+      <form class="guessform" method="post" action="/guess">
+        <input type="hidden" name="round" value="{{ round_key }}">
+        <label for="guess">Pick a whole number, 1 or higher</label>
+        <div class="row">
+          <input id="guess" name="guess" type="text" inputmode="numeric"
+                 pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
+                 placeholder="1" required>
+          <button type="submit">
+            {% if my_guess_label.is_some() %}Change it{% else %}Lock it in{% endif %}
+          </button>
+        </div>
+        <p class="hint">
+          You can keep changing it until 12:42. Lowest number that exactly one
+          person picked takes the day.
+        </p>
+      </form>
+    {% when None %}
+      <p class="signedout">Sign in with your 42 account to put a number in.</p>
+      <a class="cta big" href="/login">Sign in with 42</a>
+  {% endmatch %}
+</section>
+
+{% match last_round %}
+  {% when Some with (r) %}
+    <section class="card last">
+      <p class="eyebrow">Last round &middot; {{ r.date_label }}</p>
+      {% match r.winner %}
+        {% when Some with (w) %}
+          <div class="winner">
+            {% match w.image_url %}
+              {% when Some with (src) %}<img class="avatar big" src="{{ src }}" alt="">
+              {% when None %}
+            {% endmatch %}
+            <div>
+              <p class="who">{{ w.display_name }} <span class="login">{{ w.login }}</span></p>
+              <p class="value">{{ w.value_label }}</p>
+            </div>
+          </div>
+        {% when None %}
+          <p class="nowinner">
+            No winner &mdash; every number that day was picked by more than one person.
+          </p>
+      {% endmatch %}
+      <p class="tally">{{ r.total }} played</p>
+    </section>
+  {% when None %}
+{% endmatch %}
+{% endblock %}

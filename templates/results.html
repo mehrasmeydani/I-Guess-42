@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Results &middot; i guess 42{% endblock %}
+
+{% block content %}
+<section class="card">
+  <p class="eyebrow">Most days won</p>
+  {% if leaders.is_empty() %}
+    <p class="empty">Nobody has won a round yet.</p>
+  {% else %}
+    <ol class="leaders">
+      {% for l in leaders %}
+        <li>
+          {% match l.image_url %}
+            {% when Some with (src) %}<img class="avatar" src="{{ src }}" alt="">
+            {% when None %}
+          {% endmatch %}
+          <span class="who">{{ l.display_name }} <span class="login">{{ l.login }}</span></span>
+          <span class="wins">{{ l.wins }}</span>
+        </li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+</section>
+
+<section class="card">
+  <p class="eyebrow">Every closed round</p>
+  {% if rounds.is_empty() %}
+    <p class="empty">No round has closed yet. The first one closes at 12:42.</p>
+  {% else %}
+    <table class="history">
+      <thead>
+        <tr><th>Day</th><th>Winner</th><th class="num">Number</th><th class="num">Played</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rounds %}
+          <tr>
+            <td>{{ r.date_label }}</td>
+            {% match r.winner %}
+              {% when Some with (w) %}
+                <td class="who">{{ w.display_name }} <span class="login">{{ w.login }}</span></td>
+                <td class="num value">{{ w.value_label }}</td>
+              {% when None %}
+                <td class="nowinner" colspan="2">no unique number</td>
+            {% endmatch %}
+            <td class="num">{{ r.total }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endblock %}

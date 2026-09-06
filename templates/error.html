@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} &middot; i guess 42{% endblock %}
+
+{% block content %}
+<section class="card error">
+  <p class="eyebrow">{{ status }}</p>
+  <p class="message">{{ message }}</p>
+  <a class="cta" href="/">Back to the round</a>
+</section>
+{% endblock %}

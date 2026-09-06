@@ -1,0 +1,50 @@
+# Single-host deployment: the app plus Caddy for automatic HTTPS.
+# Runs the same on EC2, Lightsail, a VPS, or your laptop.
+#
+#   cp .env.example .env   # fill in SITE_DOMAIN and the 42 credentials
+#   docker compose up -d --build
+
+services:
+  app:
+    build: .
+    image: i_guess_42:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides whatever .env says: inside the compose network the app is
+      # always plain HTTP on 3000, and always behind TLS from the outside.
+      BIND_ADDR: 0.0.0.0:3000
+      DATABASE_URL: sqlite:///app/data/game.db
+      SECURE_COOKIES: "true"
+      FT_REDIRECT_URI: https://${SITE_DOMAIN:?set SITE_DOMAIN in .env}/auth/callback
+    volumes:
+      - game_data:/app/data
+    expose:
+      - "3000"
+    healthcheck:
+      # No curl in the runtime image; this is bash's /dev/tcp probe.
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/3000' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?set SITE_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # holds the certificates - do not delete
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  game_data:
+  caddy_data:
+  caddy_config:

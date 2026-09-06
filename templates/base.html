@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}i guess 42{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="/">i&nbsp;guess&nbsp;<b>42</b></a>
+    <nav>
+      <a href="/results">Results</a>
+      {% match user %}
+        {% when Some with (u) %}
+          <span class="me" title="{{ u.display_name }}">
+            {% match u.image_url %}
+              {% when Some with (src) %}<img class="avatar" src="{{ src }}" alt="">
+              {% when None %}
+            {% endmatch %}
+            <span>{{ u.login }}</span>
+          </span>
+          <form method="post" action="/logout">
+            <button class="linkish" type="submit">Sign out</button>
+          </form>
+        {% when None %}
+          <a class="cta" href="/login">Sign in with 42</a>
+      {% endmatch %}
+    </nav>
+  </header>
+
+  <main>{% block content %}{% endblock %}</main>
+
+  <footer>
+    Lowest number nobody else picked wins. A new round closes every day at 12:42, Europe/Vienna.
+  </footer>
+</body>
+</html>

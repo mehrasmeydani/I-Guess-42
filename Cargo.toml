@@ -1,0 +1,35 @@
+[package]
+name = "i_guess_42"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+
+[dependencies]
+axum = "0.8"
+axum-extra = { version = "0.10", features = ["cookie"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "sqlite",
+    "derive",  # #[derive(FromRow)]
+    "macros",  # sqlx::migrate!
+    "migrate",
+] }
+askama = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+chrono = "0.4"
+chrono-tz = "0.10"
+rand = "0.8"
+# Cookie max-age is expressed with `time::Duration` (the type the `cookie`
+# crate behind axum-extra uses); cargo unifies this with that copy of time.
+time = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+anyhow = "1"
+
+[profile.release]
+opt-level = 3
+lto = true

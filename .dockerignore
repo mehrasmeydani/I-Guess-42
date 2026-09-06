@@ -1,0 +1,8 @@
+target/
+data/
+.env
+.git/
+README.md
+Dockerfile
+compose.yml
+Caddyfile

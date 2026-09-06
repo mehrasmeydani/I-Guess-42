@@ -1,0 +1,17 @@
+# Caddy terminates TLS and proxies to the app container. Certificates are
+# obtained from Let's Encrypt automatically on first boot, which needs ports
+# 80 and 443 reachable from the internet and SITE_DOMAIN resolving here.
+{$SITE_DOMAIN} {
+	encode gzip
+
+	# The app builds redirect URLs from FT_REDIRECT_URI, not from headers, so
+	# these are for logging and future use rather than correctness.
+	reverse_proxy app:3000 {
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
