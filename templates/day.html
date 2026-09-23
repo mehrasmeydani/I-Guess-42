@@ -1,79 +1,55 @@
 {% extends "base.html" %}
-{% block title %}{{ round.date_label }} &middot; i guess low{% endblock %}
-{% block h1 %}Round of {{ round.date_label }}{% endblock %}
+{% block title %}{{ round.date_key }} &middot; i guess low{% endblock %}
+{% block h1 %}round {{ round.date_key }}{% endblock %}
 {% block nav_results %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
-<div class="page-head" style="--b: 0">
-  <a class="back" href="/results">&larr; All results</a>
-  <h2 class="page-title">Round of {{ round.date_label }}</h2>
-  <p class="page-lead">Closed. Here is every number that was picked.</p>
-</div>
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>round {{ round.date_key }}</span><span class="tag">closed</span></h2>
+  <div class="figures">
+    {% match round.winner %}
+      {% when Some with (w) %}<p><b class="win">{{ w.value_label }}</b><span>won &larr; {{ w.login }}</span></p>
+      {% when None %}<p><b class="lose">&times;</b><span>no winner. every number collided</span></p>
+    {% endmatch %}
+    <p><b>{{ lowest_unpicked_label }}</b><span>lowest number nobody picked</span></p>
+    <p><b>{{ round.total }}</b><span>players, {{ distinct }} different {% if distinct == 1 %}number{% else %}numbers{% endif %}</span></p>
+  </div>
+</section>
 
-<div class="stats" style="--b: 1">
-  {% match round.winner %}
-    {% when Some with (w) %}
-      <div class="stat good">
-        <span class="stat-label">Winning number</span>
-        <span class="stat-value">{{ w.value_label }}</span>
-        <span class="stat-note">Picked only by {{ w.login }}</span>
-      </div>
-    {% when None %}
-      <div class="stat bad">
-        <span class="stat-label">Winning number</span>
-        <span class="stat-value">None</span>
-        <span class="stat-note">Every number was picked twice or more</span>
-      </div>
-  {% endmatch %}
-  <div class="stat">
-    <span class="stat-label">Lowest number nobody picked</span>
-    <span class="stat-value">{{ lowest_unpicked_label }}</span>
-    <span class="stat-note">It would have won</span>
-  </div>
-  <div class="stat">
-    <span class="stat-label">Players</span>
-    <span class="stat-value">{{ round.total }}</span>
-    <span class="stat-note">{{ distinct }} different {% if distinct == 1 %}number{% else %}numbers{% endif %}</span>
-  </div>
-</div>
-
-<section class="panel" style="--b: 2">
-  <div class="panel-head">
-    <h2 class="panel-title">How the numbers were spread</h2>
-    <a class="link-more" href="/trends">See trends</a>
-  </div>
-  <ul class="legend">
-    <li><i class="key win" aria-hidden="true"></i>Winner <span aria-hidden="true">&#9660;</span></li>
-    <li><i class="key once" aria-hidden="true"></i>Picked by one player</li>
-    <li><i class="key many" aria-hidden="true"></i>Picked by several</li>
-  </ul>
+<section class="sec" style="--b: 1">
+  <h2 class="rule"><span>spread</span><a class="tag" href="/trends">trends &rarr;</a></h2>
+  <p class="legend">
+    <span><i class="win">&#9660;█</i> winner</span>
+    <span><i class="once">█</i> picked by one player</span>
+    <span><i class="many">█</i> shared</span>
+  </p>
   {% include "chart.html" %}
 </section>
 
 <div class="split">
-  <section class="panel" style="--b: 3">
-    <h2 class="panel-title">Most picked</h2>
+  <section class="sec" style="--b: 2">
+    <h2 class="rule"><span>most picked</span></h2>
     <ol class="ranked">
       {% for t in most %}
-        <li><span class="ranked-value">{{ t.value_label }}</span><span class="ranked-note">{{ t.count }} {% if t.count == 1 %}player{% else %}players{% endif %}</span></li>
+        <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
       {% endfor %}
     </ol>
   </section>
-  <section class="panel" style="--b: 3">
-    <h2 class="panel-title">Least picked</h2>
+  <section class="sec" style="--b: 2">
+    <h2 class="rule"><span>least picked</span></h2>
     <ol class="ranked">
       {% for t in least %}
-        <li><span class="ranked-value">{{ t.value_label }}</span><span class="ranked-note">{{ t.count }} {% if t.count == 1 %}player{% else %}players{% endif %}</span></li>
+        <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
       {% endfor %}
     </ol>
   </section>
 </div>
 
-<section class="panel" style="--b: 4">
-  <details class="more">
-    <summary>Every number picked ({{ distinct }})</summary>
-    <table class="table narrow">
-      <thead><tr><th class="num">Number</th><th class="num">Players</th></tr></thead>
+<section class="sec" style="--b: 3">
+  <details>
+    <summary>every number picked ({{ distinct }})</summary>
+    <table class="grid narrow">
+      <thead><tr><th class="num">number</th><th class="num">players</th></tr></thead>
       <tbody>
         {% for t in all %}
           <tr><td class="num">{{ t.value_label }}</td><td class="num">{{ t.count }}</td></tr>

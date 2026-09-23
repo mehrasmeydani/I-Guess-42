@@ -121,8 +121,9 @@ pub struct IndexTemplate {
     pub seconds_left: i64,
     /// Pre-formatted, so the page is right before the countdown script runs.
     pub time_left: String,
-    /// How much of the round has elapsed, 0-100, for the bar under the countdown.
+    /// How much of the round has elapsed, 0-100, and the same as a text bar.
     pub progress_pct: i64,
+    pub progress_bar: String,
     pub my_guess_label: Option<String>,
     pub guess_count: i64,
     pub last_round: Option<RoundView>,
@@ -291,9 +292,9 @@ impl TrendsTemplate {
         let share = |v: i64, of: i64| (v * 100 + of - 1) / of;
         let changes = trend.halves.as_ref().map_or_else(Vec::new, |h| {
             vec![
-                ChangeView::new("Players per day", Some(h.players.0), Some(h.players.1)),
-                ChangeView::new("Average winning number", h.winner.0, h.winner.1),
-                ChangeView::new("Lowest free number", Some(h.lowest_free.0), Some(h.lowest_free.1)),
+                ChangeView::new("players per day", Some(h.players.0), Some(h.players.1)),
+                ChangeView::new("winning number", h.winner.0, h.winner.1),
+                ChangeView::new("lowest free number", Some(h.lowest_free.0), Some(h.lowest_free.1)),
             ]
         });
         Self {

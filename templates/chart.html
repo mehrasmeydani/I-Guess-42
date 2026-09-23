@@ -1,8 +1,8 @@
-{# Column chart shared by the day and trends pages: one column per number over
-   the range where most picks fall, then every higher pick listed with its
-   count. Nothing is grouped and nothing is left out. #}
-<div class="chart" role="img" aria-label="Picks for each number from 1 to {{ chart.span }}. Higher picks are listed below the chart.">
-  <span class="chart-max">{{ chart.max }} picks</span>
+{# Vertical column chart, shared by the day and trends pages: one column per
+   number over the range where the bulk of the picks fall, then every higher
+   pick listed with its count. Nothing is grouped and nothing is left out. #}
+<div class="chart" role="img" aria-label="Picks for each number from 1 to {{ chart.span }}; higher picks are listed below.">
+  <span class="chart-max">{{ chart.max }}</span>
   <div class="cols" style="--n: {{ chart.span }}">
     {% for c in chart.columns %}
       <div class="col {{ c.kind }}" title="{{ c.title }}" style="--h: {{ c.pct }}%; --i: {{ loop.index0 }}">
@@ -13,7 +13,7 @@
   </div>
 </div>
 {% if !chart.tail.is_empty() %}
-  <p class="tail-head">Picks above {{ chart.span }} <span class="muted">&middot; {{ chart.tail_picks }} {% if chart.tail_picks == 1 %}pick{% else %}picks{% endif %} on {{ chart.tail.len() }} {% if chart.tail.len() == 1 %}number{% else %}numbers{% endif %}</span></p>
+  <p class="tail-head">above {{ chart.span }} <span class="dim">&middot; {{ chart.tail_picks }} {% if chart.tail_picks == 1 %}pick{% else %}picks{% endif %} on {{ chart.tail.len() }} {% if chart.tail.len() == 1 %}number{% else %}numbers{% endif %}</span></p>
   <ul class="tail">
     {% for t in chart.tail %}
       <li{% if t.won %} class="won"{% endif %} title="{{ t.title }}"><b>{{ t.label }}</b>{% if t.count > 1 %}<span>&times;{{ t.count }}</span>{% endif %}{% if t.won %}<span class="won-tag">won</span>{% endif %}</li>

@@ -92,7 +92,7 @@ pub async fn index(
     .map(RoundView::from);
 
     let seconds_left = round.seconds_left(now);
-    let (progress_pct, _) = stats::progress_bar(seconds_left);
+    let (progress_pct, progress_bar) = stats::progress_bar(seconds_left);
     let guess_count = db::guess_count(&state.db, &round_key).await?;
     Ok(templates::render(&IndexTemplate {
         user: user.map(UserView::from),
@@ -102,6 +102,7 @@ pub async fn index(
         seconds_left,
         time_left: crate::round::format_duration(seconds_left),
         progress_pct,
+        progress_bar,
         my_guess_label,
         guess_count,
         last_round,

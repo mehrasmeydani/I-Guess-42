@@ -1,63 +1,32 @@
 {% extends "base.html" %}
 {% block title %}i guess low{% endblock %}
-{% block h1 %}Today's round{% endblock %}
+{% block h1 %}today's round{% endblock %}
 {% block nav_round %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
-<section class="hero" style="--b: 0" aria-labelledby="round-h">
-  <div class="hero-head">
-    <h2 id="round-h">Round of {{ round_key }}</h2>
-    <span class="badge live"><span class="dot" aria-hidden="true"></span>Open</span>
-  </div>
-  <p class="countdown-label">Closes in</p>
+<section class="sec" style="--b: 0" aria-labelledby="round-h">
+  <h2 class="rule" id="round-h"><span>round {{ round_key }}</span><span class="tag live">open</span></h2>
   {# role=timer is not announced on every tick; the visible clock is enough. #}
-  <p class="countdown" role="timer" aria-label="Time left in this round" data-seconds="{{ seconds_left }}">{{ time_left }}</p>
-  <div class="meter" aria-hidden="true">
-    <div class="meter-track"><span class="meter-fill" style="width: {{ progress_pct }}%"></span></div>
-    <span class="meter-pct">{{ progress_pct }}% of the day gone</span>
-  </div>
-
-  <div class="stats">
-    <div class="stat">
-      <span class="stat-label">Guesses so far</span>
-      <span class="stat-value">{{ guess_count }}</span>
-      <span class="stat-note">Hidden until 12:42</span>
-    </div>
-    <div class="stat">
-      <span class="stat-label">Closes at</span>
-      <span class="stat-value">12:42</span>
-      <span class="stat-note">Vienna time</span>
-    </div>
+  <p class="countdown" role="timer" aria-label="time left in this round" data-seconds="{{ seconds_left }}">{{ time_left }}</p>
+  <p class="meter" aria-hidden="true"><span class="meter-bar">{{ progress_bar }}</span> <span class="meter-pct">{{ progress_pct }}%</span></p>
+  <div class="figures">
+    <p><b>{{ guess_count }}</b><span>{% if guess_count == 1 %}guess{% else %}guesses{% endif %} in, all hidden</span></p>
+    <p><b>12:42</b><span>closes, vienna time</span></p>
     {% match user %}
       {% when Some with (_u) %}
         {% match my_guess_label %}
-          {% when Some with (_g) %}
-            <div class="stat good">
-              <span class="stat-label">Your status</span>
-              <span class="stat-value word">You're in</span>
-              <span class="stat-note">Your number is locked</span>
-            </div>
-          {% when None %}
-            <div class="stat">
-              <span class="stat-label">Your status</span>
-              <span class="stat-value word">Not yet</span>
-              <span class="stat-note">You haven't guessed today</span>
-            </div>
+          {% when Some with (_g) %}<p class="you in"><b>you're in</b><span>your number is locked</span></p>
+          {% when None %}<p class="you"><b>not yet</b><span>you haven't guessed today</span></p>
         {% endmatch %}
-      {% when None %}
-        <div class="stat">
-          <span class="stat-label">Your status</span>
-          <span class="stat-value word">Guest</span>
-          <span class="stat-note">Sign in to play</span>
-        </div>
+      {% when None %}<p class="you"><b>guest</b><span>sign in to play</span></p>
     {% endmatch %}
   </div>
 </section>
 
-<section class="panel" style="--b: 1">
+<section class="sec" style="--b: 1">
   {% match notice %}
     {% when Some with (n) %}
-      <p class="notice {{ n.kind }}" {% if n.kind == "error" %}role="alert"{% else %}role="status"{% endif %}>{{ n.text }}</p>
+      <p class="notice {{ n.kind }}" {% if n.kind == "error" %}role="alert"{% else %}role="status"{% endif %}><b>{{ n.kind }}</b> {{ n.text }}</p>
     {% when None %}
   {% endmatch %}
 
@@ -65,57 +34,50 @@
     {% when Some with (_u) %}
       {% match my_guess_label %}
         {% when Some with (g) %}
-          <h2 class="panel-title">Your number</h2>
+          <h2 class="rule"><span>your number</span></h2>
           <div class="sealed">
             <p class="sealed-value">{{ g }}</p>
-            <span class="stamp">Sealed</span>
+            <span class="stamp">sealed</span>
           </div>
-          <p class="help">It's final, and nobody else can see it. Come back after 12:42 to find out whether it won.</p>
+          <p class="dim">final. nobody else can see it. find out after 12:42.</p>
         {% when None %}
-          <h2 class="panel-title"><label for="guess">Your number</label></h2>
+          <h2 class="rule"><label for="guess">your number</label></h2>
           <form class="guessform" method="post" action="/guess">
             <input type="hidden" name="round" value="{{ round_key }}">
             <input id="guess" name="guess" type="text" inputmode="numeric" enterkeyhint="go"
                    pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
                    placeholder="e.g. 7" aria-describedby="guess-hint" required>
-            <button type="submit" class="btn-primary">Lock it in</button>
+            <button type="submit">lock it in &rarr;</button>
           </form>
-          <p class="help" id="guess-hint">A whole number, 1 or higher. You get one guess per round, and you'll confirm it on the next screen.</p>
+          <p class="dim" id="guess-hint">a whole number, 1 or higher. you get one per round, and you'll confirm it on the next screen.</p>
       {% endmatch %}
     {% when None %}
-      <h2 class="panel-title">Play today's round</h2>
-      <a class="btn-primary" href="/login">Sign in with your 42 account</a>
-      <p class="help">We keep your 42 login, display name and profile picture link, only to show who won.</p>
+      <h2 class="rule"><span>play</span></h2>
+      <a class="btn" href="/login">sign in with your 42 account &rarr;</a>
+      <p class="dim">it keeps your 42 login, display name and profile picture link, to show who won. nothing else.</p>
   {% endmatch %}
 </section>
 
-<div class="split">
-  <section class="panel" style="--b: 2">
-    <h2 class="panel-title">How it works</h2>
-    <ol class="steps">
-      <li><span class="step-n">1</span><span>Pick one whole number, 1 or higher. One guess a day.</span></li>
-      <li><span class="step-n">2</span><span>Nobody sees anyone's number until the round closes at 12:42.</span></li>
-      <li><span class="step-n">3</span><span>The lowest number that exactly one person picked wins. If you and a friend both pick 1, neither of you gets it.</span></li>
-    </ol>
-  </section>
+<section class="sec" style="--b: 2">
+  <h2 class="rule"><span>rules</span></h2>
+  <ol class="rules">
+    <li><b>01</b> pick one whole number, 1 or higher. one shot a day.</li>
+    <li><b>02</b> nobody sees anybody's number until 12:42.</li>
+    <li><b>03</b> the lowest number exactly one person picked wins. pick 1 with a friend and you both lose it.</li>
+  </ol>
+</section>
 
-  {% match last_round %}
-    {% when Some with (r) %}
-      <section class="panel" style="--b: 3">
-        <div class="panel-head">
-          <h2 class="panel-title">Last round</h2>
-          <a class="link-more" href="/day/{{ r.date_key }}">See the numbers</a>
-        </div>
-        {% match r.winner %}
-          {% when Some with (w) %}
-            <p class="verdict"><span class="verdict-value win">{{ w.value_label }}</span></p>
-            <p class="help">Won by <b>{{ w.login }}</b>, the only one who picked it. {{ r.total }} played on {{ r.date_label }}.</p>
-          {% when None %}
-            <p class="verdict"><span class="verdict-value lose">No winner</span></p>
-            <p class="help">Every number was picked by at least two people. {{ r.total }} played on {{ r.date_label }}.</p>
-        {% endmatch %}
-      </section>
-    {% when None %}
-  {% endmatch %}
-</div>
+{% match last_round %}
+  {% when Some with (r) %}
+    <section class="sec" style="--b: 3">
+      <h2 class="rule"><span>last round {{ r.date_key }}</span><a class="tag" href="/day/{{ r.date_key }}">see the spread &rarr;</a></h2>
+      {% match r.winner %}
+        {% when Some with (w) %}
+          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }}, the only one who picked it. {{ r.total }} played.</span></p>
+        {% when None %}
+          <p class="verdict"><b class="lose">&times;</b> <span>no winner: every number was picked by at least two people. {{ r.total }} played.</span></p>
+      {% endmatch %}
+    </section>
+  {% when None %}
+{% endmatch %}
 {% endblock %}

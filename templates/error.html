@@ -1,14 +1,13 @@
 {% extends "base.html" %}
 {% block title %}{{ status }} &middot; i guess low{% endblock %}
-{% block h1 %}Error {{ status }}{% endblock %}
+
+{% block h1 %}error {{ status }}{% endblock %}
 
 {% block content %}
-<section class="panel error-panel" style="--b: 0">
-  <p class="kicker">Error {{ status }}</p>
-  <h2 class="page-title">Something went wrong</h2>
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>error</span><span class="tag bad">{{ status }}</span></h2>
+  <p class="bignumber bad">{{ status }}</p>
   <p class="message">{{ message }}</p>
-  <div class="actions">
-    <a class="btn-primary" href="/">Back to today's round</a>
-  </div>
+  <a class="btn" href="/">back to the round &rarr;</a>
 </section>
 {% endblock %}
