@@ -213,24 +213,46 @@ pub struct DayLineView {
 /// An older-half vs newer-half comparison, printed as `before -> after`.
 pub struct ChangeView {
     pub label: &'static str,
+    /// What the numbers count, printed after them.
+    pub unit: &'static str,
+    /// One line on what the row means.
+    pub explain: &'static str,
     pub before: String,
     pub after: String,
+    /// Signed difference, e.g. "+47.6"; empty if either side is missing.
+    pub delta: String,
+    /// Relative change, e.g. "+28%"; empty when it would mean nothing.
+    pub pct: String,
     /// "up", "down" or "same".
     pub dir: &'static str,
 }
 
 impl ChangeView {
-    fn new(label: &'static str, before: Option<i64>, after: Option<i64>) -> Self {
+    fn new(
+        label: &'static str,
+        unit: &'static str,
+        explain: &'static str,
+        before: Option<i64>,
+        after: Option<i64>,
+    ) -> Self {
         let show = |v: Option<i64>| v.map_or_else(|| "-".to_string(), stats::hundredths);
         let dir = match (before, after) {
             (Some(b), Some(a)) if a > b => "up",
             (Some(b), Some(a)) if a < b => "down",
             _ => "same",
         };
+        let (delta, pct) = match (before, after) {
+            (Some(b), Some(a)) => (stats::signed_hundredths(a - b), stats::percent_change(b, a)),
+            _ => (String::new(), String::new()),
+        };
         Self {
             label,
+            unit,
+            explain,
             before: show(before),
             after: show(after),
+            delta,
+            pct,
             dir,
         }
     }
@@ -240,11 +262,16 @@ pub struct MoverView {
     pub value_label: String,
     pub before: String,
     pub after: String,
+    /// The difference in percentage points, e.g. "+1.7 pts".
+    pub delta: String,
 }
 
 pub struct RegularView {
     pub value_label: String,
     pub rounds: usize,
+    pub picks: i64,
+    /// Share of all picks in the range, e.g. "9.8%".
+    pub share: String,
 }
 
 /// Several closed rounds taken together: the summed spread, a timeline, and
@@ -266,6 +293,12 @@ pub struct TrendsTemplate {
     /// Newest first, every day in the range.
     pub days: Vec<DayLineView>,
     pub changes: Vec<ChangeView>,
+    /// The two halves being compared, as "first to last" date ranges, and
+    /// how many days each holds.
+    pub older_range: String,
+    pub newer_range: String,
+    pub older_days: usize,
+    pub newer_days: usize,
     pub rising: Vec<MoverView>,
     pub falling: Vec<MoverView>,
     pub regulars: Vec<RegularView>,
@@ -285,16 +318,44 @@ impl TrendsTemplate {
             value_label: group_digits(m.value),
             before: stats::permille(m.before_permille),
             after: stats::permille(m.after_permille),
+            delta: stats::permille_points(m.after_permille - m.before_permille),
         };
+        let date_span = |(from, to): &(String, String)| {
+            if from == to { from.clone() } else { format!("{from} to {to}") }
+        };
+        let (older_range, newer_range) = trend
+            .halves
+            .as_ref()
+            .map_or_else(Default::default, |h| (date_span(&h.older), date_span(&h.newer)));
+        let older_days = trend.days.len() / 2;
+        let newer_days = trend.days.len() - older_days;
         let most_players = trend.days.iter().map(|d| d.players).max().unwrap_or(1).max(1);
         let top_winner = trend.days.iter().filter_map(|d| d.winner).max().unwrap_or(1).max(1);
         // Rounded up, so any non-zero value shows at least a sliver.
         let share = |v: i64, of: i64| (v * 100 + of - 1) / of;
         let changes = trend.halves.as_ref().map_or_else(Vec::new, |h| {
             vec![
-                ChangeView::new("players per day", Some(h.players.0), Some(h.players.1)),
-                ChangeView::new("winning number", h.winner.0, h.winner.1),
-                ChangeView::new("lowest free number", Some(h.lowest_free.0), Some(h.lowest_free.1)),
+                ChangeView::new(
+                    "players per day",
+                    "players",
+                    "average number of people who guessed each day",
+                    Some(h.players.0),
+                    Some(h.players.1),
+                ),
+                ChangeView::new(
+                    "winning number",
+                    "",
+                    "average of the numbers that won; days with no winner are skipped",
+                    h.winner.0,
+                    h.winner.1,
+                ),
+                ChangeView::new(
+                    "lowest free number",
+                    "",
+                    "average lowest number nobody picked - the easiest win there was",
+                    Some(h.lowest_free.0),
+                    Some(h.lowest_free.1),
+                ),
             ]
         });
         Self {
@@ -320,6 +381,10 @@ impl TrendsTemplate {
                 })
                 .collect(),
             changes,
+            older_range,
+            newer_range,
+            older_days,
+            newer_days,
             rising: trend.rising.iter().map(mover).collect(),
             falling: trend.falling.iter().map(mover).collect(),
             regulars: trend
@@ -328,6 +393,8 @@ impl TrendsTemplate {
                 .map(|r| RegularView {
                     value_label: group_digits(r.value),
                     rounds: r.rounds,
+                    picks: r.picks,
+                    share: stats::permille(r.share_permille),
                 })
                 .collect(),
             took: String::new(),

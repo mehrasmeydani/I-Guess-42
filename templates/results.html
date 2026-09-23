@@ -11,11 +11,11 @@
   {% else %}
     <ol class="podium">
       {% for l in leaders %}
-        <li class="p{{ loop.index }}">
+        <li class="p{{ loop.index }}" title="{{ l.display_name }}">
           <span class="rank">{{ "{:02}"|format(loop.index) }}</span>
           <b class="wins">{{ l.wins }}</b>
+          <span class="wins-unit">{% if l.wins == 1 %}day{% else %}days{% endif %} won</span>
           <span class="who">{{ l.login }}</span>
-          <span class="dim">{{ l.display_name }}</span>
         </li>
       {% endfor %}
     </ol>
@@ -23,11 +23,12 @@
       <details>
         <summary>show everyone ({{ rest.len() }} more)</summary>
         <table class="grid">
+          <thead><tr><th class="num">#</th><th>login</th><th class="num">days won</th></tr></thead>
           <tbody>
             {% for l in rest %}
-              <tr>
+              <tr title="{{ l.display_name }}">
                 <td class="num dim">{{ "{:02}"|format(loop.index + 3) }}</td>
-                <td>{{ l.login }} <span class="dim">{{ l.display_name }}</span></td>
+                <td>{{ l.login }}</td>
                 <td class="num b">{{ l.wins }}</td>
               </tr>
             {% endfor %}

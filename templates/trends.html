@@ -26,19 +26,30 @@
 {% else %}
 
 <section class="sec" style="--b: 4">
-  <h2 class="rule"><span>what changed</span><span class="tag">older half &rarr; newer half</span></h2>
+  <h2 class="rule"><span>what changed</span></h2>
   {% if changes.is_empty() %}
     <p class="dim">one round is not a trend. pick a longer range.</p>
   {% else %}
+    <p class="explain">
+      the range is split in two and each half is averaged per day:
+      <b>before</b> = {{ older_range }} ({{ older_days }} {% if older_days == 1 %}day{% else %}days{% endif %}),
+      <b>after</b> = {{ newer_range }} ({{ newer_days }} {% if newer_days == 1 %}day{% else %}days{% endif %}).
+    </p>
     <table class="grid diff">
+      <thead><tr><th>measure</th><th class="num">before</th><th class="num">after</th><th class="num">change</th></tr></thead>
       <tbody>
         {% for c in changes %}
           <tr class="{{ c.dir }}">
-            <td class="sign">{% if c.dir == "up" %}+{% else if c.dir == "down" %}-{% else %}={% endif %}</td>
-            <td>{{ c.label }}</td>
-            <td class="num">{{ c.before }}</td>
-            <td class="arrow">&rarr;</td>
-            <td class="num b">{{ c.after }}</td>
+            <td>
+              <span class="b">{{ c.label }}</span>
+              <span class="row-explain">{{ c.explain }}</span>
+            </td>
+            <td class="num">{{ c.before }}{% if !c.unit.is_empty() %} <span class="dim">{{ c.unit }}</span>{% endif %}</td>
+            <td class="num b">{{ c.after }}{% if !c.unit.is_empty() %} <span class="dim">{{ c.unit }}</span>{% endif %}</td>
+            <td class="num change">
+              {% if c.dir == "up" %}&#9650;{% else if c.dir == "down" %}&#9660;{% else %}={% endif %}
+              {% if c.delta.is_empty() %}<span class="dim">n/a</span>{% else %}{{ c.delta }}{% if !c.pct.is_empty() %} <span class="dim">({{ c.pct }})</span>{% endif %}{% endif %}
+            </td>
           </tr>
         {% endfor %}
       </tbody>
@@ -46,36 +57,38 @@
 
     <div class="split">
       <div>
-        <p class="sub">getting popular</p>
+        <p class="sub">getting popular <span class="dim">&middot; share of picks, before &rarr; after</span></p>
         {% if rising.is_empty() %}<p class="dim">nothing climbed.</p>{% endif %}
         <ol class="ranked">
           {% for m in rising %}
-            <li class="up"><b>{{ m.value_label }}</b><span>{{ m.before }} &rarr; {{ m.after }}</span></li>
+            <li class="up"><b>{{ m.value_label }}</b><span>{{ m.before }} &rarr; {{ m.after }} <em>{{ m.delta }}</em></span></li>
           {% endfor %}
         </ol>
       </div>
       <div>
-        <p class="sub">going out of fashion</p>
+        <p class="sub">going out of fashion <span class="dim">&middot; share of picks, before &rarr; after</span></p>
         {% if falling.is_empty() %}<p class="dim">nothing dropped.</p>{% endif %}
         <ol class="ranked">
           {% for m in falling %}
-            <li class="down"><b>{{ m.value_label }}</b><span>{{ m.before }} &rarr; {{ m.after }}</span></li>
+            <li class="down"><b>{{ m.value_label }}</b><span>{{ m.before }} &rarr; {{ m.after }} <em>{{ m.delta }}</em></span></li>
           {% endfor %}
         </ol>
       </div>
     </div>
-    <p class="dim">share of all picks in each half. numbers picked only once are left out.</p>
+    <p class="dim explain">share of picks = out of every 100 guesses in that half, how many were this number.
+      "pts" is the difference in percentage points. numbers picked only once in the whole range are left out, since one pick is not a trend.</p>
   {% endif %}
 </section>
 
 <section class="sec" style="--b: 5">
   <h2 class="rule"><span>what didn't</span></h2>
+  <p class="explain">the numbers people keep coming back to: picked on the most different days in the range.</p>
   {% if regulars.is_empty() %}
     <p class="dim">no number came back on more than one day.</p>
   {% else %}
     <ol class="ranked">
       {% for r in regulars %}
-        <li><b>{{ r.value_label }}</b><span>picked on {{ r.rounds }} of {{ rounds }} days</span></li>
+        <li><b>{{ r.value_label }}</b><span>on {{ r.rounds }} of {{ rounds }} days &middot; {{ r.picks }} picks &middot; {{ r.share }} of all picks</span></li>
       {% endfor %}
     </ol>
   {% endif %}

@@ -318,6 +318,7 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 .podium li + li { padding-left: 18px; border-left: var(--rule); }
 .podium .rank { color: var(--dim); }
 .podium .wins { font-size: 2.6rem; line-height: 1.1; }
+.podium .wins-unit { color: var(--dim); font-size: 0.85rem; }
 .podium .who { color: var(--hi); font-weight: 700; overflow-wrap: anywhere; }
 .podium .p1 .rank, .podium .p1 .wins { color: var(--green); }
 
@@ -616,6 +617,20 @@ a, button, summary, input, label { touch-action: manipulation; }
 /* Keep running text to a readable measure. */
 .sec > p.dim, .notice, .message, .rules { max-width: 72ch; }
 
+
+/* Plain-language notes next to the numbers on the trends page. Direction is
+   shown as a triangle in the text colour: up is not good and down is not
+   bad here, so it is not painted green or red. */
+.explain { margin-bottom: 14px; color: var(--dim); max-width: 80ch; }
+.explain b { color: var(--fg); }
+.row-explain { display: block; color: var(--dim); font-size: 0.85rem; }
+.diff .change { white-space: nowrap; color: var(--fg); }
+.diff tr.up td.b, .diff tr.down td.b { color: var(--hi); }
+.ranked em { margin-left: 6px; color: var(--fg); font-style: normal; }
+/* Rising and falling numbers are told apart by triangle, not by colour. */
+.ranked .up b, .ranked .down b { color: var(--hi); }
+.ranked .up em::before { content: "\25B2  "; }
+.ranked .down em::before { content: "\25BC  "; }
 
 /* Headings wrap into balanced lines; running text avoids one-word last lines. */
 .rule span, .question, .message { text-wrap: balance; }
