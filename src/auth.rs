@@ -52,11 +52,30 @@ pub struct IntraUser {
     pub login: String,
     pub displayname: Option<String>,
     pub image: Option<IntraImage>,
+    /// Every campus the account has belonged to, with names.
+    #[serde(default)]
+    pub campus: Vec<IntraCampus>,
+    /// Links to those campuses; exactly one is flagged as the home campus.
+    #[serde(default)]
+    pub campus_users: Vec<IntraCampusUser>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct IntraImage {
     pub link: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IntraCampus {
+    pub id: i64,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IntraCampusUser {
+    pub campus_id: i64,
+    #[serde(default)]
+    pub is_primary: bool,
 }
 
 impl IntraUser {
@@ -69,6 +88,26 @@ impl IntraUser {
 
     pub fn image_url(&self) -> Option<&str> {
         self.image.as_ref()?.link.as_deref()
+    }
+
+    /// The home campus. A student visiting another campus keeps their own as
+    /// primary, so visitors are judged by where they actually study. Accounts
+    /// with no primary flag but a single campus fall back to that one.
+    pub fn primary_campus_id(&self) -> Option<i64> {
+        self.campus_users
+            .iter()
+            .find(|cu| cu.is_primary)
+            .map(|cu| cu.campus_id)
+            .or(match self.campus.as_slice() {
+                [only] => Some(only.id),
+                _ => None,
+            })
+    }
+
+    /// Name of the home campus, for telling a turned-away player why.
+    pub fn primary_campus_name(&self) -> Option<&str> {
+        let id = self.primary_campus_id()?;
+        self.campus.iter().find(|c| c.id == id)?.name.as_deref()
     }
 }
 
@@ -155,4 +194,38 @@ pub fn clearing_admin_return_cookie() -> Cookie<'static> {
 
 pub fn admin_return_token(jar: &CookieJar) -> Option<String> {
     jar.get(ADMIN_RETURN_COOKIE).map(|c| c.value().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IntraUser;
+
+    fn user(json: &str) -> IntraUser {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn the_primary_campus_wins_over_a_visited_one() {
+        let u = user(
+            r#"{"id":1,"login":"a","displayname":"A","image":null,
+                "campus":[{"id":1,"name":"Paris"},{"id":53,"name":"Vienna"}],
+                "campus_users":[{"campus_id":1,"is_primary":false},
+                                {"campus_id":53,"is_primary":true}]}"#,
+        );
+        assert_eq!(u.primary_campus_id(), Some(53));
+        assert_eq!(u.primary_campus_name(), Some("Vienna"));
+    }
+
+    #[test]
+    fn a_single_campus_counts_even_without_a_primary_flag() {
+        let u = user(r#"{"id":1,"login":"a","campus":[{"id":53,"name":"Vienna"}]}"#);
+        assert_eq!(u.primary_campus_id(), Some(53));
+    }
+
+    #[test]
+    fn no_campus_information_means_no_campus() {
+        let u = user(r#"{"id":1,"login":"a"}"#);
+        assert_eq!(u.primary_campus_id(), None);
+        assert_eq!(u.primary_campus_name(), None);
+    }
 }

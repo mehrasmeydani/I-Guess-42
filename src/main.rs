@@ -2,8 +2,10 @@ mod app;
 mod auth;
 mod config;
 mod db;
+mod demo;
 mod handlers;
 mod round;
+mod stats;
 mod templates;
 
 use std::sync::Arc;
@@ -21,7 +23,18 @@ use config::Config;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
+    // ENV_FILE picks a different file, e.g. `ENV_FILE=.env.test cargo run` for
+    // a local test instance next to the live settings in .env. A named file
+    // that is missing is an error; a missing default .env is fine (compose
+    // passes the settings in as real environment variables).
+    match std::env::var("ENV_FILE") {
+        Ok(path) => {
+            dotenvy::from_filename(&path).with_context(|| format!("loading ENV_FILE={path}"))?;
+        }
+        Err(_) => {
+            dotenvy::dotenv().ok();
+        }
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
@@ -51,6 +64,9 @@ async fn main() -> Result<()> {
     let router = Router::new()
         .route("/", get(handlers::index))
         .route("/results", get(handlers::results))
+        // Closed rounds only; the open round answers 404.
+        .route("/day/{date}", get(handlers::day))
+        .route("/trends", get(handlers::trends))
         .route("/guess", post(handlers::submit_guess))
         .route("/guess/confirm", post(handlers::confirm_guess))
         .route("/login", get(handlers::login))
@@ -62,6 +78,8 @@ async fn main() -> Result<()> {
         .route("/admin/clock", post(handlers::admin_clock))
         .route("/admin/guess", post(handlers::admin_fake_guess))
         .route("/admin/clear", post(handlers::admin_clear))
+        .route("/admin/demo", post(handlers::admin_demo))
+        .route("/admin/demo/remove", post(handlers::admin_demo_remove))
         .route("/admin/impersonate", post(handlers::admin_impersonate))
         // Not admin-gated: the caller is a demo account by the time they need it.
         .route("/admin/return", post(handlers::admin_return))

@@ -1,4 +1,7 @@
 /target
 /data
 .env
+.env.*
+!.env.example
 deploy/.host
+deploy/.proxmox

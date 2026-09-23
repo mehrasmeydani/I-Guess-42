@@ -4,6 +4,7 @@ use axum::response::{Html, IntoResponse, Response};
 
 use crate::db::{GuessRow, LeaderboardRow, RoundSummary, User};
 use crate::round;
+use crate::stats::{self, Chart, Tally, Trend};
 
 /// Insert thin separators every three digits, so a 19-digit guess is readable.
 pub fn group_digits(n: i64) -> String {
@@ -24,7 +25,6 @@ pub fn group_digits(n: i64) -> String {
 pub struct UserView {
     pub login: String,
     pub display_name: String,
-    pub image_url: Option<String>,
 }
 
 impl From<User> for UserView {
@@ -32,7 +32,6 @@ impl From<User> for UserView {
         Self {
             login: u.login,
             display_name: u.display_name,
-            image_url: u.image_url,
         }
     }
 }
@@ -40,11 +39,12 @@ impl From<User> for UserView {
 pub struct WinnerView {
     pub login: String,
     pub display_name: String,
-    pub image_url: Option<String>,
     pub value_label: String,
 }
 
 pub struct RoundView {
+    /// `YYYY-MM-DD`, for linking to the day's page.
+    pub date_key: String,
     pub date_label: String,
     pub total: i64,
     pub winner: Option<WinnerView>,
@@ -58,13 +58,13 @@ impl From<RoundSummary> for RoundView {
             (Some(login), Some(display_name), Some(value)) => Some(WinnerView {
                 login,
                 display_name,
-                image_url: r.winner_image,
                 value_label: group_digits(value),
             }),
             _ => None,
         };
         Self {
             date_label: round::format_round_date(&r.round_date),
+            date_key: r.round_date,
             total: r.total,
             winner,
         }
@@ -74,7 +74,6 @@ impl From<RoundSummary> for RoundView {
 pub struct LeaderView {
     pub login: String,
     pub display_name: String,
-    pub image_url: Option<String>,
     pub wins: i64,
 }
 
@@ -83,7 +82,6 @@ impl From<LeaderboardRow> for LeaderView {
         Self {
             login: r.login,
             display_name: r.display_name,
-            image_url: r.image_url,
             wins: r.wins,
         }
     }
@@ -120,11 +118,12 @@ pub struct IndexTemplate {
     pub impersonating: bool,
     /// `YYYY-MM-DD`, round-tripped through the form's hidden field.
     pub round_key: String,
-    pub round_label: String,
-    pub deadline_human: String,
     pub seconds_left: i64,
     /// Pre-formatted, so the page is right before the countdown script runs.
     pub time_left: String,
+    /// How much of the round has elapsed, 0-100, and the same as a text bar.
+    pub progress_pct: i64,
+    pub progress_bar: String,
     pub my_guess_label: Option<String>,
     pub guess_count: i64,
     pub last_round: Option<RoundView>,
@@ -143,7 +142,6 @@ pub struct ConfirmTemplate {
     pub value_label: String,
     pub value_raw: String,
     pub round_key: String,
-    pub round_label: String,
     pub deadline_human: String,
 }
 
@@ -154,8 +152,187 @@ pub struct ResultsTemplate {
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
     pub impersonating: bool,
+    /// The rounds to list: the most recent few, or every match of a search.
     pub rounds: Vec<RoundView>,
+    /// How many closed rounds exist in all.
+    pub total_rounds: usize,
+    /// The search as typed, echoed back into the box.
+    pub q: String,
+    /// "7", "30" or "all".
+    pub show: &'static str,
+    /// The top of the leaderboard, always shown.
     pub leaders: Vec<LeaderView>,
+    /// Everyone else, folded away.
+    pub rest: Vec<LeaderView>,
+}
+
+/// One row of the "most" / "least picked" lists and the full table.
+pub struct TallyView {
+    pub value_label: String,
+    pub count: i64,
+}
+
+impl From<&Tally> for TallyView {
+    fn from(t: &Tally) -> Self {
+        Self {
+            value_label: group_digits(t.value),
+            count: t.count,
+        }
+    }
+}
+
+/// A closed round, laid open: the distribution chart and the headline numbers.
+#[derive(Template)]
+#[template(path = "day.html")]
+pub struct DayTemplate {
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    /// Browsing as a demo account, with an admin session parked to return to.
+    pub impersonating: bool,
+    pub round: RoundView,
+    pub distinct: usize,
+    pub lowest_unpicked_label: String,
+    pub most: Vec<TallyView>,
+    pub least: Vec<TallyView>,
+    /// Every picked value, for readers who want the numbers rather than the chart.
+    pub all: Vec<TallyView>,
+    pub chart: Chart,
+}
+
+/// One day on the trends timeline.
+pub struct DayLineView {
+    pub date: String,
+    pub players: i64,
+    /// Bar lengths as a share of the busiest day and the highest winner.
+    pub players_pct: i64,
+    pub winner_label: Option<String>,
+    pub winner_pct: i64,
+    pub lowest_free_label: String,
+}
+
+/// An older-half vs newer-half comparison, printed as `before -> after`.
+pub struct ChangeView {
+    pub label: &'static str,
+    pub before: String,
+    pub after: String,
+    /// "up", "down" or "same".
+    pub dir: &'static str,
+}
+
+impl ChangeView {
+    fn new(label: &'static str, before: Option<i64>, after: Option<i64>) -> Self {
+        let show = |v: Option<i64>| v.map_or_else(|| "-".to_string(), stats::hundredths);
+        let dir = match (before, after) {
+            (Some(b), Some(a)) if a > b => "up",
+            (Some(b), Some(a)) if a < b => "down",
+            _ => "same",
+        };
+        Self {
+            label,
+            before: show(before),
+            after: show(after),
+            dir,
+        }
+    }
+}
+
+pub struct MoverView {
+    pub value_label: String,
+    pub before: String,
+    pub after: String,
+}
+
+pub struct RegularView {
+    pub value_label: String,
+    pub rounds: usize,
+}
+
+/// Several closed rounds taken together: the summed spread, a timeline, and
+/// what changed between the older and the newer half.
+#[derive(Template)]
+#[template(path = "trends.html")]
+pub struct TrendsTemplate {
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    /// Browsing as a demo account, with an admin session parked to return to.
+    pub impersonating: bool,
+    /// "7", "30" or "all", as in the query string.
+    pub range: &'static str,
+    pub rounds: usize,
+    pub picks: i64,
+    pub chart: Chart,
+    /// Every value picked in the range with its summed count, lowest first.
+    pub totals: Vec<TallyView>,
+    /// Newest first, every day in the range.
+    pub days: Vec<DayLineView>,
+    pub changes: Vec<ChangeView>,
+    pub rising: Vec<MoverView>,
+    pub falling: Vec<MoverView>,
+    pub regulars: Vec<RegularView>,
+    /// How long reading and analysing the range took, e.g. "12.4 ms".
+    pub took: String,
+}
+
+impl TrendsTemplate {
+    pub fn build(
+        user: Option<UserView>,
+        test_mode: bool,
+        impersonating: bool,
+        range: &'static str,
+        trend: &Trend,
+    ) -> Self {
+        let mover = |m: &stats::Mover| MoverView {
+            value_label: group_digits(m.value),
+            before: stats::permille(m.before_permille),
+            after: stats::permille(m.after_permille),
+        };
+        let most_players = trend.days.iter().map(|d| d.players).max().unwrap_or(1).max(1);
+        let top_winner = trend.days.iter().filter_map(|d| d.winner).max().unwrap_or(1).max(1);
+        // Rounded up, so any non-zero value shows at least a sliver.
+        let share = |v: i64, of: i64| (v * 100 + of - 1) / of;
+        let changes = trend.halves.as_ref().map_or_else(Vec::new, |h| {
+            vec![
+                ChangeView::new("players per day", Some(h.players.0), Some(h.players.1)),
+                ChangeView::new("winning number", h.winner.0, h.winner.1),
+                ChangeView::new("lowest free number", Some(h.lowest_free.0), Some(h.lowest_free.1)),
+            ]
+        });
+        Self {
+            user,
+            test_mode,
+            impersonating,
+            range,
+            rounds: trend.days.len(),
+            picks: trend.totals.iter().map(|t| t.count).sum(),
+            chart: stats::range_chart(trend),
+            totals: trend.totals.iter().map(Into::into).collect(),
+            days: trend
+                .days
+                .iter()
+                .rev()
+                .map(|d| DayLineView {
+                    date: d.date.clone(),
+                    players: d.players,
+                    players_pct: share(d.players, most_players),
+                    winner_label: d.winner.map(group_digits),
+                    winner_pct: d.winner.map_or(0, |w| share(w, top_winner)),
+                    lowest_free_label: group_digits(d.lowest_free),
+                })
+                .collect(),
+            changes,
+            rising: trend.rising.iter().map(mover).collect(),
+            falling: trend.falling.iter().map(mover).collect(),
+            regulars: trend
+                .regulars
+                .iter()
+                .map(|r| RegularView {
+                    value_label: group_digits(r.value),
+                    rounds: r.rounds,
+                })
+                .collect(),
+            took: String::new(),
+        }
+    }
 }
 
 pub struct AdminGuessView {
@@ -196,6 +373,8 @@ pub struct AdminTemplate {
     pub guesses: Vec<AdminGuessView>,
     /// Existing stand-in accounts, offered as one-click sign-ins.
     pub demo_users: Vec<UserView>,
+    /// Generated history: (bot players, their guesses).
+    pub demo_counts: (i64, i64),
     pub last_round: Option<RoundView>,
 }
 

@@ -1,4 +1,4 @@
-# i guess 42
+# i guess low
 
 A daily lowest-unique-number game for 42 students. Sign in with your intra
 account, put one whole number in, and at **12:42 Europe/Vienna** the lowest
@@ -36,7 +36,7 @@ into a **test instance**: those users get `/admin`, every page grows a warning
 banner, and the routes 404 for everyone else. Leave it unset on the live
 instance and the admin routes do not exist at all.
 
-`/admin` gives you four things:
+`/admin` gives you five things:
 
 - **End the round now** — shift the game clock past the 12:42 deadline instead
   of waiting for it, then reset it afterwards. The offset is in memory only and
@@ -50,6 +50,10 @@ instance and the admin routes do not exist at all.
   numbers in a round to see how it looks without changing the outcome.
 - **Reveal and clear** — see the open round's guesses, which players cannot,
   and wipe a round to start over.
+- **Demo history** — fill the last 30, 90, 180 or 365 closed rounds with
+  random guesses from 300 invented `bot-###` players (hundreds a day), to
+  try the results and trends pages against months of data and see how fast
+  they are. One button removes every bot and every guess they made.
 
 See [deploy/README.md](deploy/README.md) for running a test instance alongside
 the live one.
@@ -67,7 +71,22 @@ If you want to rebuild this yourself rather than read the finished code,
 which sources are authoritative, and the design questions you should decide for
 yourself. It deliberately withholds the answers.
 
-## Going live — what's still to do
+## Going live on Proxmox
+
+The live site is **https://iguesslow.com**, on a Proxmox guest. Everything
+needed is in **[deploy/PROXMOX.md](deploy/PROXMOX.md)**: creating the guest,
+installing Docker, port forwarding and DNS, the 42 redirect URIs, then
+
+```sh
+./deploy/proxmox.sh root@<guest-ip>
+```
+
+Test locally first with `ENV_FILE=.env.test cargo run` (your login in
+`ADMIN_LOGINS`, its own database). `.env` holds the live settings and must
+keep `ADMIN_LOGINS` empty; the deploy script refuses a test instance unless
+you insist. The AWS route below still works too.
+
+## Going live on AWS — what's still to do
 
 The app is built, tested and containerised, but **it has never been deployed**.
 Two things are outstanding, and both need your account rather than more code.
@@ -172,7 +191,7 @@ Then open <http://localhost:3000>. The SQLite file and its migrations are
 created on first start.
 
 ```sh
-cargo test            # 19 tests: round boundaries, guess parsing, and the
+cargo test            # 48 tests: round boundaries, guess parsing, and the
                       # winner query against a throwaway SQLite file
 cargo clippy --all-targets
 ```
@@ -206,6 +225,7 @@ runs on any host with Docker, a domain, and ports 80/443 open.
 | `BIND_ADDR` | no | `127.0.0.1:3000` |
 | `SECURE_COOKIES` | no | `false` |
 | `ADMIN_LOGINS` | no | empty (test mode off) |
+| `ALLOWED_CAMPUS_IDS` | no | `53` (42 Vienna); empty lets every campus in |
 | `RUST_LOG` | no | `i_guess_42=info,tower_http=warn` |
 
 ## Layout
@@ -215,6 +235,8 @@ src/
   main.rs        router, startup, hourly session sweep
   config.rs      environment
   round.rs       12:42 Europe/Vienna round boundaries (+ DST handling)
+  stats.rs       day and multi-day statistics, charts, sparklines
+  demo.rs        random bot history for test instances
   db.rs          schema access; the winner query lives here
   auth.rs        42 OAuth2 flow and session cookies
   handlers.rs    routes
@@ -242,6 +264,33 @@ winners = SELECT round_date, MIN(value) FROM uniq GROUP BY round_date
 
 A round with no row in `winners` had no unique number, so no winner.
 
+## Results
+
+`/results` shows the top three of the leaderboard (everyone else is one click
+away) and the last 7 closed rounds, with switches for 30 or all of them. A
+search box finds rounds by the winner's login, the winning number, or a date
+or month (`2026-08`), and a date picker jumps straight to that day's page.
+
+## Day pages and trends
+
+Every closed round has a page at `/day/YYYY-MM-DD`, linked from the results
+table and the home page. It shows the winning number, the lowest number nobody
+picked, the headcount, a column chart, and the most and least picked
+numbers. The chart has one column per number over the range where 95% of the
+picks fall; every higher pick is listed right under it with its count. The
+full list of numbers is one click away underneath.
+
+`/trends` takes the last 7 days, 30 days, or all of them together: the picks
+added up, a day-by-day table with bars for players and winning numbers, and
+a comparison of the older
+half of the range against the newer half. That covers players per day, the
+winning number, the lowest free number, and which numbers got more or less
+popular. It also lists the numbers that kept coming back, and prints how long
+the analysis took.
+
+Both answer only for closed rounds, which is what keeps the open round's
+numbers secret until 12:42.
+
 ## Security notes
 
 - Sessions are 32 random alphanumeric characters, stored server-side; the
@@ -250,5 +299,9 @@ A round with no row in `winners` had no unique number, so no winner.
   minutes.
 - `SameSite=Lax` is what stops cross-site guess submissions; there is no
   separate CSRF token.
+- Only students whose **primary** 42 campus is in `ALLOWED_CAMPUS_IDS` can
+  sign in. Anyone else is turned away at the OAuth callback, before a user
+  row or session is created. Visitors from other campuses keep their home
+  campus as primary, so they are refused too.
 - The client secret is only ever sent to `api.intra.42.fr` in a POST body, and
   is never logged.

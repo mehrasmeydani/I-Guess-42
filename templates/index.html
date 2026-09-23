@@ -1,18 +1,22 @@
 {% extends "base.html" %}
-{% block title %}i guess 42{% endblock %}
+{% block title %}i guess low{% endblock %}
+{% block nav_round %}on{% endblock %}
 
 {% block content %}
-<section class="card round">
-  <p class="eyebrow">Round of {{ round_label }}</p>
-  <h1 class="countdown" data-seconds="{{ seconds_left }}">{{ time_left }}</h1>
-  <p class="deadline">Closes {{ deadline_human }}</p>
-  <p class="tally">
-    {{ guess_count }} {% if guess_count == 1 %}number{% else %}numbers{% endif %} in.
-    Everyone's guess stays hidden until the round closes.
-  </p>
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>round {{ round_key }}</span><span class="tag live">open</span></h2>
+  <p class="countdown" data-seconds="{{ seconds_left }}">{{ time_left }}</p>
+  <p class="meter"><span class="meter-bar">{{ progress_bar }}</span> <span class="meter-pct">{{ progress_pct }}%</span></p>
+  <div class="figures">
+    <p><b>{{ guess_count }}</b><span>{% if guess_count == 1 %}guess{% else %}guesses{% endif %} in</span></p>
+    <p><b>12:42</b><span>closes, vienna time</span></p>
+    <p><b>sealed</b><span>every guess, until 12:42</span></p>
+  </div>
+</section>
 
+<section class="sec" style="--b: 1">
   {% match notice %}
-    {% when Some with (n) %}<p class="notice {{ n.kind }}">{{ n.text }}</p>
+    {% when Some with (n) %}<p class="notice {{ n.kind }}"><b>{{ n.kind }}</b> {{ n.text }}</p>
     {% when None %}
   {% endmatch %}
 
@@ -20,56 +24,49 @@
     {% when Some with (_u) %}
       {% match my_guess_label %}
         {% when Some with (g) %}
-          <p class="yours locked">Your number: <strong>{{ g }}</strong></p>
-          <p class="hint">
-            That is final for this round. Come back after 12:42 to see whether
-            it held.
-          </p>
+          <h2 class="rule"><span>your number</span></h2>
+          <div class="sealed">
+            <p class="sealed-value">{{ g }}</p>
+            <span class="stamp">sealed</span>
+          </div>
+          <p class="dim">final. no take-backs. find out after 12:42.</p>
         {% when None %}
+          <h2 class="rule"><span>your number</span></h2>
           <form class="guessform" method="post" action="/guess">
             <input type="hidden" name="round" value="{{ round_key }}">
-            <label for="guess">Pick a whole number, 1 or higher</label>
-            <div class="row">
-              <input id="guess" name="guess" type="text" inputmode="numeric"
-                     pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
-                     placeholder="1" required>
-              <button type="submit">Lock it in</button>
-            </div>
-            <p class="hint">
-              One guess per round, and <strong>it cannot be changed</strong>
-              once you confirm it. Lowest number that exactly one person
-              picked takes the day.
-            </p>
+            <label class="sr" for="guess">your number</label>
+            <input id="guess" name="guess" type="text" inputmode="numeric"
+                   pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
+                   placeholder="1" required>
+            <button type="submit">lock it in &rarr;</button>
           </form>
+          <p class="dim">one guess per round. it cannot be changed once you confirm.</p>
       {% endmatch %}
     {% when None %}
-      <p class="signedout">Sign in with your 42 account to put a number in.</p>
-      <a class="cta big" href="/login">Sign in with 42</a>
+      <h2 class="rule"><span>play</span></h2>
+      <a class="btn" href="/login">sign in with 42 &rarr;</a>
   {% endmatch %}
+</section>
+
+<section class="sec" style="--b: 2">
+  <h2 class="rule"><span>rules</span></h2>
+  <ol class="rules">
+    <li><b>01</b> pick one whole number, 1 or higher. one shot a day.</li>
+    <li><b>02</b> nobody sees anybody's number until 12:42.</li>
+    <li><b>03</b> the lowest number exactly one person picked wins. pick 1 with a friend and you both lose it.</li>
+  </ol>
 </section>
 
 {% match last_round %}
   {% when Some with (r) %}
-    <section class="card last">
-      <p class="eyebrow">Last round &middot; {{ r.date_label }}</p>
+    <section class="sec" style="--b: 3">
+      <h2 class="rule"><span>last round {{ r.date_key }}</span><a class="tag" href="/day/{{ r.date_key }}">spread &rarr;</a></h2>
       {% match r.winner %}
         {% when Some with (w) %}
-          <div class="winner">
-            {% match w.image_url %}
-              {% when Some with (src) %}<img class="avatar big" src="{{ src }}" alt="">
-              {% when None %}
-            {% endmatch %}
-            <div>
-              <p class="who">{{ w.display_name }} <span class="login">{{ w.login }}</span></p>
-              <p class="value">{{ w.value_label }}</p>
-            </div>
-          </div>
+          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>&larr; {{ w.login }}, alone. {{ r.total }} played.</span></p>
         {% when None %}
-          <p class="nowinner">
-            No winner &mdash; every number that day was picked by more than one person.
-          </p>
+          <p class="verdict"><b class="lose">&times;</b> <span>nobody. every number had company. {{ r.total }} played.</span></p>
       {% endmatch %}
-      <p class="tally">{{ r.total }} played</p>
     </section>
   {% when None %}
 {% endmatch %}

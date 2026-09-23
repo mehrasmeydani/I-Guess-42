@@ -1,52 +1,101 @@
 {% extends "base.html" %}
-{% block title %}Results &middot; i guess 42{% endblock %}
+{% block title %}Results &middot; i guess low{% endblock %}
+{% block nav_results %}on{% endblock %}
 
 {% block content %}
-<section class="card">
-  <p class="eyebrow">Most days won</p>
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>most days won</span></h2>
   {% if leaders.is_empty() %}
-    <p class="empty">Nobody has won a round yet.</p>
+    <p class="dim">nobody has won a round yet.</p>
   {% else %}
-    <ol class="leaders">
+    <ol class="podium">
       {% for l in leaders %}
-        <li>
-          {% match l.image_url %}
-            {% when Some with (src) %}<img class="avatar" src="{{ src }}" alt="">
-            {% when None %}
-          {% endmatch %}
-          <span class="who">{{ l.display_name }} <span class="login">{{ l.login }}</span></span>
-          <span class="wins">{{ l.wins }}</span>
+        <li class="p{{ loop.index }}">
+          <span class="rank">{{ "{:02}"|format(loop.index) }}</span>
+          <b class="wins">{{ l.wins }}</b>
+          <span class="who">{{ l.login }}</span>
+          <span class="dim">{{ l.display_name }}</span>
         </li>
       {% endfor %}
     </ol>
+    {% if !rest.is_empty() %}
+      <details>
+        <summary>show everyone ({{ rest.len() }} more)</summary>
+        <table class="grid">
+          <tbody>
+            {% for l in rest %}
+              <tr>
+                <td class="num dim">{{ "{:02}"|format(loop.index + 3) }}</td>
+                <td>{{ l.login }} <span class="dim">{{ l.display_name }}</span></td>
+                <td class="num b">{{ l.wins }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
   {% endif %}
 </section>
 
-<section class="card">
-  <p class="eyebrow">Every closed round</p>
+<section class="sec" style="--b: 1">
+  <h2 class="rule"><span>rounds</span>
+    <span class="ranges">
+      <a class="{% if q.is_empty() && show == "7" %}on{% endif %}" href="/results">7</a>
+      <a class="{% if q.is_empty() && show == "30" %}on{% endif %}" href="/results?show=30">30</a>
+      <a class="{% if q.is_empty() && show == "all" %}on{% endif %}" href="/results?show=all">all</a>
+    </span>
+  </h2>
+
+  <div class="finders">
+    <form method="get" action="/results" class="finder">
+      <label class="sr" for="q">search rounds</label>
+      <input id="q" name="q" type="text" value="{{ q }}" placeholder="login, number or 2026-08"
+             autocomplete="off" spellcheck="false">
+      <button type="submit">search</button>
+    </form>
+    <form method="get" action="/results" class="finder">
+      <label class="sr" for="date">go to a day</label>
+      <input id="date" name="date" type="date">
+      <button type="submit">go to day</button>
+    </form>
+  </div>
+
   {% if rounds.is_empty() %}
-    <p class="empty">No round has closed yet. The first one closes at 12:42.</p>
+    {% if q.is_empty() %}
+      <p class="dim">no round has closed yet. the first one closes at 12:42.</p>
+    {% else %}
+      <p class="dim">no round matches "{{ q }}". <a href="/results">clear</a></p>
+    {% endif %}
   {% else %}
-    <table class="history">
-      <thead>
-        <tr><th>Day</th><th>Winner</th><th class="num">Number</th><th class="num">Played</th></tr>
-      </thead>
+    <table class="grid">
+      <thead><tr><th>date</th><th>winner</th><th class="num">number</th><th class="num">played</th></tr></thead>
       <tbody>
         {% for r in rounds %}
           <tr>
-            <td>{{ r.date_label }}</td>
+            <td><a href="/day/{{ r.date_key }}">{{ r.date_key }}</a></td>
             {% match r.winner %}
               {% when Some with (w) %}
-                <td class="who">{{ w.display_name }} <span class="login">{{ w.login }}</span></td>
-                <td class="num value">{{ w.value_label }}</td>
+                <td>{{ w.login }}</td>
+                <td class="num win">{{ w.value_label }}</td>
               {% when None %}
-                <td class="nowinner" colspan="2">no unique number</td>
+                <td class="dim">nobody</td>
+                <td class="num dim">&times;</td>
             {% endmatch %}
             <td class="num">{{ r.total }}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
+    <p class="dim listed">
+      {% if q.is_empty() %}
+        {{ rounds.len() }} of {{ total_rounds }} rounds.
+        {% if rounds.len() < total_rounds %}
+          {% if show == "7" %}<a href="/results?show=30">show 30</a> &middot; {% endif %}<a href="/results?show=all">show all</a>
+        {% endif %}
+      {% else %}
+        {{ rounds.len() }} {% if rounds.len() == 1 %}round matches{% else %}rounds match{% endif %} "{{ q }}". <a href="/results">clear</a>
+      {% endif %}
+    </p>
   {% endif %}
 </section>
 {% endblock %}

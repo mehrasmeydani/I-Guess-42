@@ -1,24 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Confirm your guess &middot; i guess 42{% endblock %}
+{% block title %}Confirm your guess &middot; i guess low{% endblock %}
+{% block nav_round %}on{% endblock %}
 
 {% block content %}
-<section class="card confirm">
-  <p class="eyebrow">Round of {{ round_label }}</p>
-  <h1>Are you sure?</h1>
-
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>round {{ round_key }}</span><span class="tag warn">final</span></h2>
+  <p class="question">sure?</p>
   <p class="bignumber">{{ value_label }}</p>
-
-  <p class="warning">
-    This is your one guess for this round and <strong>it cannot be changed
-    or withdrawn</strong>. Nobody else sees it until the round closes
-    {{ deadline_human }}.
-  </p>
-
+  <p class="notice warn"><b>warning</b> this is your one guess. it cannot be changed or withdrawn.
+    nobody sees it until the round closes {{ deadline_human }}.</p>
   <form method="post" action="/guess/confirm" class="confirmform">
     <input type="hidden" name="guess" value="{{ value_raw }}">
     <input type="hidden" name="round" value="{{ round_key }}">
-    <button type="submit">Yes, lock in {{ value_label }}</button>
-    <a class="cancel" href="/">Cancel</a>
+    <button type="submit">yes, lock in {{ value_label }} &rarr;</button>
+    <a class="btn ghost" href="/">no, go back</a>
   </form>
 </section>
 {% endblock %}

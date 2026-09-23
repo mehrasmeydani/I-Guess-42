@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Trends &middot; i guess low{% endblock %}
+{% block nav_trends %}on{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>trends</span>
+    <span class="ranges">
+      <a class="{% if range == "7" %}on{% endif %}" href="/trends?days=7">7d</a>
+      <a class="{% if range == "30" %}on{% endif %}" href="/trends?days=30">30d</a>
+      <a class="{% if range == "all" %}on{% endif %}" href="/trends?days=all">all</a>
+    </span>
+  </h2>
+  <p class="analyse">
+    analysing {{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}, {{ picks }} picks
+    <span class="analyse-bar" aria-hidden="true">[##############################]</span>
+    <span class="analyse-done">done in {{ took }}</span>
+  </p>
+</section>
+
+{% if rounds == 0 %}
+  <section class="sec" style="--b: 4">
+    <p class="dim">no closed rounds in this range yet.</p>
+  </section>
+{% else %}
+
+<section class="sec" style="--b: 4">
+  <h2 class="rule"><span>what changed</span><span class="tag">older half &rarr; newer half</span></h2>
+  {% if changes.is_empty() %}
+    <p class="dim">one round is not a trend. pick a longer range.</p>
+  {% else %}
+    <table class="grid diff">
+      <tbody>
+        {% for c in changes %}
+          <tr class="{{ c.dir }}">
+            <td class="sign">{% if c.dir == "up" %}+{% else if c.dir == "down" %}-{% else %}={% endif %}</td>
+            <td>{{ c.label }}</td>
+            <td class="num">{{ c.before }}</td>
+            <td class="arrow">&rarr;</td>
+            <td class="num b">{{ c.after }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="split">
+      <div>
+        <p class="sub">getting popular</p>
+        {% if rising.is_empty() %}<p class="dim">nothing climbed.</p>{% endif %}
+        <ol class="ranked">
+          {% for m in rising %}
+            <li class="up"><b>{{ m.value_label }}</b><span>{{ m.before }} &rarr; {{ m.after }}</span></li>
+          {% endfor %}
+        </ol>
+      </div>
+      <div>
+        <p class="sub">going out of fashion</p>
+        {% if falling.is_empty() %}<p class="dim">nothing dropped.</p>{% endif %}
+        <ol class="ranked">
+          {% for m in falling %}
+            <li class="down"><b>{{ m.value_label }}</b><span>{{ m.before }} &rarr; {{ m.after }}</span></li>
+          {% endfor %}
+        </ol>
+      </div>
+    </div>
+    <p class="dim">share of all picks in each half. numbers picked only once are left out.</p>
+  {% endif %}
+</section>
+
+<section class="sec" style="--b: 5">
+  <h2 class="rule"><span>what didn't</span></h2>
+  {% if regulars.is_empty() %}
+    <p class="dim">no number came back on more than one day.</p>
+  {% else %}
+    <ol class="ranked">
+      {% for r in regulars %}
+        <li><b>{{ r.value_label }}</b><span>picked on {{ r.rounds }} of {{ rounds }} days</span></li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+</section>
+
+<section class="sec" style="--b: 6">
+  <h2 class="rule"><span>all picks, added up</span></h2>
+  <p class="legend">
+    <span><i class="win">█</i> won a day</span>
+    <span><i class="picked">█</i> never won</span>
+  </p>
+  {% include "chart.html" %}
+  <details>
+    <summary>every number picked ({{ totals.len() }})</summary>
+    <table class="grid narrow">
+      <thead><tr><th class="num">number</th><th class="num">picks</th></tr></thead>
+      <tbody>
+        {% for t in totals %}
+          <tr><td class="num">{{ t.value_label }}</td><td class="num">{{ t.count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</section>
+
+<section class="sec" style="--b: 7">
+  <h2 class="rule"><span>day by day</span><span class="tag">newest first</span></h2>
+  <table class="grid">
+    <thead><tr><th>date</th><th>players</th><th>winning number</th><th class="num">lowest free</th></tr></thead>
+    <tbody>
+      {% for d in days %}
+        <tr>
+          <td><a href="/day/{{ d.date }}">{{ d.date }}</a></td>
+          <td class="barcell"><span class="minibar" style="--w: {{ d.players_pct }}%"></span><b>{{ d.players }}</b></td>
+          {% match d.winner_label %}
+            {% when Some with (w) %}<td class="barcell win"><span class="minibar" style="--w: {{ d.winner_pct }}%"></span><b>{{ w }}</b></td>
+            {% when None %}<td class="barcell dim">nobody won</td>
+          {% endmatch %}
+          <td class="num">{{ d.lowest_free_label }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

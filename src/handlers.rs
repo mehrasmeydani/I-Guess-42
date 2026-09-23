@@ -1,4 +1,4 @@
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::Form;
@@ -10,13 +10,18 @@ use crate::app::{error_page, AppError, AppState};
 use crate::auth;
 use crate::db::{self, User};
 use crate::round::Round;
+use crate::stats;
 use crate::templates::{
-    self, group_digits, AdminTemplate, ConfirmTemplate, IndexTemplate, Notice, ResultsTemplate,
-    RoundView, UserView,
+    self, group_digits, AdminTemplate, ConfirmTemplate, DayTemplate, IndexTemplate, Notice,
+    ResultsTemplate, RoundView, TrendsTemplate, UserView,
 };
 
-const HISTORY_LIMIT: i64 = 60;
-const LEADERBOARD_LIMIT: i64 = 20;
+/// Rounds are loaded in full and narrowed down in Rust: search and the
+/// 7 / 30 / all switch work on the whole history.
+const HISTORY_LIMIT: i64 = i64::MAX;
+const LEADERBOARD_LIMIT: i64 = i64::MAX;
+/// Shown up front on the results page; the rest of the leaderboard folds away.
+const PODIUM: usize = 3;
 
 async fn current_user(state: &AppState, jar: &CookieJar) -> Result<Option<User>, AppError> {
     let Some(token) = auth::session_token(jar) else {
@@ -87,18 +92,17 @@ pub async fn index(
     .map(RoundView::from);
 
     let seconds_left = round.seconds_left(now);
+    let (progress_pct, progress_bar) = stats::progress_bar(seconds_left);
     let guess_count = db::guess_count(&state.db, &round_key).await?;
-    let round_label = crate::round::format_round_date(&round_key);
-
     Ok(templates::render(&IndexTemplate {
         user: user.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         round_key,
-        round_label,
-        deadline_human: round.deadline_human(),
         seconds_left,
         time_left: crate::round::format_duration(seconds_left),
+        progress_pct,
+        progress_bar,
         my_guess_label,
         guess_count,
         last_round,
@@ -106,28 +110,174 @@ pub async fn index(
     }))
 }
 
-pub async fn results(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
+#[derive(Deserialize)]
+pub struct ResultsQuery {
+    /// Search: a winner's login, a winning number, or a date or month prefix.
+    q: Option<String>,
+    /// "7" (default), "30" or "all": how many recent rounds to list.
+    show: Option<String>,
+    /// From the date picker: jump straight to that day's page.
+    date: Option<String>,
+}
+
+/// Whether a closed round matches a search. The query is matched against the
+/// date as a prefix (`2026-08` finds August), the winner's login as a
+/// substring, and the winning number exactly (separators allowed).
+fn round_matches(r: &db::RoundSummary, query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return true;
+    }
+    if r.round_date.starts_with(&q) {
+        return true;
+    }
+    if r.winner_login.as_deref().is_some_and(|l| l.to_lowercase().contains(&q)) {
+        return true;
+    }
+    matches!((parse_guess(&q), r.winning_value), (Ok(n), Some(v)) if n == v)
+}
+
+pub async fn results(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<ResultsQuery>,
+) -> Result<Response, AppError> {
+    if let Some(date) = query.date.as_deref().filter(|d| !d.is_empty()) {
+        // Only a well-formed date is echoed into a URL.
+        if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok() {
+            return Ok(Redirect::to(&format!("/day/{date}")).into_response());
+        }
+    }
+
     let round_key = Round::current(state.now()).key();
     let user = current_user(&state, &jar).await?;
 
-    let rounds = db::closed_rounds(&state.db, &round_key, HISTORY_LIMIT)
-        .await?
+    let all = db::closed_rounds(&state.db, &round_key, HISTORY_LIMIT).await?;
+    let total_rounds = all.len();
+    let q = query.q.unwrap_or_default().trim().to_string();
+    let show: &'static str = match query.show.as_deref() {
+        Some("30") => "30",
+        Some("all") => "all",
+        _ => "7",
+    };
+    // A search looks through everything; otherwise only the most recent few.
+    let limit = match (q.is_empty(), show) {
+        (false, _) | (true, "all") => usize::MAX,
+        (true, "30") => 30,
+        _ => 7,
+    };
+    let rounds: Vec<RoundView> = all
         .into_iter()
+        .filter(|r| round_matches(r, &q))
+        .take(limit)
         .map(RoundView::from)
         .collect();
-    let leaders = db::leaderboard(&state.db, &round_key, LEADERBOARD_LIMIT)
+
+    let mut leaders: Vec<templates::LeaderView> = db::leaderboard(&state.db, &round_key, LEADERBOARD_LIMIT)
         .await?
         .into_iter()
         .map(Into::into)
         .collect();
+    let rest = leaders.split_off(leaders.len().min(PODIUM));
 
     Ok(templates::render(&ResultsTemplate {
         user: user.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         rounds,
+        total_rounds,
+        q,
+        show,
         leaders,
+        rest,
     }))
+}
+
+/// One closed round in detail: how the numbers were spread, who won, and
+/// which numbers were crowded or left alone.
+pub async fn day(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(date): Path<String>,
+) -> Result<Response, AppError> {
+    let no_such_day = || error_page(StatusCode::NOT_FOUND, "No closed round on that day.");
+
+    // Only well-formed dates reach the database.
+    let is_date = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+        .is_ok_and(|d| d.format("%Y-%m-%d").to_string() == date);
+    if !is_date {
+        return Ok(no_such_day());
+    }
+
+    // round_summary only answers for closed rounds, which is what keeps the
+    // open round's numbers secret: no summary, no tallies.
+    let open_round = Round::current(state.now()).key();
+    let Some(summary) = db::round_summary(&state.db, &open_round, &date).await? else {
+        return Ok(no_such_day());
+    };
+
+    let tallies = db::round_tallies(&state.db, &date).await?;
+    let stats = stats::analyse(&tallies);
+    let chart = stats::day_chart(&tallies, &stats);
+    let user = current_user(&state, &jar).await?;
+
+    Ok(templates::render(&DayTemplate {
+        user: user.map(UserView::from),
+        test_mode: state.cfg.test_mode(),
+        impersonating: auth::admin_return_token(&jar).is_some(),
+        round: RoundView::from(summary),
+        distinct: stats.distinct,
+        lowest_unpicked_label: group_digits(stats.lowest_unpicked),
+        most: stats.most.iter().map(Into::into).collect(),
+        least: stats.least.iter().map(Into::into).collect(),
+        all: tallies.iter().map(Into::into).collect(),
+        chart,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct TrendsQuery {
+    days: Option<String>,
+}
+
+/// Several closed rounds taken together: the last 7 or 30 days, or all of them.
+pub async fn trends(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<TrendsQuery>,
+) -> Result<Response, AppError> {
+    let (range, days) = match query.days.as_deref() {
+        Some("30") => ("30", Some(30)),
+        Some("all") => ("all", None),
+        _ => ("7", Some(7)),
+    };
+
+    let round = Round::current(state.now());
+    let open_round = round.key();
+    // The range counts back from the most recent closed round.
+    let from = match days {
+        Some(n) => (round.previous_date() - chrono::Duration::days(n - 1))
+            .format("%Y-%m-%d")
+            .to_string(),
+        None => String::new(), // sorts before every date
+    };
+
+    let user = current_user(&state, &jar).await?;
+
+    // Timed from the query to the finished view model, and shown on the page:
+    // an honest number for how heavy the analysis is.
+    let started = std::time::Instant::now();
+    let rows = db::range_tallies(&state.db, &from, &open_round).await?;
+    let trend = stats::trend(&rows);
+    let mut page = TrendsTemplate::build(
+        user.map(UserView::from),
+        state.cfg.test_mode(),
+        auth::admin_return_token(&jar).is_some(),
+        range,
+        &trend,
+    );
+    page.took = format!("{:.1} ms", started.elapsed().as_secs_f64() * 1000.0);
+    Ok(templates::render(&page))
 }
 
 // ---------------------------------------------------------------- guessing
@@ -197,7 +347,6 @@ pub async fn submit_guess(
         // "007" was displayed as 7 and must be submitted as 7.
         value_raw: value.to_string(),
         round_key,
-        round_label: crate::round::format_round_date(&round.key()),
         deadline_human: round.deadline_human(),
     }))
 }
@@ -297,6 +446,7 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
             .into_iter()
             .map(Into::into)
             .collect(),
+        demo_counts: db::demo_counts(&state.db).await?,
         demo_users: db::demo_users(&state.db)
             .await?
             .into_iter()
@@ -459,6 +609,42 @@ pub async fn admin_return(
     Ok((jar, Redirect::to("/admin")).into_response())
 }
 
+#[derive(Deserialize)]
+pub struct DemoForm {
+    days: i64,
+}
+
+/// Fills the closed rounds before today with random bot guesses, so the
+/// history pages have months of data to chew on. Test instances only.
+pub async fn admin_demo(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<DemoForm>,
+) -> Result<Response, AppError> {
+    if require_admin(&state, &jar).await?.is_none() {
+        return Ok(admin_gone());
+    }
+    let days = form.days.clamp(1, 730);
+    let last_closed = Round::current(state.now()).previous_date();
+    // Generated before any await: the thread-local RNG cannot be held across one.
+    let guesses = crate::demo::generate(&mut rand::thread_rng(), last_closed, days);
+    let started = std::time::Instant::now();
+    let added = db::insert_demo(&state.db, &guesses).await?;
+    tracing::info!(days, added, took = ?started.elapsed(), "generated demo history");
+    Ok(Redirect::to("/admin").into_response())
+}
+
+pub async fn admin_demo_remove(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Response, AppError> {
+    if require_admin(&state, &jar).await?.is_none() {
+        return Ok(admin_gone());
+    }
+    db::remove_demo(&state.db).await?;
+    Ok(Redirect::to("/admin").into_response())
+}
+
 pub async fn admin_clear(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -519,6 +705,20 @@ pub async fn callback(
     let access_token = auth::exchange_code(&state.http, &state.cfg, &code).await?;
     let me = auth::fetch_me(&state.http, &access_token).await?;
 
+    // Turned away before anything is stored: no user row, no session.
+    let campus = me.primary_campus_id();
+    if !state.cfg.campus_allowed(campus) {
+        tracing::info!(login = %me.login, ?campus, "refused sign-in from another campus");
+        let home = me
+            .primary_campus_name()
+            .map(|name| format!(" Your intra account belongs to 42 {name}."))
+            .unwrap_or_default();
+        return Ok(error_page(
+            StatusCode::FORBIDDEN,
+            &format!("This game is only open to students of this campus.{home}"),
+        ));
+    }
+
     db::upsert_user(
         &state.db,
         me.id,
@@ -561,7 +761,36 @@ pub async fn not_found() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_guess;
+    use super::{parse_guess, round_matches};
+    use crate::db::RoundSummary;
+
+    fn round(date: &str, winner: Option<(&str, i64)>) -> RoundSummary {
+        RoundSummary {
+            round_date: date.to_string(),
+            total: 10,
+            winning_value: winner.map(|w| w.1),
+            winner_login: winner.map(|w| w.0.to_string()),
+            winner_name: winner.map(|w| w.0.to_string()),
+        }
+    }
+
+    #[test]
+    fn search_finds_rounds_by_date_login_or_number() {
+        let r = round("2026-08-14", Some(("megardes", 1_337)));
+        assert!(round_matches(&r, ""));
+        assert!(round_matches(&r, "2026-08"));
+        assert!(round_matches(&r, "2026-08-14"));
+        assert!(round_matches(&r, "MEGA"));
+        assert!(round_matches(&r, "1337"));
+        assert!(round_matches(&r, "1 337"));
+        assert!(!round_matches(&r, "2026-09"));
+        assert!(!round_matches(&r, "133"));
+        assert!(!round_matches(&r, "someone"));
+
+        let nobody = round("2026-08-15", None);
+        assert!(!round_matches(&nobody, "megardes"));
+        assert!(round_matches(&nobody, "2026-08"));
+    }
 
     #[test]
     fn accepts_plain_and_separated_digits() {

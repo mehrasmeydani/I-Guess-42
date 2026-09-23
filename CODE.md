@@ -385,6 +385,25 @@ pub fn test_mode(&self) -> bool { !self.admin_logins.is_empty() }
 safe one — you cannot enable test mode by forgetting something, only by
 explicitly setting a login.
 
+```rust
+allowed_campus_ids: parse_ids(&opt("ALLOWED_CAMPUS_IDS", DEFAULT_CAMPUS_IDS))
+    .context("ALLOWED_CAMPUS_IDS must be comma-separated campus ids")?,
+```
+
+Which 42 campuses may play. The default is `53`, 42 Vienna, because the round
+deadline is Vienna time. Unlike `ADMIN_LOGINS`, a typo here is a **startup
+error** rather than a skipped entry: a silently dropped id would lock that
+campus out with no clue why. An empty list lets every campus in.
+
+```rust
+pub fn campus_allowed(&self, campus_id: Option<i64>) -> bool {
+    self.allowed_campus_ids.is_empty()
+        || campus_id.is_some_and(|id| self.allowed_campus_ids.contains(&id))
+}
+```
+
+An account with no campus at all (`None`) is refused whenever a list is set.
+
 ---
 
 ## `src/app.rs` — shared state and errors
@@ -991,6 +1010,23 @@ pub fn image_url(&self) -> Option<&str> {
 `?` on an `Option` in a function returning `Option` — returns `None` early if
 `image` is absent. A nested-optional unwrap in one line.
 
+```rust
+#[serde(default)]
+pub campus: Vec<IntraCampus>,
+#[serde(default)]
+pub campus_users: Vec<IntraCampusUser>,
+```
+
+`/v2/me` lists every campus the account has been attached to (`campus`, with
+names) and one link row per campus (`campus_users`), exactly one of which has
+`is_primary: true`. `#[serde(default)]` turns a missing array into an empty
+one instead of a decode error.
+
+`primary_campus_id` picks the `is_primary` row, falling back to the only
+campus when there is exactly one. Using the *primary* campus matters: a
+student visiting Vienna from Paris gains a Vienna `campus_users` row but keeps
+Paris as primary, so they are still judged as a Paris student.
+
 ### The session cookie
 
 ```rust
@@ -1230,6 +1266,11 @@ if !db::consume_oauth_state(&state.db, &state_token).await? {
 let access_token = auth::exchange_code(&state.http, &state.cfg, &code).await?;
 let me = auth::fetch_me(&state.http, &access_token).await?;
 
+if !state.cfg.campus_allowed(me.primary_campus_id()) {
+    return Ok(error_page(StatusCode::FORBIDDEN,
+        "This game is only open to students of this campus..."));
+}
+
 db::upsert_user(&state.db, me.id, &me.login, me.display_name(), me.image_url()).await?;
 
 let session = auth::random_token();
@@ -1243,6 +1284,10 @@ The `state` check is the security-critical line, and it comes **before** the
 token exchange — no work is done for a request that cannot prove it started the
 flow. `consume_oauth_state` deletes the row as it checks, in one statement, so
 a state cannot be replayed.
+
+The campus check sits **before** `upsert_user`: someone from another campus
+leaves no user row and gets no session. The refusal names their home campus
+when 42 provides it, so a confused visitor knows why.
 
 `upsert_user` means the login refreshes the display name and avatar every time,
 so a changed intra profile propagates without extra machinery.
@@ -1370,6 +1415,93 @@ An unchecked HTML checkbox sends **nothing at all**, rather than a false value.
 `#[serde(default)]` plus `Option` is how you read one: absent means unchecked.
 Getting this wrong gives a form that fails to submit whenever the box is
 cleared.
+
+---
+
+## `src/stats.rs` — the day and trends pages
+
+Pure functions over closed rounds' `(value, count)` tallies. No database and
+no HTML, so all of it is tested directly.
+
+### One day
+
+`analyse` computes a round's headline numbers:
+
+- **winner**: the first tally with a count of 1. The tallies are sorted, so
+  the first unique value is the lowest one, the same rule as `WINNER_CTE`.
+- **lowest_unpicked**: walk up from 1 and stop at the first gap.
+- **most** / **least**: sorted by count, ties to the lower number, cut to
+  five. "Least picked" only sees values somebody picked, so a zero never
+  appears in it.
+
+### The chart
+
+`build` lays out the chart used on both pages in two parts, with nothing
+grouped and nothing dropped:
+
+- **Columns**, one per number from 1 up to where 95% of all picks fall
+  (`CHART_PERMILLE`), between 10 and 100 of them. Capping the count keeps
+  every column wide enough to read; a few stray picks at 300 or 400 would
+  otherwise stretch the axis and squeeze the numbers people actually play
+  into a sliver. The winner gets a column too if it is within 100.
+- **The tail**: every number picked above the last column, listed lowest
+  first with its count (`420 ×7`), winners marked.
+
+Heights are a share of the tallest column, rounded up so a single pick always
+shows. Only round numbers (from `nice_step`) get a label on the axis, so labels
+never collide; winners are told apart by colour, and every column has its
+number and count in its hover text.
+
+`day_chart` colours a day: winner, picked once, shared. `range_chart` colours
+several days added together: numbers that won at least one day, and the rest.
+How many days a number won is in its hover text.
+
+### Several days
+
+`trend` takes per-day rows (`db::range_tallies`, oldest first) and works out:
+
+- a `DayLine` per day (players, winner, lowest free number), by running
+  `analyse` on each day;
+- **totals**, every pick added up per value, and **wins**, how many days each
+  value won;
+- **halves**: the range split into an older and a newer half (an odd middle
+  day goes to the newer one), with average players, winning number and
+  lowest free number for each. Averages are integer hundredths, printed by
+  `hundredths`;
+- **rising** / **falling**: each value's share of all picks in the older half
+  against the newer half, in tenths of a percent (`permille`). Values picked
+  only once in the whole range are skipped as noise;
+- **regulars**: the values picked on the most different days, the part that
+  did not change.
+
+Shares and day counts are looked up in `HashMap`s. A year of rounds holds tens
+of thousands of distinct values, and scanning lists for each one made the
+analysis quadratic; with maps a year analyses in well under a second even in a
+debug build. The trends page prints the real time it took.
+
+---
+
+## `src/demo.rs` — random history for test instances
+
+`generate` invents guesses for the `days` closed rounds ending yesterday, from
+a pool of 300 `bot-###` players. Turnout grows over the months and dips at
+weekends. Early on, most bots pile onto 1-5; later, more of them spread
+higher. The trends page therefore has real drift to find. A share of bots
+pick joke numbers (42, 69, 420, 1337) and a few go as high as 500. Nobody
+goes further, because the point of the game is to go low. The share of each
+kind of player is a small table in `pick`, and the shares always add up to 1.
+
+`db::insert_demo` writes it in one transaction. It creates any missing bots
+with negative ids, like every stand-in, and uses `INSERT OR IGNORE`, so running
+it twice tops up instead of duplicating. It refuses to reuse a `bot-###` login
+that belongs to a real (positive-id) account. `db::remove_demo` deletes the
+bots; `ON DELETE CASCADE` takes their guesses with them. Hand-made stand-ins
+and real players are untouched.
+
+It is reachable only from `/admin` (`POST /admin/demo`,
+`POST /admin/demo/remove`). Those routes go through `require_admin`, so they
+answer 404 on a live instance with no `ADMIN_LOGINS`. The open round is never
+touched.
 
 ---
 
@@ -1635,11 +1767,11 @@ template — this project keeps it to trivial cases like `is_empty` and `len`.
 
 ---
 
-## `static/` — CSS and the countdown
+## `static/` — CSS and the script
 
 ### `app.js`
 
-31 lines, and the only JavaScript in the project. Everything works without it.
+The only JavaScript in the project. Everything works without it.
 
 ```js
 var left = parseInt(el.dataset.seconds, 10);
@@ -1648,7 +1780,10 @@ if (!isFinite(left)) return;
 
 The remaining seconds come **from the server**, not from `new Date()`. A
 visitor with a wrong system clock still sees a correct countdown, because the
-client never computes the deadline — it only decrements.
+client never computes the deadline, it only decrements. The same tick redraws
+the `[####------]` bar under the countdown, using the same flat-24-hour
+formula as `stats::progress_bar`, so the server-rendered bar and the script
+agree.
 
 ```js
 setTimeout(function () { window.location.assign('/'); }, 1500);
@@ -1658,39 +1793,68 @@ When the countdown hits zero the round has rolled, so the page reloads to pick
 up the new one. The 1.5-second delay avoids a reload storm if many tabs hit
 zero simultaneously.
 
-Written in ES5 style (`var`, `function`) with no build step — it is small
+A second block keeps the Vienna time in the header, via `Intl.DateTimeFormat`
+with `timeZone: 'Europe/Vienna'`.
+
+A third block is loading feedback, the way a command-line tool does it: a
+braille spinner (`⠋⠙⠹⠸…`) in the header while the next page loads, and in the
+button that sent a form. A second submit of the same form is cancelled. The
+button is deliberately **not** `disabled`: a disabled button leaves its own
+`name=value` out of the form, and the admin clock buttons (`name="shift"`)
+depend on theirs. Changing its text is safe, because the submitted value comes
+from the `value` attribute. A `pageshow` handler puts everything back when the
+Back button restores a page from the browser's cache.
+
+Written in ES5 style (`var`, `function`) with no build step. It is small
 enough that a toolchain would cost more than it saves.
 
 ### `style.css`
 
-Plain CSS, no framework. Custom properties at the top hold the palette:
+Plain CSS, no framework. The look is a terminal's materials in a brutalist
+layout: Cascadia Mono and Windows Terminal's default "Campbell" colours,
+set with thick 2px rules, huge numbers and hard edges. Nothing is rounded,
+nothing glows, nothing fades.
 
 ```css
-:root { --bg: #0d0f12; --card: #16191f; --accent: #00babc; ... }
+:root { --bg: #0c0c0c; --fg: #cccccc; --green: #16c60c; --blue: #3b78ff; ... }
 ```
 
-`#00babc` is 42's teal. Changing the theme means editing these few lines.
+Green is the one accent (live, winner, the brand). Red, yellow, blue and cyan
+only ever mean something: an error, a warning, the guess box, a number picked
+once. The font stack starts with Cascadia Mono, which ships with Windows 11
+and Windows Terminal, and falls back through Consolas, Ubuntu Mono and Menlo.
+No web font is downloaded, so no third party sees a visit.
+
+A section header (`.rule`) is its name, a thick rule running to the edge, and
+an optional tag on the right, all from one flex row and a `::after`.
+
+The guess box is blue at rest and turns green while you type in it. A number
+already locked in sits in a green-bordered box with a red "sealed" label.
+
+The chart (`.chart`, `.cols`, `.col`) is a CSS grid of `--n` equal columns,
+`repeat(var(--n), minmax(0, 1fr))`. The tail under it (`.tail`) is a wrapping
+row of bordered chips. In the trends page's day-by-day table, `.barcell` puts
+a short bar (`.minibar`, width `--w`) beside each value, so the column reads
+as a chart without hiding the number.
+Each column is a `.col-track` the height of the plot and a `.col-bar` whose
+height is the server-computed share (`--h`), with a gap that is a percentage
+of the column so it shrinks too. Labels hang below the thick baseline and may
+be wider than their column. The count shows on hover, and the whole column is
+the hover target, so even an empty number reports "nobody".
+
+Motion is in hard steps, never fades: sections switch on one after another
+(`--b` is each section's position, `--beat` the gap), the countdown's bar and
+the trends page's "analysing" bar fill cell by cell, chart columns grow in six
+steps (the stagger is capped, so a wide chart still finishes quickly), and a freshly sealed guess gets its label stamped on in three frames.
+Under `prefers-reduced-motion` every animation is cut to effectively zero.
 
 ```css
 body { min-height: 100vh; display: flex; flex-direction: column; }
-.bar, main, footer { width: 100%; }
-main { align-content: start; }
-footer { margin: auto auto 0; text-align: center; }
+main { flex: 1; }
 ```
 
-The sticky-footer pattern: the body is a full-height column, and the footer's
-`auto` top margin absorbs whatever vertical space is left over, so it sits at
-the bottom on short pages without floating up on long ones. `align-content:
-start` keeps `main`'s grid rows packed at the top rather than spreading to fill
-the height it was given. The `width: 100%` is needed because a column flex
-item's `margin: 0 auto` only centres it once it has a definite width.
-
-```css
-font-variant-numeric: tabular-nums;
-```
-
-Applied to every number. Tabular figures are all the same width, so a ticking
-countdown does not jitter as digits change.
+Keeps the footer at the bottom of short pages without floating it up on long
+ones.
 
 ---
 

@@ -7,6 +7,9 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::SqlitePool;
 
+use crate::demo::{self, DemoGuess};
+use crate::stats::{DayTally, Tally};
+
 pub type Db = SqlitePool;
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -14,6 +17,9 @@ pub struct User {
     pub id: i64,
     pub login: String,
     pub display_name: String,
+    /// The intra avatar, refreshed at every sign-in. Kept although the
+    /// terminal-style pages show no pictures.
+    #[allow(dead_code)]
     pub image_url: Option<String>,
 }
 
@@ -25,14 +31,12 @@ pub struct RoundSummary {
     pub winning_value: Option<i64>,
     pub winner_login: Option<String>,
     pub winner_name: Option<String>,
-    pub winner_image: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct LeaderboardRow {
     pub login: String,
     pub display_name: String,
-    pub image_url: Option<String>,
     pub wins: i64,
 }
 
@@ -252,10 +256,12 @@ pub async fn clear_round(db: &Db, round_date: &str) -> Result<u64> {
     Ok(n)
 }
 
-/// Stand-in players, which are exactly the negative-id users.
+/// Stand-in players you can sign in as: the negative-id users, minus the
+/// generated `bot-###` crowd, which would bury them.
 pub async fn demo_users(db: &Db) -> Result<Vec<User>> {
     let rows = sqlx::query_as::<_, User>(
-        "SELECT id, login, display_name, image_url FROM users WHERE id < 0 ORDER BY login",
+        "SELECT id, login, display_name, image_url FROM users
+         WHERE id < 0 AND login NOT LIKE 'bot-%' ORDER BY login",
     )
     .fetch_all(db)
     .await?;
@@ -287,6 +293,89 @@ pub async fn create_test_user(db: &Db, login: &str) -> Result<User> {
         display_name,
         image_url: None,
     })
+}
+
+// ------------------------------------------------------------ demo history
+
+/// Writes generated history: creates any missing `bot-###` players (negative
+/// ids, like every stand-in) and records their guesses. A bot that already
+/// has a guess for a day keeps it, so running this twice tops up rather than
+/// duplicates. One transaction, so it is quick and all-or-nothing.
+pub async fn insert_demo(db: &Db, guesses: &[DemoGuess]) -> Result<u64> {
+    let mut tx = db.begin().await?;
+    let now = ts(Utc::now());
+
+    let (lowest,): (Option<i64>,) = sqlx::query_as("SELECT MIN(id) FROM users")
+        .fetch_one(&mut *tx)
+        .await?;
+    let mut next_id = lowest.unwrap_or(0).min(0) - 1;
+    let mut ids = Vec::with_capacity(demo::BOTS);
+    for i in 0..demo::BOTS {
+        let login = demo::bot_login(i);
+        let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE login = ?1")
+            .bind(&login)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let id = match existing {
+            Some((id,)) if id < 0 => id,
+            Some(_) => anyhow::bail!("{login} is a real account; refusing to use it as a bot"),
+            None => {
+                let id = next_id;
+                next_id -= 1;
+                sqlx::query(
+                    "INSERT INTO users (id, login, display_name, image_url, created_at, last_seen_at)
+                     VALUES (?1, ?2, ?3, NULL, ?4, ?4)",
+                )
+                .bind(id)
+                .bind(&login)
+                .bind(format!("Bot {:03}", i + 1))
+                .bind(&now)
+                .execute(&mut *tx)
+                .await?;
+                id
+            }
+        };
+        ids.push(id);
+    }
+
+    let mut added = 0;
+    for g in guesses {
+        added += sqlx::query(
+            "INSERT OR IGNORE INTO guesses (round_date, user_id, value, submitted_at, participates)
+             VALUES (?1, ?2, ?3, ?4, 1)",
+        )
+        .bind(&g.round_date)
+        .bind(ids[g.bot])
+        .bind(g.value)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    }
+    tx.commit().await?;
+    Ok(added)
+}
+
+/// Deletes every bot, and with them (ON DELETE CASCADE) every guess they made.
+pub async fn remove_demo(db: &Db) -> Result<u64> {
+    let n = sqlx::query("DELETE FROM users WHERE id < 0 AND login LIKE 'bot-%'")
+        .execute(db)
+        .await?
+        .rows_affected();
+    Ok(n)
+}
+
+/// How many bots exist and how many guesses they hold.
+pub async fn demo_counts(db: &Db) -> Result<(i64, i64)> {
+    let counts: (i64, i64) = sqlx::query_as(
+        "SELECT
+             (SELECT COUNT(*) FROM users WHERE id < 0 AND login LIKE 'bot-%'),
+             (SELECT COUNT(*) FROM guesses g JOIN users u ON u.id = g.user_id
+              WHERE u.id < 0 AND u.login LIKE 'bot-%')",
+    )
+    .fetch_one(db)
+    .await?;
+    Ok(counts)
 }
 
 pub async fn my_guess(db: &Db, round_date: &str, user_id: i64) -> Result<Option<i64>> {
@@ -335,8 +424,7 @@ pub async fn closed_rounds(db: &Db, open_round: &str, limit: i64) -> Result<Vec<
          SELECT r.round_date, r.total,
                 w.value    AS winning_value,
                 u.login    AS winner_login,
-                u.display_name AS winner_name,
-                u.image_url    AS winner_image
+                u.display_name AS winner_name
          FROM rounds r
          LEFT JOIN winners w ON w.round_date = r.round_date
          LEFT JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
@@ -360,8 +448,7 @@ pub async fn round_summary(db: &Db, open_round: &str, date: &str) -> Result<Opti
          SELECT r.round_date, r.total,
                 w.value    AS winning_value,
                 u.login    AS winner_login,
-                u.display_name AS winner_name,
-                u.image_url    AS winner_image
+                u.display_name AS winner_name
          FROM rounds r
          LEFT JOIN winners w ON w.round_date = r.round_date
          LEFT JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
@@ -377,10 +464,43 @@ pub async fn round_summary(db: &Db, open_round: &str, date: &str) -> Result<Opti
     Ok(row)
 }
 
+/// How many players picked each value in a round, lowest value first. Ghosts
+/// are left out, as everywhere else in the game. Callers must only ask about
+/// closed rounds - this does not check, and an open round's numbers are secret.
+pub async fn round_tallies(db: &Db, round_date: &str) -> Result<Vec<Tally>> {
+    let rows = sqlx::query_as::<_, Tally>(
+        "SELECT value, COUNT(*) AS count
+         FROM guesses WHERE round_date = ?1 AND participates = 1
+         GROUP BY value ORDER BY value",
+    )
+    .bind(round_date)
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
+/// Per-day tallies for every closed round from `from` (inclusive) up to the
+/// open round (exclusive), oldest day first. Ghosts are left out. Stopping
+/// before `open_round` is what keeps the open round's numbers secret.
+pub async fn range_tallies(db: &Db, from: &str, open_round: &str) -> Result<Vec<DayTally>> {
+    let rows = sqlx::query_as::<_, DayTally>(
+        "SELECT round_date, value, COUNT(*) AS count
+         FROM guesses
+         WHERE round_date >= ?1 AND round_date < ?2 AND participates = 1
+         GROUP BY round_date, value
+         ORDER BY round_date, value",
+    )
+    .bind(from)
+    .bind(open_round)
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
 pub async fn leaderboard(db: &Db, open_round: &str, limit: i64) -> Result<Vec<LeaderboardRow>> {
     let sql = format!(
         "{WINNER_CTE}
-         SELECT u.login, u.display_name, u.image_url, COUNT(*) AS wins
+         SELECT u.login, u.display_name, COUNT(*) AS wins
          FROM winners w
          JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
                         AND g.participates = 1
@@ -553,6 +673,66 @@ mod tests {
         let board = leaderboard(&t.db, "2026-09-06", 10).await.unwrap();
         assert_eq!(board.len(), 2);
         assert!(board.iter().all(|r| r.wins == 1));
+    }
+
+    #[tokio::test]
+    async fn tallies_count_each_value_once_per_round_and_skip_ghosts() {
+        let t = temp_db().await;
+        seed(&t.db, "2026-09-05", &[(1, 3), (2, 1), (3, 3)]).await;
+        seed(&t.db, "2026-09-06", &[(1, 1)]).await; // another round
+        upsert_user(&t.db, -1, "ghosty", "Ghosty", None)
+            .await
+            .unwrap();
+        insert_guess(&t.db, "2026-09-05", -1, 2, false).await.unwrap();
+
+        let tallies = round_tallies(&t.db, "2026-09-05").await.unwrap();
+        assert_eq!(
+            tallies,
+            [Tally { value: 1, count: 1 }, Tally { value: 3, count: 2 }]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_range_stops_before_the_open_round() {
+        let t = temp_db().await;
+        seed(&t.db, "2026-09-04", &[(1, 1)]).await; // before the range
+        seed(&t.db, "2026-09-05", &[(1, 2), (2, 2)]).await;
+        seed(&t.db, "2026-09-06", &[(1, 5)]).await;
+        seed(&t.db, "2026-09-07", &[(1, 9)]).await; // still open
+
+        let rows = range_tallies(&t.db, "2026-09-05", "2026-09-07").await.unwrap();
+        let got: Vec<(&str, i64, i64)> = rows
+            .iter()
+            .map(|r| (r.round_date.as_str(), r.value, r.count))
+            .collect();
+        assert_eq!(got, [("2026-09-05", 2, 2), ("2026-09-06", 5, 1)]);
+    }
+
+    #[tokio::test]
+    async fn demo_history_goes_in_and_comes_back_out_cleanly() {
+        let t = temp_db().await;
+        seed(&t.db, "2026-09-05", &[(1, 3)]).await; // a real player
+        create_test_user(&t.db, "alice").await.unwrap(); // a hand-made stand-in
+
+        let guesses = vec![
+            DemoGuess { round_date: "2026-09-05".into(), bot: 0, value: 3 },
+            DemoGuess { round_date: "2026-09-05".into(), bot: 1, value: 7 },
+            DemoGuess { round_date: "2026-09-04".into(), bot: 0, value: 1 },
+        ];
+        assert_eq!(insert_demo(&t.db, &guesses).await.unwrap(), 3);
+        // Running it again adds nothing: those bots already guessed those days.
+        assert_eq!(insert_demo(&t.db, &guesses).await.unwrap(), 0);
+        assert_eq!(demo_counts(&t.db).await.unwrap(), (demo::BOTS as i64, 3));
+
+        // Bots stay out of the sign-in-as list.
+        let listed: Vec<String> = demo_users(&t.db).await.unwrap().into_iter().map(|u| u.login).collect();
+        assert_eq!(listed, ["alice"]);
+
+        remove_demo(&t.db).await.unwrap();
+        assert_eq!(demo_counts(&t.db).await.unwrap(), (0, 0));
+        // The real player's guess and the hand-made stand-in survive.
+        assert_eq!(guess_count(&t.db, "2026-09-05").await.unwrap(), 1);
+        assert!(user_by_login(&t.db, "alice").await.unwrap().is_some());
     }
 
     #[tokio::test]

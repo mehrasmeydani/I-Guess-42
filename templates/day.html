@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ round.date_key }} &middot; i guess low{% endblock %}
+{% block nav_results %}on{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>round {{ round.date_key }}</span><span class="tag">closed</span></h2>
+  <div class="figures">
+    {% match round.winner %}
+      {% when Some with (w) %}<p><b class="win">{{ w.value_label }}</b><span>won &larr; {{ w.login }}</span></p>
+      {% when None %}<p><b class="lose">&times;</b><span>no winner. every number collided</span></p>
+    {% endmatch %}
+    <p><b>{{ lowest_unpicked_label }}</b><span>lowest number nobody picked</span></p>
+    <p><b>{{ round.total }}</b><span>players, {{ distinct }} different {% if distinct == 1 %}number{% else %}numbers{% endif %}</span></p>
+  </div>
+</section>
+
+<section class="sec" style="--b: 1">
+  <h2 class="rule"><span>spread</span><a class="tag" href="/trends">trends &rarr;</a></h2>
+  <p class="legend">
+    <span><i class="win">█</i> winner</span>
+    <span><i class="once">█</i> picked by one player</span>
+    <span><i class="many">█</i> shared</span>
+  </p>
+  {% include "chart.html" %}
+</section>
+
+<div class="split">
+  <section class="sec" style="--b: 2">
+    <h2 class="rule"><span>most picked</span></h2>
+    <ol class="ranked">
+      {% for t in most %}
+        <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
+      {% endfor %}
+    </ol>
+  </section>
+  <section class="sec" style="--b: 2">
+    <h2 class="rule"><span>least picked</span></h2>
+    <ol class="ranked">
+      {% for t in least %}
+        <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
+      {% endfor %}
+    </ol>
+  </section>
+</div>
+
+<section class="sec" style="--b: 3">
+  <details>
+    <summary>every number picked ({{ distinct }})</summary>
+    <table class="grid narrow">
+      <thead><tr><th class="num">number</th><th class="num">players</th></tr></thead>
+      <tbody>
+        {% for t in all %}
+          <tr><td class="num">{{ t.value_label }}</td><td class="num">{{ t.count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</section>
+{% endblock %}
