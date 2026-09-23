@@ -3,26 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0c0c0c">
+  <meta name="theme-color" content="#0b0d10">
   <title>{% block title %}i guess low{% endblock %}</title>
+  <link rel="preload" href="/static/fonts/InstrumentSans-Regular.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="preload" href="/static/fonts/JetBrainsMono-Bold.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <a class="skip" href="#main">skip to content</a>
+  <a class="skip" href="#main">Skip to content</a>
 
   {% if test_mode %}
   <div class="testbanner">
-    <b>test instance</b> &mdash;
+    <span class="testbanner-tag">Test instance</span>
     {% if impersonating %}
-      signed in as a demo account.
+      You are signed in as a demo account.
       <form method="post" action="/admin/return" class="inline">
-        <button type="submit" class="linkish">back to mine</button>
+        <button type="submit" class="linkish">Back to my account</button>
       </form>
     {% else %}
-      not the live game.
+      This is not the live game.
       {% match user %}
-        {% when Some with (_u) %}<a href="/admin">admin</a>
+        {% when Some with (_u) %}<a href="/admin">Open admin</a>
         {% when None %}
       {% endmatch %}
     {% endif %}
@@ -30,25 +32,27 @@
   {% endif %}
 
   <header class="top">
-    <a class="brand" href="/">i guess <b>low</b></a>
-    <nav aria-label="main">
-      <a {% block nav_round %}{% endblock %} href="/">round</a>
-      <a {% block nav_results %}{% endblock %} href="/results">results</a>
-      <a {% block nav_trends %}{% endblock %} href="/trends">trends</a>
-    </nav>
-    <div class="status">
-      {# The spinner glyphs are decoration; only the one-off message is read out. #}
-      <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>
-      <span class="clock"></span>
-      {% match user %}
-        {% when Some with (u) %}
-          <span class="me">{{ u.login }}</span>
-          <form method="post" action="/logout" class="inline">
-            <button class="linkish out" type="submit">sign out</button>
-          </form>
-        {% when None %}
-          <a class="signin" href="/login">sign in</a>
-      {% endmatch %}
+    <div class="top-inner">
+      <a class="brand" href="/" aria-label="i guess low, home"><span>i guess</span><b>low</b></a>
+      <nav aria-label="Main">
+        <a {% block nav_round %}{% endblock %} href="/">Today</a>
+        <a {% block nav_results %}{% endblock %} href="/results">Results</a>
+        <a {% block nav_trends %}{% endblock %} href="/trends">Trends</a>
+      </nav>
+      <div class="status">
+        {# The spinner glyphs are decoration; only the one-off message is read out. #}
+        <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>
+        <span class="clock" title="Vienna time"></span>
+        {% match user %}
+          {% when Some with (u) %}
+            <span class="me" title="{{ u.display_name }}">{{ u.login }}</span>
+            <form method="post" action="/logout" class="inline">
+              <button class="btn-quiet" type="submit">Sign out</button>
+            </form>
+          {% when None %}
+            <a class="btn-quiet" href="/login">Sign in</a>
+        {% endmatch %}
+      </div>
     </div>
   </header>
 
@@ -58,9 +62,10 @@
   </main>
 
   <footer>
-    <span>lowest unique number wins</span>
-    <span>every day 12:42 vienna</span>
-    <span>made by students, for students</span>
+    <div class="foot-inner">
+      <span><b>i guess low</b> &middot; the lowest number nobody else picked wins</span>
+      <span>New round every day at 12:42, Vienna time</span>
+    </div>
   </footer>
 </body>
 </html>

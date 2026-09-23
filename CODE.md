@@ -1810,64 +1810,46 @@ enough that a toolchain would cost more than it saves.
 
 ### `style.css`
 
-Plain CSS, no framework. The look is a terminal's materials in a brutalist
-layout: Cascadia Mono and Windows Terminal's default "Campbell" colours,
-set with thick 2px rules, huge numbers and hard edges. Nothing is rounded,
-nothing glows, nothing fades.
+Plain CSS, no framework. The visual rules (voice, colours with their measured
+contrast, type, spacing, motion) are written down in
+**[docs/brand-guidelines.md](docs/brand-guidelines.md)**; the stylesheet
+implements them.
 
-```css
-:root { --bg: #0c0c0c; --fg: #cccccc; --green: #16c60c; --blue: #3b78ff; ... }
-```
+Tokens come in three layers at the top of the file. **Primitives** are raw
+values named by what they are (`--gray-900`, `--green-500`, the 4px spacing
+scale, the 12-to-72px type scale). **Semantic** tokens name a role
+(`--surface`, `--text-muted`, `--accent`, `--danger`). **Component** tokens are
+per-component knobs (`--btn-primary-bg`, `--guess-border`, `--chart-win`).
+Component rules only use the last two, so a colour changes in one place.
 
-Green is the one accent (live, winner, the brand). Red, yellow, blue and cyan
-only ever mean something: an error, a warning, the guess box, a number picked
-once. The font stack starts with Cascadia Mono, which ships with Windows 11
-and Windows Terminal, and falls back through Consolas, Ubuntu Mono and Menlo.
-No web font is downloaded, so no third party sees a visit.
+Two fonts, both served from `static/fonts` under the SIL Open Font Licence so
+no third party sees a visit: Instrument Sans for reading, JetBrains Mono for
+every number (tabular figures, so the countdown does not jitter).
 
-A section header (`.rule`) is its name, a thick rule running to the edge, and
-an optional tag on the right, all from one flex row and a `::after`.
+Buttons come in three kinds (`.btn-primary`, `.btn-secondary`, `.btn-quiet`),
+each with hover, pressed, focus and busy states. Pages are built from a
+`.page-head`, `.panel`s with a `.panel-title`, `.stats` cards, `.table`s and a
+`.segmented` switch for ranges.
 
-The guess box is blue at rest and turns green while you type in it. A number
-already locked in sits in a green-bordered box with a red "sealed" label.
+The chart (`.chart`, `.cols`, `.col`) is a CSS grid of `--n` equal columns
+over faint 25% gridlines; each `.col-bar` takes its height from the
+server-computed `--h`. The tail under it (`.tail`) is a wrapping row of pills.
 
-The chart (`.chart`, `.cols`, `.col`) is a CSS grid of `--n` equal columns,
-`repeat(var(--n), minmax(0, 1fr))`. The tail under it (`.tail`) is a wrapping
-row of bordered chips. In the trends page's day-by-day table, `.barcell` puts
-a short bar (`.minibar`, width `--w`) beside each value, so the column reads
-as a chart without hiding the number.
-Each column is a `.col-track` the height of the plot and a `.col-bar` whose
-height is the server-computed share (`--h`), with a gap that is a percentage
-of the column so it shrinks too. Labels hang below the thick baseline and may
-be wider than their column. The count shows on hover, and the whole column is
-the hover target, so even an empty number reports "nobody".
+Accessibility is built in: a 2px focus ring on everything, a skip link, a
+hidden `h1` per page, 44px targets on phones, 16px minimum text, notices that
+say "Error." / "Done." / "Heads up." in words as well as colour, and a
+spinner that announces its message once.
 
-Accessibility is part of the look, not an afterthought. Secondary text
-(`--dim`, `#8f8f8f`) is 6:1 against the background; every colour used for text
-is at least 4.5:1. Everything reachable by keyboard gets the same 3px green
-`:focus-visible` ring, a "skip to content" link appears on the first Tab, and
-each page has a (visually hidden) `h1`. Navigation links, the range switches,
-fold-out toggles and the account button are at least 44px tall, and on touch
-screens (`pointer: coarse`) the smaller controls grow to 44px too. Text stays
-16px on phones, because iOS zooms into any input set smaller. The winner is
-marked on the chart by a ▼ as well as by colour. The loading spinner writes
-its glyphs into an `aria-hidden` span and its message once into a
-`role="status"` span, so a screen reader says "loading /results" once instead
-of reading every frame.
-
-Motion is in hard steps, never fades: sections switch on one after another
-(`--b` is each section's position, `--beat` the gap), the countdown's bar and
-the trends page's "analysing" bar fill cell by cell, chart columns grow in six
-steps (the stagger is capped, so a wide chart still finishes quickly), and a freshly sealed guess gets its label stamped on in three frames.
-Under `prefers-reduced-motion` every animation is cut to effectively zero.
+Motion is quiet: sections fade up 8px on arrival (240ms, 50ms apart), chart
+bars grow, the live dot pulses, hovers take 150ms. `prefers-reduced-motion`
+turns all of it off.
 
 ```css
 body { min-height: 100vh; display: flex; flex-direction: column; }
 main { flex: 1; }
 ```
 
-Keeps the footer at the bottom of short pages without floating it up on long
-ones.
+Keeps the footer at the bottom of short pages.
 
 ---
 

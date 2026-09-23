@@ -7,15 +7,12 @@
   var left = parseInt(el.dataset.seconds, 10);
   if (!isFinite(left)) return;
 
-  // Same flat-24-hour bar as stats::progress_bar in stats.rs.
-  var bar = document.querySelector('.meter-bar');
+  // Same flat-24-hour share as stats::progress_bar in stats.rs.
+  var bar = document.querySelector('.meter-fill');
   var pct = document.querySelector('.meter-pct');
   var DAY = 24 * 60 * 60;
-  var CELLS = 30;
 
   function pad(n) { return n < 10 ? '0' + n : String(n); }
-
-  function repeat(ch, n) { return new Array(n + 1).join(ch); }
 
   function label(total) {
     if (total <= 0) return 'closing…';
@@ -28,9 +25,9 @@
   function render() {
     el.textContent = label(left);
     var done = Math.min(Math.max(DAY - left, 0), DAY);
-    var filled = Math.floor(done * CELLS / DAY);
-    if (bar) bar.textContent = '[' + repeat('#', filled) + repeat('-', CELLS - filled) + ']';
-    if (pct) pct.textContent = Math.floor(done * 100 / DAY) + '%';
+    var share = Math.floor(done * 100 / DAY);
+    if (bar) bar.style.width = share + '%';
+    if (pct) pct.textContent = share + '% of the day gone';
   }
 
   render();
@@ -53,41 +50,31 @@
   var fmt = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Vienna', hour: '2-digit', minute: '2-digit'
   });
-  function tick() { el.textContent = fmt.format(new Date()) + ' vienna'; }
+  function tick() { el.textContent = fmt.format(new Date()) + ' Vienna'; }
   tick();
   setInterval(tick, 10 * 1000);
 })();
 
-// Loading feedback, the way a CLI does it: a braille spinner in the header
-// while the next page loads, and in the button that sent a form. Also
-// stops a double click from sending the same form twice.
+// Loading feedback: a small spinner and a message in the header while the
+// next page loads, and "Sending…" on the button that sent a form. Also stops
+// a double click from sending the same form twice.
 (function () {
-  var FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
-  // Frames go to .spin, which is hidden from screen readers; the message goes
-  // once to .busy-text (role=status), so it is announced once, not 12x a second.
+  // The spinner (.spin) is hidden from screen readers; the message goes once
+  // to .busy-text (role=status), so it is announced once.
   var glyph = document.querySelector('.busy .spin');
   var status = document.querySelector('.busy .busy-text');
-  var timer = null;
   var busyButton = null;
   var busyLabel = '';
 
   function spin(text) {
-    var i = 0;
     stop();
     if (status) status.textContent = text;
-    function frame() {
-      var f = FRAMES.charAt(i++ % FRAMES.length);
-      if (glyph) glyph.textContent = f;
-      if (busyButton) busyButton.textContent = f + ' sending';
-    }
-    frame();
-    timer = setInterval(frame, 80);
+    if (glyph) glyph.classList.add('spinning');
+    if (busyButton) busyButton.textContent = 'Sending…';
   }
 
   function stop() {
-    if (timer) clearInterval(timer);
-    timer = null;
-    if (glyph) glyph.textContent = '';
+    if (glyph) glyph.classList.remove('spinning');
     if (status) status.textContent = '';
   }
 
@@ -99,7 +86,7 @@
     var url = new URL(a.href, location.href);
     if (url.origin !== location.origin) return;
     if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
-    spin(url.pathname === '/login' ? 'connecting to intra' : 'loading ' + url.pathname);
+    spin(url.pathname === '/login' ? 'Connecting to 42…' : 'Loading…');
   });
 
   document.addEventListener('submit', function (e) {
@@ -120,7 +107,7 @@
       busyButton.setAttribute('aria-busy', 'true');
       busyButton.setAttribute('aria-label', 'sending');
     }
-    spin('sending ' + (form.getAttribute('action') || location.pathname));
+    spin(form.method.toLowerCase() === 'get' ? 'Loading…' : 'Sending…');
   });
 
   // Coming back with the Back button can restore this page from memory,
