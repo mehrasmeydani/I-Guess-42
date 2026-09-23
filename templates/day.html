@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ round.date_key }} &middot; i guess low{% endblock %}
-{% block nav_results %}on{% endblock %}
+{% block h1 %}round {{ round.date_key }}{% endblock %}
+{% block nav_results %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
 <section class="sec" style="--b: 0">
@@ -18,7 +19,7 @@
 <section class="sec" style="--b: 1">
   <h2 class="rule"><span>spread</span><a class="tag" href="/trends">trends &rarr;</a></h2>
   <p class="legend">
-    <span><i class="win">█</i> winner</span>
+    <span><i class="win">&#9660;█</i> winner</span>
     <span><i class="once">█</i> picked by one player</span>
     <span><i class="many">█</i> shared</span>
   </p>

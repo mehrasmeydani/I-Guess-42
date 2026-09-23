@@ -1842,6 +1842,19 @@ of the column so it shrinks too. Labels hang below the thick baseline and may
 be wider than their column. The count shows on hover, and the whole column is
 the hover target, so even an empty number reports "nobody".
 
+Accessibility is part of the look, not an afterthought. Secondary text
+(`--dim`, `#8f8f8f`) is 6:1 against the background; every colour used for text
+is at least 4.5:1. Everything reachable by keyboard gets the same 3px green
+`:focus-visible` ring, a "skip to content" link appears on the first Tab, and
+each page has a (visually hidden) `h1`. Navigation links, the range switches,
+fold-out toggles and the account button are at least 44px tall, and on touch
+screens (`pointer: coarse`) the smaller controls grow to 44px too. Text stays
+16px on phones, because iOS zooms into any input set smaller. The winner is
+marked on the chart by a ▼ as well as by colour. The loading spinner writes
+its glyphs into an `aria-hidden` span and its message once into a
+`role="status"` span, so a screen reader says "loading /results" once instead
+of reading every frame.
+
 Motion is in hard steps, never fades: sections switch on one after another
 (`--b` is each section's position, `--beat` the gap), the countdown's bar and
 the trends page's "analysing" bar fill cell by cell, chart columns grow in six

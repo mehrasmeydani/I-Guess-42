@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Results &middot; i guess low{% endblock %}
-{% block nav_results %}on{% endblock %}
+{% block h1 %}results{% endblock %}
+{% block nav_results %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
 <section class="sec" style="--b: 0">
@@ -47,16 +48,20 @@
   </h2>
 
   <div class="finders">
-    <form method="get" action="/results" class="finder">
-      <label class="sr" for="q">search rounds</label>
-      <input id="q" name="q" type="text" value="{{ q }}" placeholder="login, number or 2026-08"
-             autocomplete="off" spellcheck="false">
-      <button type="submit">search</button>
+    <form method="get" action="/results" class="finder" role="search">
+      <label for="q">search rounds</label>
+      <div class="finder-row">
+        <input id="q" name="q" type="search" value="{{ q }}" placeholder="login, number or 2026-08"
+               autocomplete="off" spellcheck="false" enterkeyhint="search">
+        <button type="submit">search</button>
+      </div>
     </form>
     <form method="get" action="/results" class="finder">
-      <label class="sr" for="date">go to a day</label>
-      <input id="date" name="date" type="date">
-      <button type="submit">go to day</button>
+      <label for="date">go to a day</label>
+      <div class="finder-row">
+        <input id="date" name="date" type="date" required>
+        <button type="submit">open</button>
+      </div>
     </form>
   </div>
 
@@ -86,7 +91,7 @@
         {% endfor %}
       </tbody>
     </table>
-    <p class="dim listed">
+    <p class="dim listed" role="status">
       {% if q.is_empty() %}
         {{ rounds.len() }} of {{ total_rounds }} rounds.
         {% if rounds.len() < total_rounds %}

@@ -9,7 +9,8 @@
   --bg: #0c0c0c;
   --fg: #cccccc;
   --hi: #f2f2f2;
-  --dim: #767676;
+  /* 6:1 on --bg. Anything darker fails WCAG AA for body-size text. */
+  --dim: #8f8f8f;
   --line: #cccccc;
   --red: #e74856;
   --green: #16c60c;
@@ -20,7 +21,7 @@
     Menlo, monospace;
   --rule: 2px solid var(--line);
   /* Sections print one after another, this far apart. */
-  --beat: 110ms;
+  --beat: 80ms;
 }
 
 * { box-sizing: border-box; }
@@ -30,6 +31,7 @@ html { background: var(--bg); }
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -71,15 +73,39 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .brand b { padding: 0 6px; margin-left: 2px; background: var(--green); color: var(--bg); }
 .brand:hover { background: none; color: var(--hi); }
 
-.top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; }
-.top nav a { color: var(--fg); text-decoration: none; }
-.top nav a.on { background: var(--hi); color: var(--bg); padding: 0 6px; margin: 0 -6px; }
+.top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+/* Nav targets are at least 44px tall, whatever the text size. */
+.top nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 10px;
+  color: var(--fg);
+  text-decoration: none;
+}
+.top nav a.on { background: var(--hi); color: var(--bg); font-weight: 700; }
 .top nav a:hover { background: var(--hi); color: var(--bg); }
-.top nav form { margin: 0; }
 
-.status { margin-left: auto; color: var(--dim); white-space: nowrap; }
+.status { display: flex; align-items: center; gap: 14px; margin-left: auto; color: var(--dim); white-space: nowrap; }
+.status form { margin: 0; }
 .busy { color: var(--green); }
-.busy:not(:empty) { margin-right: 14px; }
+.spin:empty { display: none; }
+.busy-text:empty { display: none; }
+.busy-text { margin-left: 6px; }
+.me { color: var(--hi); }
+/* Sign-out sits apart from the navigation, and looks like what it is. */
+.status .out,
+.status .signin {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--dim);
+  color: var(--fg);
+  text-decoration: none;
+}
+.status .out:hover,
+.status .signin:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
 
 main { flex: 1; padding-block: 8px 64px; }
 
@@ -162,7 +188,7 @@ input[type="text"] {
   font: 700 2rem/1 var(--font);
   caret-color: var(--green);
 }
-input[type="text"]::placeholder { color: #3a3a3a; }
+input::placeholder { color: #6f6f6f; }
 /* Blue at rest, green while you type in it. */
 input[type="text"]:focus { outline: none; border-color: var(--green); }
 
@@ -182,7 +208,9 @@ button,
 button:hover,
 .btn:hover,
 button:focus-visible,
-.btn:focus-visible { background: var(--green); border-color: var(--green); color: var(--bg); outline: none; }
+.btn:focus-visible { background: var(--green); border-color: var(--green); color: var(--bg); }
+button:active,
+.btn:active { translate: 0 1px; }
 .guessform button { font-size: 1.1rem; }
 
 .btn.ghost,
@@ -265,7 +293,8 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   list-style: none;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  /* Always three across, so the top three read as one line, even on a phone. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-top: var(--rule);
   border-bottom: var(--rule);
   margin-bottom: 12px;
@@ -278,9 +307,11 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 .podium .p1 .rank, .podium .p1 .wins { color: var(--green); }
 
 /* Search and jump-to-day, side by side. */
-.finders { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-bottom: 16px; }
-.finder { display: flex; }
-.finder input[type="text"],
+.finders { display: flex; flex-wrap: wrap; gap: 14px 28px; margin-bottom: 18px; }
+.finder { display: flex; flex-direction: column; gap: 6px; flex: 1 1 260px; max-width: 420px; }
+.finder label { color: var(--dim); }
+.finder-row { display: flex; }
+.finder input[type="search"],
 .finder input[type="date"] {
   flex: 1 1 200px;
   padding: 6px 10px;
@@ -291,8 +322,8 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   font: inherit;
   color-scheme: dark;
 }
-.finder input:focus { outline: none; border-color: var(--green); }
-.finder button { padding: 6px 14px; }
+.finder input:focus { border-color: var(--green); }
+.finder button { padding: 8px 16px; }
 .listed { margin-top: 10px; }
 
 .leaders { list-style: none; padding: 0; border-top: var(--rule); }
@@ -358,7 +389,11 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 .barcell.win .minibar { background: var(--green); }
 .barcell.win b { color: var(--green); }
 
-details summary { cursor: pointer; color: var(--hi); font-weight: 700; }
+details summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--hi); font-weight: 700; list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+/* The disclosure state, drawn explicitly since the native marker is gone. */
+details summary::before { content: "+"; width: 2ch; color: var(--green); }
+details[open] summary::before { content: "-"; }
 details summary:hover { color: var(--green); }
 details[open] summary { margin-bottom: 12px; }
 
@@ -378,7 +413,8 @@ details[open] summary { margin-bottom: 12px; }
 /* Every pick above the chart, one chip per number. */
 .tail-head { margin: 6px 0 8px; color: var(--hi); font-weight: 700; }
 .tail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.tail li { padding: 1px 7px; border: 1px solid #3a3a3a; white-space: nowrap; }
+.tail li { padding: 3px 8px; border: 1px solid #3a3a3a; white-space: nowrap; }
+.tail .won-tag { color: var(--green); font-weight: 700; }
 .tail li b { color: var(--cyan); font-weight: 700; }
 .tail li span { margin-left: 4px; color: var(--dim); }
 .tail li.won { border-color: var(--green); }
@@ -409,7 +445,7 @@ details[open] summary { margin-bottom: 12px; }
   display: block;
   translate: -50% 0;
   color: var(--dim);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 .chart { margin-bottom: 1.6em; }
@@ -431,12 +467,33 @@ details[open] summary { margin-bottom: 12px; }
 .many .col-bar { background: var(--blue); }
 .col:hover .col-c { visibility: visible; }
 .col:hover .col-n span { color: var(--hi); }
+/* The winner is marked by a shape as well as by colour. */
+.col-mark {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  translate: -50% 0;
+  color: var(--green);
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+.col:hover .col-mark { visibility: hidden; }
 .col:hover .col-bar { filter: brightness(1.35); }
 
 /* --------------------------------------------------------------- trends */
 
 .ranges { display: flex; gap: 10px; font-weight: 400; }
-.ranges a { color: var(--fg); text-decoration: none; padding: 0 6px; border: 1px solid var(--dim); }
+.ranges a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--dim);
+  color: var(--fg);
+  text-decoration: none;
+}
 .ranges a.on { background: var(--hi); border-color: var(--hi); color: var(--bg); font-weight: 700; }
 
 .analyse { color: var(--dim); }
@@ -511,10 +568,56 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 
 button.is-busy { pointer-events: none; }
 
+
+/* ---------------------------------------------------------- accessibility */
+
+/* One visible focus ring for everything reachable by keyboard. */
+:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
+main:focus { outline: none; }
+
+a, button, summary, input, label { touch-action: manipulation; }
+
+.skip {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 100;
+  padding: 10px 14px;
+  background: var(--green);
+  color: var(--bg);
+  font-weight: 700;
+  text-decoration: none;
+}
+.skip:focus { top: 12px; }
+
+.rule label { cursor: pointer; }
+
+/* Your own status on the home page. */
+.figures .you b { color: var(--fg); }
+.figures .you.in b { color: var(--green); }
+
+/* Keep running text to a readable measure. */
+.sec > p.dim, .notice, .message, .rules { max-width: 72ch; }
+
+/* Coarse pointers (phones) get the full 44px on every small control. */
+@media (pointer: coarse) {
+  .ranges a { min-height: 44px; }
+  .tail li { padding: 8px 10px; }
+  .finder button, .finder input { min-height: 44px; }
+}
+
 @media (max-width: 640px) {
-  body { font-size: 14px; }
   .top, main, footer { padding-inline: 14px; }
   .status .clock { display: none; }
+  /* Two rows on a phone: brand and account, then the navigation. */
+  .top { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
+  .top nav { grid-column: 1 / -1; grid-row: 2; margin: 0 -10px; }
+  .status { margin-left: 0; gap: 10px; }
+  .me { display: none; }
+  .podium li { padding: 10px 8px 10px 0; }
+  .podium li + li { padding-left: 10px; }
+  .podium .wins { font-size: 2rem; }
+  .podium .dim { display: none; }
   .figures p + p { padding-left: 0; border-left: 0; border-top: 1px solid #2a2a2a; }
   .sealed { display: block; }
   .kv { grid-template-columns: 1fr; gap: 0; }

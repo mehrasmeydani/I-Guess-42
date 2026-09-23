@@ -63,7 +63,10 @@
 // stops a double click from sending the same form twice.
 (function () {
   var FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
-  var status = document.querySelector('.busy');
+  // Frames go to .spin, which is hidden from screen readers; the message goes
+  // once to .busy-text (role=status), so it is announced once, not 12x a second.
+  var glyph = document.querySelector('.busy .spin');
+  var status = document.querySelector('.busy .busy-text');
   var timer = null;
   var busyButton = null;
   var busyLabel = '';
@@ -71,9 +74,10 @@
   function spin(text) {
     var i = 0;
     stop();
+    if (status) status.textContent = text;
     function frame() {
       var f = FRAMES.charAt(i++ % FRAMES.length);
-      if (status) status.textContent = f + ' ' + text;
+      if (glyph) glyph.textContent = f;
       if (busyButton) busyButton.textContent = f + ' sending';
     }
     frame();
@@ -83,6 +87,7 @@
   function stop() {
     if (timer) clearInterval(timer);
     timer = null;
+    if (glyph) glyph.textContent = '';
     if (status) status.textContent = '';
   }
 
@@ -111,6 +116,9 @@
     if (busyButton) {
       busyLabel = busyButton.textContent;
       busyButton.classList.add('is-busy');
+      // Screen readers hear "sending", not a new braille frame every 80ms.
+      busyButton.setAttribute('aria-busy', 'true');
+      busyButton.setAttribute('aria-label', 'sending');
     }
     spin('sending ' + (form.getAttribute('action') || location.pathname));
   });
@@ -123,6 +131,8 @@
     if (busyButton) {
       busyButton.textContent = busyLabel;
       busyButton.classList.remove('is-busy');
+      busyButton.removeAttribute('aria-busy');
+      busyButton.removeAttribute('aria-label');
       busyButton = null;
     }
     document.querySelectorAll('form[data-sent]').forEach(function (f) { delete f.dataset.sent; });
