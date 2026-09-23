@@ -5,6 +5,22 @@
  * edges, nothing rounded, nothing glowing, nothing faded. Green is the one
  * accent; red, yellow and blue only ever mean something. */
 
+/* Cascadia Mono comes with Windows; everyone else gets JetBrains Mono, served
+   from here (SIL Open Font License), so the terminal look holds on every
+   device. Neither is downloaded on Windows. */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/static/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/static/fonts/JetBrainsMono-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+
 :root {
   --bg: #0c0c0c;
   --fg: #cccccc;
@@ -17,8 +33,7 @@
   --yellow: #c19c00;
   --blue: #3b78ff;
   --cyan: #61d6d6;
-  --font: "Cascadia Mono", "Cascadia Code", Consolas, "Ubuntu Mono", "DejaVu Sans Mono",
-    Menlo, monospace;
+  --font: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, Menlo, monospace;
   --rule: 2px solid var(--line);
   /* Sections print one after another, this far apart. */
   --beat: 80ms;
@@ -36,7 +51,7 @@ body {
   flex-direction: column;
   background: var(--bg);
   color: var(--fg);
-  font: 15px/1.5 var(--font);
+  font: 16px/1.5 var(--font);
   font-variant-ligatures: none;
   -webkit-font-smoothing: antialiased;
 }
@@ -409,7 +424,6 @@ details[open] summary { margin-bottom: 12px; }
    thinner each column, down to a pixel. They stand on a thick baseline. */
 .chart { position: relative; padding-top: 22px; }
 .chart-max { position: absolute; top: 0; left: 0; color: var(--dim); font-size: 0.8rem; }
-.chart-max::after { content: " picks"; }
 /* Every pick above the chart, one chip per number. */
 .tail-head { margin: 6px 0 8px; color: var(--hi); font-weight: 700; }
 .tail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
@@ -425,6 +439,9 @@ details[open] summary { margin-bottom: 12px; }
   grid-template-columns: repeat(var(--n), minmax(0, 1fr));
   height: 300px;
   border-bottom: var(--rule);
+  /* Faint lines at each quarter of the scale, so heights can be compared. */
+  background-image: linear-gradient(to top, #262626 1px, transparent 1px);
+  background-size: 100% 25%;
 }
 .col { position: relative; display: flex; flex-direction: column; min-width: 0; }
 /* The plot area; a bar's height is a share of it. */
@@ -599,6 +616,14 @@ a, button, summary, input, label { touch-action: manipulation; }
 /* Keep running text to a readable measure. */
 .sec > p.dim, .notice, .message, .rules { max-width: 72ch; }
 
+
+/* Headings wrap into balanced lines; running text avoids one-word last lines. */
+.rule span, .question, .message { text-wrap: balance; }
+p, li { text-wrap: pretty; }
+
+/* Table rows light up under the pointer, to keep your place along a row. */
+.grid tbody tr:hover td, .history tbody tr:hover td { background: #161616; }
+
 /* Coarse pointers (phones) get the full 44px on every small control. */
 @media (pointer: coarse) {
   .ranges a { min-height: 44px; }
@@ -618,7 +643,12 @@ a, button, summary, input, label { touch-action: manipulation; }
   .podium li + li { padding-left: 10px; }
   .podium .wins { font-size: 2rem; }
   .podium .dim { display: none; }
-  .figures p + p { padding-left: 0; border-left: 0; border-top: 1px solid #2a2a2a; }
+  .figures { grid-template-columns: 1fr 1fr; }
+  .figures p + p { padding-left: 0; border-left: 0; }
+  .figures p:nth-child(2) { padding-left: 14px; border-left: 1px solid #2a2a2a; }
+  .figures p:nth-child(3) { grid-column: 1 / -1; border-top: 1px solid #2a2a2a; }
+  .figures b { font-size: 2rem; }
+  .grid { display: block; overflow-x: auto; }
   .sealed { display: block; }
   .kv { grid-template-columns: 1fr; gap: 0; }
   .kv dd { margin-bottom: 6px; }

@@ -2,7 +2,7 @@
    number over the range where the bulk of the picks fall, then every higher
    pick listed with its count. Nothing is grouped and nothing is left out. #}
 <div class="chart" role="img" aria-label="Picks for each number from 1 to {{ chart.span }}; higher picks are listed below.">
-  <span class="chart-max">{{ chart.max }}</span>
+  <span class="chart-max">{{ chart.max }} picks</span>
   <div class="cols" style="--n: {{ chart.span }}">
     {% for c in chart.columns %}
       <div class="col {{ c.kind }}" title="{{ c.title }}" style="--h: {{ c.pct }}%; --i: {{ loop.index0 }}">
