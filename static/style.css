@@ -2,8 +2,12 @@
  *
  * A terminal's materials - Cascadia Mono and Windows Terminal's "Campbell"
  * colours - set in a brutalist layout: thick rules, huge numbers, hard
- * edges, nothing rounded, nothing glowing, nothing faded. Green is the one
- * accent; red, yellow and blue only ever mean something. */
+ * edges, nothing rounded, nothing glowing, nothing faded.
+ *
+ * Three colours, taken from the bash prompt in that terminal: green (the
+ * user@host part), blue (the path) and white (the text), with grey as a
+ * dimmer white. Red is the one extra, and only ever means "went down" or
+ * "something is wrong". */
 
 /* Cascadia Mono comes with Windows; everyone else gets JetBrains Mono, served
    from here (SIL Open Font License), so the terminal look holds on every
@@ -30,9 +34,7 @@
   --line: #cccccc;
   --red: #e74856;
   --green: #16c60c;
-  --yellow: #c19c00;
   --blue: #3b78ff;
-  --cyan: #61d6d6;
   --font: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, Menlo, monospace;
   --rule: 2px solid var(--line);
   /* Sections print one after another, this far apart. */
@@ -154,7 +156,7 @@ footer {
 .tag { color: var(--dim); font-weight: 400; text-decoration: none; }
 a.tag { color: var(--fg); text-decoration: underline; }
 .tag.live { background: var(--green); color: var(--bg); padding: 0 6px; font-weight: 700; }
-.tag.warn { background: var(--yellow); color: var(--bg); padding: 0 6px; font-weight: 700; }
+.tag.warn { background: var(--blue); color: var(--bg); padding: 0 6px; font-weight: 700; }
 .tag.bad { background: var(--red); color: var(--bg); padding: 0 6px; font-weight: 700; }
 
 /* ---------------------------------------------------------------- round */
@@ -273,8 +275,8 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 .notice.ok b { color: var(--green); }
 .notice.error { border-color: var(--red); }
 .notice.error b { color: var(--red); }
-.notice.warn { border-color: var(--yellow); }
-.notice.warn b { color: var(--yellow); }
+.notice.warn { border-color: var(--blue); }
+.notice.warn b { color: var(--blue); }
 
 /* ---------------------------------------------------------------- rules */
 
@@ -400,7 +402,7 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   vertical-align: middle;
   width: calc(var(--w) * 0.7);
   height: 10px;
-  background: var(--cyan);
+  background: var(--hi);
 }
 .barcell.win .minibar { background: var(--green); }
 .barcell.win b { color: var(--green); }
@@ -418,7 +420,7 @@ details[open] summary { margin-bottom: 12px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 12px; color: var(--dim); }
 .legend i { font-style: normal; }
 .legend .win { color: var(--green); }
-.legend .once, .legend .picked { color: var(--cyan); }
+.legend .once, .legend .picked { color: var(--hi); }
 .legend .many { color: var(--blue); }
 
 /* One column per number, all sharing the width: the more numbers, the
@@ -430,7 +432,7 @@ details[open] summary { margin-bottom: 12px; }
 .tail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .tail li { padding: 3px 8px; border: 1px solid #3a3a3a; white-space: nowrap; }
 .tail .won-tag { color: var(--green); font-weight: 700; }
-.tail li b { color: var(--cyan); font-weight: 700; }
+.tail li b { color: var(--hi); font-weight: 700; }
 .tail li span { margin-left: 4px; color: var(--dim); }
 .tail li.won { border-color: var(--green); }
 .tail li.won b { color: var(--green); }
@@ -452,7 +454,7 @@ details[open] summary { margin-bottom: 12px; }
   height: var(--h);
   /* A sliver of gap between neighbours that shrinks with the column. */
   margin-inline: 12%;
-  background: var(--cyan);
+  background: var(--hi);
   transform-origin: bottom;
   animation: grow 420ms steps(6) both;
   animation-delay: calc(var(--b, 0) * var(--beat) + min(var(--i, 0) * 12ms, 600ms));
@@ -481,7 +483,7 @@ details[open] summary { margin-bottom: 12px; }
   white-space: nowrap;
 }
 .win .col-bar { background: var(--green); }
-.once .col-bar, .picked .col-bar { background: var(--cyan); }
+.once .col-bar, .picked .col-bar { background: var(--hi); }
 .many .col-bar { background: var(--blue); }
 .col:hover .col-c { visibility: visible; }
 .col:hover .col-n span { color: var(--hi); }
@@ -531,7 +533,7 @@ details[open] summary { margin-bottom: 12px; }
 .testbanner {
   margin: 0;
   padding: 6px 20px;
-  background: var(--yellow);
+  background: var(--blue);
   color: var(--bg);
 }
 .testbanner b { color: var(--bg); }
@@ -618,17 +620,19 @@ a, button, summary, input, label { touch-action: manipulation; }
 .sec > p.dim, .notice, .message, .rules { max-width: 72ch; }
 
 
-/* Plain-language notes next to the numbers on the trends page. Direction is
-   shown as a triangle in the text colour: up is not good and down is not
-   bad here, so it is not painted green or red. */
+/* Plain-language notes next to the numbers on the trends page. */
 .explain { margin-bottom: 14px; color: var(--dim); max-width: 80ch; }
 .explain b { color: var(--fg); }
 .row-explain { display: block; color: var(--dim); font-size: 0.85rem; }
-.diff .change { white-space: nowrap; color: var(--fg); }
-.diff tr.up td.b, .diff tr.down td.b { color: var(--hi); }
+.diff .change { white-space: nowrap; font-weight: 700; }
+.diff tr.up .change { color: var(--green); }
+.diff tr.down .change { color: var(--red); }
+.diff tr.same .change { color: var(--dim); }
+.diff .change .dim { font-weight: 400; }
 .ranked em { margin-left: 6px; color: var(--fg); font-style: normal; }
-/* Rising and falling numbers are told apart by triangle, not by colour. */
-.ranked .up b, .ranked .down b { color: var(--hi); }
+/* Rising numbers are green, falling ones red, each with a triangle too. */
+.ranked .up em { color: var(--green); }
+.ranked .down em { color: var(--red); }
 .ranked .up em::before { content: "\25B2  "; }
 .ranked .down em::before { content: "\25BC  "; }
 
