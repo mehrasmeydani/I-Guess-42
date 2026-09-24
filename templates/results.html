@@ -18,10 +18,16 @@
       {% endmatch %}
       {% match chart %}
         {% when Some with (chart) %}
+          {# The same legend the day page prints over the same chart. #}
+          <p class="legend">
+            <span><i class="win">&#9608;</i> winner</span>
+            <span><i class="once">&#9608;</i> picked by one player</span>
+            <span><i class="many">&#9608;</i> shared</span>
+          </p>
           {% include "chart.html" %}
         {% when None %}
       {% endmatch %}
-      <p class="lastlink"><a class="btn ghost" href="/day/{{ r.date_key }}">details &rarr;</a></p>
+      <p class="morelink"><a href="/day/{{ r.date_key }}">details &rarr;</a></p>
     </section>
   {% when None %}
 {% endmatch %}
