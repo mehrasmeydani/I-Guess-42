@@ -172,6 +172,13 @@ cp .env.example .env   # SITE_DOMAIN, the 42 credentials, ADMIN_LOGINS empty
 docker compose up -d --build
 ```
 
+On a host where something else already terminates TLS, Caddy is in the way and
+the app needs to be reachable from outside the compose network.
+`compose.override.yml.example` is that setup: copy it to
+`compose.override.yml`, which Compose merges on top and git ignores, so each
+server keeps its own. It also writes down the two settings that bite quietly
+once Caddy is gone.
+
 ## Environment
 
 | Variable | Required | Default |

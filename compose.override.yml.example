@@ -1,0 +1,50 @@
+# Copy to compose.override.yml on a host that needs it. Compose merges that
+# file on top of compose.yml automatically, and it is gitignored, so each
+# server keeps its own without it ever reaching this repository.
+#
+#   cp compose.override.yml.example compose.override.yml
+#   $EDITOR compose.override.yml
+#
+# Nothing here is needed on a host where Caddy does its job: compose.yml
+# alone gives you the app behind Caddy with automatic HTTPS on 80 and 443.
+# This file is for the other case - something else already terminates TLS on
+# that machine, and the app should be a plain-HTTP backend behind it.
+
+services:
+  app:
+    # Publish the app on the LAN so the proxy in front of it can reach it.
+    # Without this the app is only reachable inside the compose network.
+    #
+    # Put the host's own address here, not 0.0.0.0, and the port answers on
+    # that interface alone. The cost is that the address has to stay put: if
+    # it changes, the container does not start at all ("cannot assign
+    # requested address") and the site is down until this file is edited.
+    # A static DHCP reservation is the usual fix. If the host firewall is
+    # already deciding who gets in, "3000:3000" avoids the whole problem.
+    ports:
+      - "10.0.0.10:3000:3000"
+
+  caddy:
+    # Take Caddy out of the run. A profile no one asks for never starts, so
+    # `docker compose up -d` brings up the app by itself; ./Caddyfile and
+    # ports 80 and 443 go unused on this host, and the certificate is
+    # somebody else's problem - whatever is in front.
+    profiles:
+      - disabled
+
+# Two things compose.yml sets that this file does NOT change, because both
+# bite quietly when Caddy is gone:
+#
+# SECURE_COOKIES is "true", so the session cookie is only sent over HTTPS.
+# That is right when the proxy in front terminates TLS. Reach the app
+# directly over plain http://<lan-ip>:3000 and the browser drops the cookie:
+# the page loads, sign-in looks like it worked, and you come back signed
+# out. No error is printed anywhere. Put a proxy with a certificate in
+# front, or set SECURE_COOKIES=false for that host and accept that the
+# session travels in the clear.
+#
+# FT_REDIRECT_URI is https://${SITE_DOMAIN}/auth/callback, so signing in
+# always goes out to intra and comes back through the public name. An
+# instance that is only reachable on a LAN cannot log anybody in. SITE_DOMAIN
+# also stays required in .env even with Caddy disabled - compose.yml is
+# interpolated before profiles decide what runs.
