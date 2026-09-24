@@ -155,8 +155,10 @@ disk and only need a reload. Keep to the look described at the top of
 | `main` | Exactly what runs on https://iguesslow.com. Only updated when a new version is deployed. |
 | `dev` | Where work happens. Open pull requests against `dev`. |
 
-Each deployed version is tagged (`v1.0.0`, ...). To deploy, merge `dev` into
-`main`, tag the merge, and roll it out.
+Each deployed version is tagged (`v1.0.0`, ...). To deploy, bump `version` in
+`Cargo.toml`, merge `dev` into `main`, tag the merge with the same number, and
+roll it out. The footer of every page prints that version, so you can tell what
+is running on a site without looking at the server.
 
 ## Running in production
 

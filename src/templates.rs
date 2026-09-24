@@ -15,6 +15,11 @@ pub const ASSET_VERSION: u64 = {
     fnv1a(include_bytes!("../static/app.js"), css)
 };
 
+/// What is running, printed in the footer. Comes from Cargo.toml, which is
+/// bumped in the commit that gets tagged and deployed, so the footer and the
+/// git tag cannot drift apart.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// FNV-1a, 64-bit: tiny, and good enough to notice that a file changed.
 const fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
     let mut i = 0;

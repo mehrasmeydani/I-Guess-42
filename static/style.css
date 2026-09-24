@@ -118,6 +118,9 @@ footer {
   border-top: var(--rule);
   color: var(--dim);
 }
+/* What is running. Pushed to the far end of the row, the way a status bar
+   keeps the build number out of the way of everything else. */
+footer .ver { margin-left: auto; }
 
 /* ------------------------------------------------------------- sections */
 
