@@ -137,6 +137,12 @@ cargo test                   # 49 tests
 cargo clippy --all-targets   # should print no warnings
 ```
 
+GitHub Actions runs both of these on every pull request against `dev` or
+`main`, and also builds the production image so a broken `Dockerfile` shows up
+before a deploy rather than during one. Warnings are errors there. Nothing in
+CI deploys anything; rolling out stays the manual step described under
+[Running in production](#running-in-production).
+
 Templates are compiled into the binary, so a typo in a template is a build
 error, not a broken page. The stylesheet and script in `static/` are read from
 disk and only need a reload. Keep to the look described at the top of
