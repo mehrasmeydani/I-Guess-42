@@ -3,3 +3,6 @@
 .env
 .env.*
 !.env.example
+
+# Server-specific overrides (ports, reverse proxy) stay on the server.
+compose.override.yml

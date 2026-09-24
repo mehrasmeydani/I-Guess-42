@@ -1,7 +1,8 @@
 # ---- build ----------------------------------------------------------------
 # sqlx compiles SQLite from source (libsqlite3-sys/bundled), so the builder
 # needs a C toolchain. Askama templates and the migrations are both embedded
-# into the binary at compile time; only `static/` is read at runtime.
+# into the binary at compile time; `static/` is served at runtime and also
+# fingerprinted at compile time.
 FROM rust:1-slim-bookworm AS builder
 
 RUN apt-get update \
@@ -19,6 +20,9 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs \
 COPY src ./src
 COPY templates ./templates
 COPY migrations ./migrations
+# The stylesheet and script are hashed into the binary (templates.rs,
+# ASSET_VERSION) for cache-busting, so the build needs them too.
+COPY static ./static
 # Cargo skips a rebuild if mtime looks unchanged after the dummy main.rs above.
 RUN touch src/main.rs && cargo build --release
 
