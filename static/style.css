@@ -69,8 +69,8 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 28px;
-  padding-block: 14px;
+  gap: 6px 24px;
+  padding-block: 8px;
   border-bottom: var(--rule);
 }
 
@@ -79,12 +79,12 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .brand:hover { background: none; color: var(--hi); }
 
 .top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-/* Nav targets are at least 44px tall, whatever the text size. */
+/* A compact bar with a mouse; touch screens get 44px targets (below). */
 .top nav a {
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 8px;
   color: var(--fg);
   text-decoration: none;
 }
@@ -102,8 +102,8 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .status .signin {
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 8px;
   border: 1px solid var(--dim);
   color: var(--fg);
   text-decoration: none;
@@ -640,6 +640,7 @@ p, li { text-wrap: pretty; }
 
 /* Coarse pointers (phones) get the full 44px on every small control. */
 @media (pointer: coarse) {
+  .top nav a, .status .out, .status .signin { min-height: 44px; }
   .ranges a { min-height: 44px; }
   .tail li { padding: 8px 10px; }
   .finder button, .finder input { min-height: 44px; }
