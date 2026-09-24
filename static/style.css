@@ -112,7 +112,6 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .spin:empty { display: none; }
 .busy-text:empty { display: none; }
 .busy-text { margin-left: 6px; }
-.me { color: var(--hi); }
 /* Sign-out sits apart from the navigation, and looks like what it is. */
 .status .out,
 .status .signin {
@@ -648,7 +647,6 @@ p, li { text-wrap: pretty; }
   .top { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
   .top nav { grid-column: 1 / -1; grid-row: 2; margin: 0 -10px; }
   .status { margin-left: 0; gap: 10px; }
-  .me { display: none; }
   .podium li { padding: 10px 8px 10px 0; }
   .podium li + li { padding-left: 10px; }
   .podium .wins { font-size: 2rem; }

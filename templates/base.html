@@ -42,9 +42,9 @@
       <span class="clock"></span>
       {% match user %}
         {% when Some with (u) %}
-          <span class="me">{{ u.login }}</span>
+          {# One button: your login, and the x logs you out. #}
           <form method="post" action="/logout" class="inline">
-            <button class="linkish out" type="submit">sign out</button>
+            <button class="linkish out" type="submit" title="log out" aria-label="log out {{ u.login }}">{{ u.login }} &times;</button>
           </form>
         {% when None %}
           <a class="signin" href="/login">log in with 42</a>

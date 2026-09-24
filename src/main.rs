@@ -46,6 +46,7 @@ async fn main() -> Result<()> {
 
     let cfg = Config::from_env()?;
     let bind_addr = cfg.bind_addr.clone();
+    let redirect_uri = cfg.redirect_uri.clone();
 
     let db = db::connect(&cfg.database_url).await?;
     db::purge_expired(&db).await?;
@@ -104,6 +105,15 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("binding {bind_addr}"))?;
     tracing::info!("listening on http://{bind_addr}");
+    // The 42 login always comes back to the host in FT_REDIRECT_URI. Browsing
+    // on another name for the same machine (127.0.0.1 vs localhost) keeps its
+    // own cookies and zoom, so after logging in you would look logged out.
+    if let Ok(url) = reqwest::Url::parse(&redirect_uri) {
+        if let Some(host) = url.host_str() {
+            let port = url.port().map(|p| format!(":{p}")).unwrap_or_default();
+            tracing::info!("open {}://{host}{port} in the browser", url.scheme());
+        }
+    }
 
     axum::serve(listener, router)
         .await
