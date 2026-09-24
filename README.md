@@ -155,10 +155,16 @@ disk and only need a reload. Keep to the look described at the top of
 | `main` | Exactly what runs on https://iguesslow.com. Only updated when a new version is deployed. |
 | `dev` | Where work happens. Open pull requests against `dev`. |
 
-Each deployed version is tagged (`v1.0.0`, ...). To deploy, bump `version` in
-`Cargo.toml`, merge `dev` into `main`, tag the merge with the same number, and
-roll it out. The footer of every page prints that version, so you can tell what
-is running on a site without looking at the server.
+Each deployed version is tagged (`v1.0.0`, ...). To deploy, bump
+`version.txt`, merge `dev` into `main`, tag the merge with the same number, and
+roll it out. The footer of every page prints that file, so you can tell what is
+running on a site without looking at the server.
+
+It is `version.txt` and not `version` in `Cargo.toml` for a build reason: the
+Dockerfile compiles the dependencies in a layer keyed on `Cargo.toml`, so
+editing that file for a release throws away 281 compiled crates and adds
+minutes to the deploy. `version.txt` is copied after that layer, and a release
+rebuilds only this crate.
 
 ## Running in production
 

@@ -20,6 +20,10 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs \
 COPY src ./src
 COPY templates ./templates
 COPY migrations ./migrations
+# What the footer prints. Its own file, and copied here rather than up with
+# Cargo.toml, so that bumping it for a release does not invalidate the
+# dependency layer above and recompile all 281 crates.
+COPY version.txt ./
 # The stylesheet and script are hashed into the binary (templates.rs,
 # ASSET_VERSION) for cache-busting, so the build needs them too.
 COPY static ./static
