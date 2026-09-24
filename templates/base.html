@@ -42,12 +42,13 @@
       <span class="clock"></span>
       {% match user %}
         {% when Some with (u) %}
-          {# One button: your login, and the x logs you out. #}
+          {# Your login is only your name; logging out is its own button. #}
+          <span class="who" title="{{ u.display_name }}">{{ u.login }}</span>
           <form method="post" action="/logout" class="inline">
-            <button class="linkish out" type="submit" title="log out" aria-label="log out {{ u.login }}">{{ u.login }} &times;</button>
+            <button class="linkish out" type="submit" aria-label="log out {{ u.login }}">log out</button>
           </form>
         {% when None %}
-          <a class="signin" href="/login">log in with 42</a>
+          <a class="signin" href="/login">log in to play</a>
       {% endmatch %}
     </div>
   </header>

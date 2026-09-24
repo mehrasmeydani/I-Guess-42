@@ -101,6 +101,12 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 }
 .status .out:hover,
 .status .signin:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+/* Your login, next to the log out button: readable, not a control. */
+.status .who { color: var(--fg); }
+/* Logging in is the one blue thing in the header - it is the way in. Blue on
+   the background is 5:1, so it carries body-size text. */
+.status .signin { border-color: var(--blue); color: var(--blue); }
+.status .signin:hover { background: var(--blue); border-color: var(--blue); color: var(--bg); }
 
 main { flex: 1; padding-block: 8px 64px; }
 
@@ -206,6 +212,16 @@ button:focus-visible,
 .btn:focus-visible { background: var(--green); border-color: var(--green); color: var(--bg); }
 button:active,
 .btn:active { translate: 0 1px; }
+
+/* The way in, in blue. The text on it is --bg, not --hi: white on this blue
+   is 3.5:1 and fails AA at this size, dark on it is 5:1. */
+.btn.play { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+.btn.play:hover,
+.btn.play:focus-visible { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+
+/* The way to yesterday's numbers, above the guess box: present, but never
+   louder than locking a number in. */
+.lastlink { margin: 0 0 20px; }
 .guessform button { font-size: 1.1rem; }
 
 .btn.ghost,
