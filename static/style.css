@@ -69,8 +69,8 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 24px;
-  padding-block: 8px;
+  gap: 8px 28px;
+  padding-block: 14px;
   border-bottom: var(--rule);
 }
 
@@ -78,17 +78,9 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .brand b { padding: 0 6px; margin-left: 2px; background: var(--green); color: var(--bg); }
 .brand:hover { background: none; color: var(--hi); }
 
-.top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-/* A compact bar with a mouse; touch screens get 44px targets (below). */
-.top nav a {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 0 8px;
-  color: var(--fg);
-  text-decoration: none;
-}
-.top nav a.on { background: var(--hi); color: var(--bg); font-weight: 700; }
+.top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; }
+.top nav a { color: var(--fg); text-decoration: none; }
+.top nav a.on { background: var(--hi); color: var(--bg); padding: 0 6px; margin: 0 -6px; }
 .top nav a:hover { background: var(--hi); color: var(--bg); }
 
 .status { display: flex; align-items: center; gap: 14px; margin-left: auto; color: var(--dim); white-space: nowrap; }
@@ -97,19 +89,11 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .spin:empty { display: none; }
 .busy-text:empty { display: none; }
 .busy-text { margin-left: 6px; }
-/* Sign-out sits apart from the navigation, and looks like what it is. */
+/* Log in / log out: plain text in the corner, like the nav. */
 .status .out,
-.status .signin {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 0 8px;
-  border: 1px solid var(--dim);
-  color: var(--fg);
-  text-decoration: none;
-}
+.status .signin { color: var(--fg); text-decoration: none; }
 .status .out:hover,
-.status .signin:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+.status .signin:hover { background: var(--hi); color: var(--bg); }
 
 main { flex: 1; padding-block: 8px 64px; }
 
@@ -640,7 +624,8 @@ p, li { text-wrap: pretty; }
 
 /* Coarse pointers (phones) get the full 44px on every small control. */
 @media (pointer: coarse) {
-  .top nav a, .status .out, .status .signin { min-height: 44px; }
+  .top nav a, .status .out, .status .signin { display: inline-flex; align-items: center; min-height: 44px; }
+  .top nav a.on { padding: 0 6px; }
   .ranges a { min-height: 44px; }
   .tail li { padding: 8px 10px; }
   .finder button, .finder input { min-height: 44px; }
