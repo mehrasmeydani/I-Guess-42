@@ -6,7 +6,7 @@
   <div class="cols" style="--n: {{ chart.span }}">
     {% for c in chart.columns %}
       <div class="col {{ c.kind }}" title="{{ c.title }}" style="--h: {{ c.pct }}%; --i: {{ loop.index0 }}">
-        <span class="col-track"><span class="col-bar">{% if c.count > 0 %}<span class="col-c">{{ c.count }}</span>{% endif %}</span></span>
+        <span class="col-track"><span class="col-bar">{% if c.kind == "win" %}<span class="col-mark" aria-hidden="true">&#9660;</span>{% endif %}{% if c.count > 0 %}<span class="col-c">{{ c.count }}</span>{% endif %}</span></span>
         <span class="col-n"><span{% if c.show_label %} class="shown"{% endif %}>{{ c.label }}</span></span>
       </div>
     {% endfor %}
