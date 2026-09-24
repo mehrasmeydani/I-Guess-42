@@ -395,7 +395,8 @@ details[open] summary { margin-bottom: 12px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 12px; color: var(--dim); }
 .legend i { font-style: normal; }
 .legend .win { color: var(--green); }
-.legend .once, .legend .picked { color: var(--hi); }
+.legend .once { color: var(--hi); }
+.legend .picked { color: var(--blue); }
 .legend .many { color: var(--blue); }
 
 /* One column per number, all sharing the width: the more numbers, the
@@ -458,10 +459,15 @@ details[open] summary { margin-bottom: 12px; }
   white-space: nowrap;
 }
 .win .col-bar { background: var(--green); }
-.once .col-bar, .picked .col-bar { background: var(--hi); }
+.once .col-bar { background: var(--hi); }
+/* Trends: numbers that never won a day are blue, winners green. */
+.picked .col-bar { background: var(--blue); }
 .many .col-bar { background: var(--blue); }
 .col:hover .col-c { visibility: visible; }
-.col:hover .col-n span { color: var(--hi); }
+/* Every column carries its number under the axis; only round numbers show
+   it, the rest appear while hovered, drawn over their neighbours. */
+.col-n span:not(.shown) { visibility: hidden; }
+.col:hover .col-n span { visibility: visible; position: relative; z-index: 2; padding: 0 3px; background: var(--hi); color: var(--bg); }
 /* The winner is marked by a shape as well as by colour. */
 .col-mark {
   position: absolute;
