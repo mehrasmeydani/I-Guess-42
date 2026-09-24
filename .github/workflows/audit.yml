@@ -1,0 +1,51 @@
+# Watches the dependency tree for RustSec advisories.
+#
+# `Cargo.lock` is committed, so an advisory against axum, sqlx, rustls or tokio
+# would otherwise sit in the tree unnoticed on a site that is internet-facing
+# and holds OAuth tokens and session cookies.
+#
+# One action, two behaviours, which answers "what should a failure do":
+#   - on a pull request touching the manifests, a new advisory fails the check,
+#     so it is seen before the merge rather than after
+#   - on the weekly schedule, each new advisory is filed as an issue. A red run
+#     on a branch nobody pushed to is only useful if someone is watching, and
+#     nobody watches; an issue arrives on the board with everything else.
+#
+# Scheduled runs always use the default branch, so what gets audited is `main` -
+# the code actually serving iguesslow.com, not whatever `dev` is mid-way through.
+name: Audit
+
+on:
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+  schedule:
+    # Monday morning UTC, off the hour: the top of the hour is when every
+    # scheduled workflow on GitHub queues at once.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # the scheduled run files an advisory as an issue
+  checks: write   # the pull request run reports as a check
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Informational advisories are reported but do not fail the check.
+      # Note: on pull requests from forks the token cannot create a check, and
+      # findings are printed to the log instead.
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,47 @@
+# Nothing moves the dependency tree on its own: `Cargo.lock` is committed, as
+# it should be for an application, so versions only change when someone asks.
+#
+# Pull requests land on `dev`, never on `main` - main is exactly what runs on
+# iguesslow.com and only moves when a version is deployed. One documented
+# consequence of `target-branch`: this becomes a version-updates-only config,
+# so Dependabot *security* updates, if they are switched on for the repository,
+# still open against the default branch. Advisories are watched by
+# `.github/workflows/audit.yml` rather than relying on that.
+#
+# Weekly and grouped on purpose - one pull request per ecosystem per week, not
+# fifteen. The board this feeds is small enough to bury.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Vienna
+    open-pull-requests-limit: 3
+    groups:
+      cargo:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+
+  # CI pins actions/checkout, dtolnay/rust-toolchain, Swatinem/rust-cache,
+  # docker/setup-buildx-action, docker/build-push-action and rustsec/audit-check.
+  # Left alone they go stale silently, which is how a workflow starts failing
+  # on a runner image change nobody asked for.
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Vienna
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
