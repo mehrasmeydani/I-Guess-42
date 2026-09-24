@@ -55,8 +55,8 @@ instance and the admin routes do not exist at all.
   try the results and trends pages against months of data and see how fast
   they are. One button removes every bot and every guess they made.
 
-See [deploy/README.md](deploy/README.md) for running a test instance alongside
-the live one.
+See [Getting started](#getting-started) for running a test instance on your own
+machine.
 
 ## Understanding the code
 
@@ -71,148 +71,90 @@ If you want to rebuild this yourself rather than read the finished code,
 which sources are authoritative, and the design questions you should decide for
 yourself. It deliberately withholds the answers.
 
-## Going live on Proxmox
+## Getting started
 
-The live site is **https://iguesslow.com**, on a Proxmox guest. Everything
-needed is in **[deploy/PROXMOX.md](deploy/PROXMOX.md)**: creating the guest,
-installing Docker, port forwarding and DNS, the 42 redirect URIs, then
+Everything runs on your own machine: a Rust toolchain, a SQLite file, and a
+42 intra application of your own for sign-in. No Docker needed.
+
+### 1. A Linux shell
+
+- **Windows:** use WSL. In PowerShell, `wsl --install -d Ubuntu`, restart, and
+  open the Ubuntu terminal. Clone and build **inside WSL** (under `~`, not under
+  `/mnt/c`): builds on the Windows side of the filesystem are many times slower.
+  VS Code works with it through the WSL extension (`code .` from the Ubuntu
+  terminal).
+- **macOS / Linux:** your normal terminal is fine.
+
+### 2. Rust and a C compiler
 
 ```sh
-./deploy/proxmox.sh root@<guest-ip>
+sudo apt update && sudo apt install -y build-essential pkg-config git   # Ubuntu / WSL
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Test locally first with `ENV_FILE=.env.test cargo run` (your login in
-`ADMIN_LOGINS`, its own database). `.env` holds the live settings and must
-keep `ADMIN_LOGINS` empty; the deploy script refuses a test instance unless
-you insist. The AWS route below still works too.
+SQLite is compiled from source as part of the build, which is what needs the
+C compiler. On macOS, `xcode-select --install` covers it.
 
-## Going live on AWS — what's still to do
+### 3. Your own 42 application
 
-The app is built, tested and containerised, but **it has never been deployed**.
-Two things are outstanding, and both need your account rather than more code.
+Create one at <https://profile.intra.42.fr/oauth/applications/new> with the
+redirect URI `http://localhost:3000/auth/callback`, and copy its **UID** and
+**SECRET**. Everyone uses their own: the live site's credentials are not
+shared.
 
-- [ ] **AWS access keys** — the account exists, the keys were never created
-- [ ] **A domain** — required before HTTPS can work
-- [ ] Register `https://<domain>/auth/callback` on the intra application
-- [ ] Run `./deploy/provision.sh`, then `./deploy/deploy.sh`
-
-### 1. AWS access keys
-
-`aws sts get-caller-identity` currently answers `NoCredentials`. The CLI itself
-is installed at `/sgoinfre/megardes/aws/bin/aws` and is already on your `PATH`
-via `~/.zshrc` and `~/.bashrc`.
-
-In the AWS console, signed in as the root user or an admin:
-
-1. **IAM → Users → Create user**. Name it `i-guess-42-deploy`. Leave console
-   access **off** — this identity is only ever used by the CLI.
-2. **Next → Attach policies directly → Create policy → JSON**. Paste
-   [`deploy/iam-policy.json`](deploy/iam-policy.json) and save it as
-   `i-guess-42-deploy`. (`AmazonEC2FullAccess` is one click and also works, but
-   it grants far more than this project needs.)
-3. Finish creating the user, open it, then **Security credentials → Create
-   access key → Command Line Interface**.
-4. Back on this machine:
-
-   ```sh
-   aws configure
-   # AWS Access Key ID:     AKIA...
-   # AWS Secret Access Key: ...
-   # Default region name:   eu-central-1     # Frankfurt, closest to Vienna
-   # Default output format: json
-   ```
-
-The secret key is displayed exactly once. If you lose it, delete that key and
-create another — it cannot be retrieved.
-
-### 2. A domain
-
-Caddy obtains a Let's Encrypt certificate on first boot, but Let's Encrypt has
-to reach the server *by name*, so a bare IP will not do.
-
-> **Route 53 does not include a free first year.** A `.com` is billed at
-> roughly **$14 immediately**, plus **$0.50/month** for the hosted zone. The AWS
-> free tier covers compute and bandwidth, never domain registration.
-
-The genuinely free option for a 42 student is the
-[GitHub Student Developer Pack](https://education.github.com/pack), which
-includes a free `.me` for a year through Namecheap. Any registrar is fine —
-all that matters is being able to set an **A record** pointing at the IP that
-`provision.sh` prints.
-
-### 3. Then deploy
+### 4. Configure and run
 
 ```sh
-./deploy/provision.sh          # ~2 min; creates the instance, prints its IP
-# point the domain's A record at that IP and wait for DNS to propagate
-cp .env.example .env           # SITE_DOMAIN + FT_CLIENT_ID + FT_CLIENT_SECRET
-./deploy/deploy.sh
-```
-
-Don't forget to add `https://<your-domain>/auth/callback` as a redirect URI on
-the intra application — sign-in fails with a redirect-uri mismatch otherwise.
-
-`./deploy/teardown.sh` deletes everything again and stops the billing.
-
-> **Caveat:** the scripts in `deploy/` have never been run against a real AWS
-> account, because there were no credentials available to test with. The shell
-> is syntax-checked and the logic is straightforward, but expect to fix a rough
-> edge or two on the first `provision.sh` run.
-
-## Setup
-
-### 1. Rust
-
-Already installed on this machine, under `/sgoinfre` (see `~/.zshrc`). Home has
-only a few GB free and a debug build of this project is ~1.8 GB, so keep the
-build artifacts off `/home`:
-
-```sh
-export CARGO_TARGET_DIR=/goinfre/$USER/i_guess_42_target
-```
-
-That directory already holds a warm build.
-
-### 2. Register the intra application
-
-Go to <https://profile.intra.42.fr/oauth/applications/new> and create an app
-with redirect URI `http://localhost:3000/auth/callback` (add your production
-URL too, once you have one). Copy the **UID** and **SECRET**.
-
-### 3. Configure and run
-
-```sh
+git clone git@github.com:mehrasmeydani/I-Guess-42.git
+cd I-Guess-42
 cp .env.example .env
-$EDITOR .env          # paste FT_CLIENT_ID and FT_CLIENT_SECRET
+$EDITOR .env          # paste FT_CLIENT_ID and FT_CLIENT_SECRET, and put your
+                      # own login in ADMIN_LOGINS to get /admin
 cargo run
 ```
 
-Then open <http://localhost:3000>. The SQLite file and its migrations are
-created on first start.
+Then open <http://localhost:3000>. The database (`data/game.db`) and its
+tables are created on first start. The first build takes a few minutes;
+after that it is quick.
+
+With your login in `ADMIN_LOGINS` the instance is a **test instance**: open
+`/admin` to move the clock past 12:42, sign in as demo players, and fill in
+months of random history (**Demo history**) so the results and trends pages
+have something to show.
+
+### 5. Before you open a pull request
 
 ```sh
-cargo test            # 48 tests: round boundaries, guess parsing, and the
-                      # winner query against a throwaway SQLite file
-cargo clippy --all-targets
+cargo test                   # 49 tests
+cargo clippy --all-targets   # should print no warnings
 ```
 
-### With Docker
+Templates are compiled into the binary, so a typo in a template is a build
+error, not a broken page. The stylesheet and script in `static/` are read from
+disk and only need a reload. Keep to the look described at the top of
+`static/style.css`.
 
-The app plus Caddy for automatic HTTPS, which is also how it runs in
-production:
+## Branches
+
+| Branch | What it is |
+|---|---|
+| `main` | Exactly what runs on https://iguesslow.com. Only updated when a new version is deployed. |
+| `dev` | Where work happens. Open pull requests against `dev`. |
+
+Each deployed version is tagged (`v1.0.0`, ...). To deploy, merge `dev` into
+`main`, tag the merge, and roll it out.
+
+## Running in production
+
+The live site, **https://iguesslow.com**, is run by the maintainer from the
+`Dockerfile`, `compose.yml` and `Caddyfile` in this repository: the app plus
+Caddy, which fetches the HTTPS certificate. The same stack runs anywhere with
+Docker:
 
 ```sh
-cp .env.example .env   # SITE_DOMAIN + the 42 credentials
+cp .env.example .env   # SITE_DOMAIN, the 42 credentials, ADMIN_LOGINS empty
 docker compose up -d --build
 ```
-
-### Deploying
-
-See **[deploy/README.md](deploy/README.md)** for the full path: AWS credentials,
-`./deploy/provision.sh` to create an EC2 instance with Docker and a static IP,
-`./deploy/deploy.sh` to ship the image, and `./deploy/teardown.sh` to delete it
-all again. Nothing past `provision.sh` is AWS-specific — the same compose stack
-runs on any host with Docker, a domain, and ports 80/443 open.
 
 ## Environment
 
@@ -227,6 +169,7 @@ runs on any host with Docker, a domain, and ports 80/443 open.
 | `ADMIN_LOGINS` | no | empty (test mode off) |
 | `ALLOWED_CAMPUS_IDS` | no | `53` (42 Vienna); empty lets every campus in |
 | `RUST_LOG` | no | `i_guess_42=info,tower_http=warn` |
+| `ENV_FILE` | no | `.env`; point it at another file to keep two setups side by side |
 
 ## Layout
 
@@ -235,7 +178,7 @@ src/
   main.rs        router, startup, hourly session sweep
   config.rs      environment
   round.rs       12:42 Europe/Vienna round boundaries (+ DST handling)
-  stats.rs       day and multi-day statistics, charts, sparklines
+  stats.rs       day and multi-day statistics and charts
   demo.rs        random bot history for test instances
   db.rs          schema access; the winner query lives here
   auth.rs        42 OAuth2 flow and session cookies
@@ -243,11 +186,11 @@ src/
   templates.rs   view structs
   app.rs         shared state and the error page
 templates/       askama HTML
-static/          stylesheet and countdown
+static/          stylesheet, countdown script, fonts
 migrations/      applied automatically at startup
-deploy/          AWS provisioning, deployment, teardown
 Dockerfile       multi-stage build -> 141 MB image, runs as non-root
 compose.yml      app + Caddy (automatic Let's Encrypt)
+Caddyfile        HTTPS and the reverse proxy
 ```
 
 ## How the winner is computed
