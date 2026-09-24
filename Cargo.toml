@@ -1,5 +1,8 @@
 [package]
 name = "i_guess_42"
+# Not the version the site shows - that is version.txt, which the footer
+# prints. Changing this one invalidates the Docker dependency layer and
+# recompiles every crate, so it stays put unless the crate itself is published.
 version = "1.1.0"
 edition = "2021"
 rust-version = "1.80"
@@ -36,4 +39,8 @@ serde_json = "1"
 
 [profile.release]
 opt-level = 3
-lto = true
+# Thin, not fat. Measured on this tree: a source-only change relinks in 10s
+# with thin and 38s with fat, and a full build is 60s against 86s. Fat LTO
+# buys 3.8 MB off a 142 MB image - under 3% - and nothing measurable at
+# runtime for a server that spends its life waiting on SQLite and HTTP.
+lto = "thin"

@@ -15,10 +15,17 @@ pub const ASSET_VERSION: u64 = {
     fnv1a(include_bytes!("../static/app.js"), css)
 };
 
-/// What is running, printed in the footer. Comes from Cargo.toml, which is
+/// What is running, printed in the footer: the contents of version.txt,
 /// bumped in the commit that gets tagged and deployed, so the footer and the
 /// git tag cannot drift apart.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+///
+/// Its own file rather than Cargo.toml's `version`, and not for tidiness:
+/// the Dockerfile builds the dependencies in a layer keyed on Cargo.toml, so
+/// touching that file for a release throws away 281 compiled crates and adds
+/// minutes to every deploy. version.txt is copied after that layer.
+pub fn version() -> &'static str {
+    include_str!("../version.txt").trim()
+}
 
 /// FNV-1a, 64-bit: tiny, and good enough to notice that a file changed.
 const fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
