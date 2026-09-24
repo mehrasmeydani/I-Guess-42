@@ -172,6 +172,12 @@ pub struct ResultsTemplate {
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
     pub impersonating: bool,
+    /// The round that closed most recently, shown above everything else.
+    /// `None` only until a first round has closed.
+    pub latest: Option<RoundView>,
+    /// That round's chart. `Some` exactly when `latest` is; the two are kept
+    /// apart because chart.html reads a binding called `chart`.
+    pub chart: Option<Chart>,
     /// The rounds to list: the most recent few, or every match of a search.
     pub rounds: Vec<RoundView>,
     /// How many closed rounds exist in all.

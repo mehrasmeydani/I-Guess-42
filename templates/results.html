@@ -4,7 +4,29 @@
 {% block nav_results %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
-<section class="sec" style="--b: 0">
+{# The day that just closed, with the day page's own chart. Always here: not
+   behind the range switches, and not replaced by a search. #}
+{% match latest %}
+  {% when Some with (r) %}
+    <section class="sec" style="--b: 0">
+      <h2 class="rule"><span>last round</span><span class="tag">{{ r.date_key }}</span></h2>
+      {% match r.winner %}
+        {% when Some with (w) %}
+          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }} &middot; {{ r.total }} played</span></p>
+        {% when None %}
+          <p class="verdict"><b class="lose">&times;</b> <span>no winner &middot; {{ r.total }} played</span></p>
+      {% endmatch %}
+      {% match chart %}
+        {% when Some with (chart) %}
+          {% include "chart.html" %}
+        {% when None %}
+      {% endmatch %}
+      <p class="lastlink"><a class="btn ghost" href="/day/{{ r.date_key }}">details &rarr;</a></p>
+    </section>
+  {% when None %}
+{% endmatch %}
+
+<section class="sec" style="--b: 1">
   <h2 class="rule"><span>most days won</span></h2>
   {% if leaders.is_empty() %}
     <p class="dim">nobody has won a round yet.</p>
@@ -39,7 +61,7 @@
   {% endif %}
 </section>
 
-<section class="sec" style="--b: 1">
+<section class="sec" style="--b: 2">
   <h2 class="rule"><span>rounds</span>
     <span class="ranges">
       <a class="{% if q.is_empty() && show == "7" %}on{% endif %}" href="/results">7</a>

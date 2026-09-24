@@ -138,3 +138,35 @@
     document.querySelectorAll('form[data-sent]').forEach(function (f) { delete f.dataset.sent; });
   });
 })();
+
+// Charts that start below the fold hold their bars until they are scrolled
+// to, so the columns grow while someone is watching instead of before they
+// get there. The page works the same without this: no IntersectionObserver,
+// or reduced motion asked for, and nothing is ever held.
+(function () {
+  var charts = document.querySelectorAll('.chart');
+  if (!charts.length || !window.IntersectionObserver) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  var held = [];
+  for (var i = 0; i < charts.length; i++) {
+    // A chart already on screen animates now; holding it would only delay
+    // the one the visitor is looking at.
+    if (charts[i].getBoundingClientRect().top < window.innerHeight) continue;
+    charts[i].classList.add('hold');
+    held.push(charts[i]);
+  }
+  if (!held.length) return;
+
+  // A tenth of the viewport of overlap, so the bars start once the chart is
+  // properly in view rather than at the first pixel of it.
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      e.target.classList.add('seen');
+      io.unobserve(e.target);
+    });
+  }, { rootMargin: '0px 0px -10% 0px' });
+
+  held.forEach(function (c) { io.observe(c); });
+})();

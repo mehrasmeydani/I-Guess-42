@@ -451,6 +451,18 @@ details[open] summary { margin-bottom: 12px; }
   animation: grow 420ms steps(6) both;
   animation-delay: calc(var(--b, 0) * var(--beat) + min(var(--i, 0) * 12ms, 600ms));
 }
+/* A chart that starts below the fold waits for the scroll instead of growing
+   where nobody is looking. app.js adds .hold, then .seen when it comes into
+   view; with no script, or no IntersectionObserver, neither class is ever set
+   and the bars animate on load as before. Held bars drop the section beat from
+   their delay -- the ordering of sections stopped mattering by the time the
+   visitor scrolled down -- and keep the per-column stagger that sweeps the
+   chart left to right. */
+.chart.hold .col-bar {
+  animation-play-state: paused;
+  animation-delay: min(var(--i, 0) * 12ms, 600ms);
+}
+.chart.hold.seen .col-bar { animation-play-state: running; }
 /* Labels hang below the baseline and may be wider than their column. */
 .col-n { position: absolute; top: 100%; left: 50%; padding-top: 4px; }
 .col-n span {
@@ -697,5 +709,9 @@ p, li { text-wrap: pretty; }
     animation-duration: 0.01ms !important;
     animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
+    /* app.js does not hold anything when reduced motion is asked for, but if
+       a class ever survives a cached page, a paused bar would sit invisible
+       at scaleY(0) forever. */
+    animation-play-state: running !important;
   }
 }
