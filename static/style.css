@@ -258,6 +258,16 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   border: 2px solid var(--green);
 }
 .sealed-value { color: var(--hi); font-size: clamp(2.6rem, 10vw, 5rem); font-weight: 700; line-height: 1; word-break: break-all; }
+.stamp {
+  position: absolute;
+  top: -14px;
+  right: -12px;
+  padding: 2px 8px;
+  background: var(--red);
+  color: var(--bg);
+  font-weight: 700;
+  transform: rotate(4deg);
+}
 
 /* ------------------------------------------------------------- messages */
 
@@ -562,6 +572,14 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 @keyframes show { from { visibility: hidden; } }
 @keyframes fill { from { width: 1ch; } }
 @keyframes grow { from { transform: scaleY(0); } }
+@keyframes stamp {
+  0% { visibility: hidden; }
+  1% { visibility: visible; transform: rotate(4deg) scale(2.2); }
+  50% { transform: rotate(4deg) scale(0.9); }
+  100% { transform: rotate(4deg); }
+}
+/* A number locked in just now gets the stamp slammed on, in three frames. */
+.notice.ok ~ .sealed .stamp { animation: stamp 300ms steps(3) 350ms both; }
 
 .sec, .card { animation: show 1ms both; animation-delay: calc(var(--b, 0) * var(--beat)); }
 .meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; width: 32ch; animation: fill 420ms steps(30) 80ms both; }

@@ -35,7 +35,10 @@
       {% match my_guess_label %}
         {% when Some with (g) %}
           <h2 class="rule"><span>your number</span></h2>
-          <p class="sealed"><span class="sealed-value">{{ g }}</span></p>
+          <div class="sealed">
+            <p class="sealed-value">{{ g }}</p>
+            <span class="stamp">sealed</span>
+          </div>
           <p class="dim">hidden until 12:42</p>
         {% when None %}
           <h2 class="rule"><label for="guess">your number</label></h2>
