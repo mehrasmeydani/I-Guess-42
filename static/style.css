@@ -89,11 +89,18 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .spin:empty { display: none; }
 .busy-text:empty { display: none; }
 .busy-text { margin-left: 6px; }
-/* Log in / log out: plain text in the corner, like the nav. */
+/* Log in / log out: a boxed button in the corner, regular weight. */
 .status .out,
-.status .signin { color: var(--fg); text-decoration: none; }
+.status .signin {
+  display: inline-block;
+  padding: 2px 10px;
+  border: 1px solid var(--dim);
+  color: var(--fg);
+  font-weight: 400;
+  text-decoration: none;
+}
 .status .out:hover,
-.status .signin:hover { background: var(--hi); color: var(--bg); }
+.status .signin:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
 
 main { flex: 1; padding-block: 8px 64px; }
 
