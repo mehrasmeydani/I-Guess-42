@@ -43,7 +43,10 @@
 
 * { box-sizing: border-box; }
 
-html { background: var(--bg); }
+/* Always reserve the scrollbar's space, so a page that fits the window
+   (signed out, short) and one that scrolls (signed in, longer) sit in exactly
+   the same place instead of jumping sideways by the scrollbar's width. */
+html { background: var(--bg); scrollbar-gutter: stable; }
 
 body {
   margin: 0;
@@ -620,22 +623,9 @@ a, button, summary, input, label { touch-action: manipulation; }
 .ranked .up em::after { content: " \25B2"; }
 .ranked .down em::after { content: " \25BC"; }
 
-/* Home: what you can do sits right under the clock, then two quiet stats. */
-.play { margin-top: 26px; display: grid; gap: 10px; justify-items: start; }
-.play .guessform, .play .notice { width: 100%; }
-.play-label { color: var(--hi); font-weight: 700; }
-/* The login button carries a whole sentence; let it wrap on a phone. */
-.play .btn { white-space: normal; }
-.stats-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 28px;
-  margin-top: 26px;
-  padding-top: 12px;
-  border-top: var(--rule);
-  color: var(--dim);
-}
-.stats-line b { color: var(--hi); }
+/* Your own status in the third box on the home page. */
+.figures .you b { color: var(--fg); }
+.figures .you.in b { color: var(--green); }
 
 /* Headings wrap into balanced lines; running text avoids one-word last lines. */
 .rule span, .question, .message { text-wrap: balance; }
