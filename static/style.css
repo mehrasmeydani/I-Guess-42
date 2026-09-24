@@ -468,17 +468,6 @@ details[open] summary { margin-bottom: 12px; }
    it, the rest appear while hovered, drawn over their neighbours. */
 .col-n span:not(.shown) { visibility: hidden; }
 .col:hover .col-n span { visibility: visible; position: relative; z-index: 2; padding: 0 3px; background: var(--hi); color: var(--bg); }
-/* The winner is marked by a shape as well as by colour. */
-.col-mark {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  translate: -50% 0;
-  color: var(--green);
-  font-size: 0.75rem;
-  line-height: 1.2;
-}
-.col:hover .col-mark { visibility: hidden; }
 .col:hover .col-bar { filter: brightness(1.35); }
 
 /* --------------------------------------------------------------- trends */
