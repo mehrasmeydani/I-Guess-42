@@ -194,7 +194,7 @@ src/
   templates.rs   view structs
   app.rs         shared state and the error page
 templates/       askama HTML
-static/          stylesheet, countdown script, fonts
+static/          stylesheet and countdown script
 migrations/      applied automatically at startup
 Dockerfile       multi-stage build -> 141 MB image, runs as non-root
 compose.yml      app + Caddy (automatic Let's Encrypt)
