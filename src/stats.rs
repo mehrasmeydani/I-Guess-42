@@ -261,11 +261,18 @@ pub struct Mover {
 pub struct Regular {
     pub value: i64,
     pub rounds: usize,
+    /// How often it was picked across the whole range.
+    pub picks: i64,
+    /// Those picks as a share of all picks, in tenths of a percent.
+    pub share_permille: i64,
 }
 
 /// Averages over the older and the newer half of the range, in hundredths
 /// so they stay integers. `None` where a half had no winners at all.
 pub struct Halves {
+    /// First and last date of each half, `YYYY-MM-DD`.
+    pub older: (String, String),
+    pub newer: (String, String),
     pub players: (i64, i64),
     pub winner: (Option<i64>, Option<i64>),
     pub lowest_free: (i64, i64),
@@ -401,17 +408,35 @@ pub fn trend(rows: &[DayTally]) -> Trend {
             *seen.entry(t.value).or_insert(0) += 1;
         }
     }
+    let all_picks: i64 = totals.iter().map(|t| t.count).sum();
+    let picks_of: HashMap<i64, i64> = totals.iter().map(|t| (t.value, t.count)).collect();
     let mut regulars: Vec<Regular> = seen
         .into_iter()
         .filter(|&(_, rounds)| rounds >= 2)
-        .map(|(value, rounds)| Regular { value, rounds })
+        .map(|(value, rounds)| {
+            let picks = picks_of.get(&value).copied().unwrap_or(0);
+            Regular {
+                value,
+                rounds,
+                picks,
+                share_permille: if all_picks == 0 { 0 } else { picks * 1000 / all_picks },
+            }
+        })
         .collect();
     regulars.sort_by(|a, b| b.rounds.cmp(&a.rounds).then(a.value.cmp(&b.value)));
     regulars.truncate(TREND_TOP);
 
     let halves = (days.len() >= 2).then(|| {
         let (a, b) = lines.split_at(mid);
+        let span = |part: &[DayLine]| {
+            (
+                part.first().map(|d| d.date.clone()).unwrap_or_default(),
+                part.last().map(|d| d.date.clone()).unwrap_or_default(),
+            )
+        };
         Halves {
+            older: span(a),
+            newer: span(b),
             players: (
                 avg(a.iter().map(|d| d.players)).unwrap_or(0),
                 avg(b.iter().map(|d| d.players)).unwrap_or(0),
@@ -446,6 +471,24 @@ pub fn hundredths(n: i64) -> String {
         whole.to_string()
     } else {
         format!("{whole}.{tenth}")
+    }
+}
+
+/// `+47.6` / `-0.8` from a difference in hundredths.
+pub fn signed_hundredths(n: i64) -> String {
+    let sign = if n < 0 { "-" } else { "+" };
+    format!("{sign}{}", hundredths(n.abs()))
+}
+
+/// `+1.7 pts` / `-0.9 pts`: a difference between two shares, in percentage
+/// points, from tenths of a percent.
+pub fn permille_points(n: i64) -> String {
+    let sign = if n < 0 { "-" } else { "+" };
+    let n = n.abs();
+    if n % 10 == 0 {
+        format!("{sign}{} pts", n / 10)
+    } else {
+        format!("{sign}{}.{} pts", n / 10, n % 10)
     }
 }
 
@@ -630,8 +673,13 @@ mod tests {
         // 1, 2 and 3 each turned up on several days; 5 only once.
         let regulars: Vec<(i64, usize)> = tr.regulars.iter().map(|r| (r.value, r.rounds)).collect();
         assert_eq!(regulars, [(1, 3), (2, 3), (3, 2)]);
+        // 1 was picked 6 times out of 19.
+        assert_eq!(tr.regulars[0].picks, 6);
+        assert_eq!(tr.regulars[0].share_permille, 315);
 
         let h = tr.halves.unwrap();
+        assert_eq!(h.older, ("2026-09-01".to_string(), "2026-09-02".to_string()));
+        assert_eq!(h.newer, ("2026-09-03".to_string(), "2026-09-04".to_string()));
         assert_eq!(h.players, (350, 600));
         assert_eq!(h.winner, (Some(250), Some(100)));
     }
@@ -641,6 +689,14 @@ mod tests {
         let tr = trend(&day("2026-09-01", &[(1, 1), (2, 2)]));
         assert!(tr.halves.is_none());
         assert!(tr.rising.is_empty() && tr.falling.is_empty());
+    }
+
+    #[test]
+    fn changes_are_printed_with_sign_and_unit() {
+        assert_eq!(signed_hundredths(4760), "+47.6");
+        assert_eq!(signed_hundredths(-80), "-0.8");
+        assert_eq!(permille_points(17), "+1.7 pts");
+        assert_eq!(permille_points(-20), "-2 pts");
     }
 
     #[test]

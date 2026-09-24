@@ -2,34 +2,41 @@
  *
  * A terminal's materials - Cascadia Mono and Windows Terminal's "Campbell"
  * colours - set in a brutalist layout: thick rules, huge numbers, hard
- * edges, nothing rounded, nothing glowing, nothing faded. Green is the one
- * accent; red, yellow and blue only ever mean something. */
+ * edges, nothing rounded, nothing glowing, nothing faded.
+ *
+ * Three colours, taken from the bash prompt in that terminal: green (the
+ * user@host part), blue (the path) and white (the text), with grey as a
+ * dimmer white. Red is the one extra, and only ever means "went down" or
+ * "something is wrong". */
 
 :root {
   --bg: #0c0c0c;
   --fg: #cccccc;
   --hi: #f2f2f2;
-  --dim: #767676;
+  /* 6:1 on --bg. Anything darker fails WCAG AA for body-size text. */
+  --dim: #8f8f8f;
   --line: #cccccc;
   --red: #e74856;
   --green: #16c60c;
-  --yellow: #c19c00;
   --blue: #3b78ff;
-  --cyan: #61d6d6;
   --font: "Cascadia Mono", "Cascadia Code", Consolas, "Ubuntu Mono", "DejaVu Sans Mono",
     Menlo, monospace;
   --rule: 2px solid var(--line);
   /* Sections print one after another, this far apart. */
-  --beat: 110ms;
+  --beat: 80ms;
 }
 
 * { box-sizing: border-box; }
 
-html { background: var(--bg); }
+/* Always reserve the scrollbar's space, so a page that fits the window
+   (signed out, short) and one that scrolls (signed in, longer) sit in exactly
+   the same place instead of jumping sideways by the scrollbar's width. */
+html { background: var(--bg); scrollbar-gutter: stable; }
 
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -75,11 +82,31 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .top nav a { color: var(--fg); text-decoration: none; }
 .top nav a.on { background: var(--hi); color: var(--bg); padding: 0 6px; margin: 0 -6px; }
 .top nav a:hover { background: var(--hi); color: var(--bg); }
-.top nav form { margin: 0; }
 
-.status { margin-left: auto; color: var(--dim); white-space: nowrap; }
+.status { display: flex; align-items: center; gap: 14px; margin-left: auto; color: var(--dim); white-space: nowrap; }
+.status form { margin: 0; }
 .busy { color: var(--green); }
-.busy:not(:empty) { margin-right: 14px; }
+.spin:empty { display: none; }
+.busy-text:empty { display: none; }
+.busy-text { margin-left: 6px; }
+/* Log in / log out: a boxed button in the corner, regular weight. */
+.status .out,
+.status .signin {
+  display: inline-block;
+  padding: 2px 10px;
+  border: 1px solid var(--dim);
+  color: var(--fg);
+  font-weight: 400;
+  text-decoration: none;
+}
+.status .out:hover,
+.status .signin:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+/* Your login, next to the log out button: readable, not a control. */
+.status .who { color: var(--fg); }
+/* Logging in is the one blue thing in the header - it is the way in. Blue on
+   the background is 5:1, so it carries body-size text. */
+.status .signin { border-color: var(--blue); color: var(--blue); }
+.status .signin:hover { background: var(--blue); border-color: var(--blue); color: var(--bg); }
 
 main { flex: 1; padding-block: 8px 64px; }
 
@@ -91,6 +118,9 @@ footer {
   border-top: var(--rule);
   color: var(--dim);
 }
+/* What is running. Pushed to the far end of the row, the way a status bar
+   keeps the build number out of the way of everything else. */
+footer .ver { margin-left: auto; }
 
 /* ------------------------------------------------------------- sections */
 
@@ -113,7 +143,7 @@ footer {
 .tag { color: var(--dim); font-weight: 400; text-decoration: none; }
 a.tag { color: var(--fg); text-decoration: underline; }
 .tag.live { background: var(--green); color: var(--bg); padding: 0 6px; font-weight: 700; }
-.tag.warn { background: var(--yellow); color: var(--bg); padding: 0 6px; font-weight: 700; }
+.tag.warn { background: var(--blue); color: var(--bg); padding: 0 6px; font-weight: 700; }
 .tag.bad { background: var(--red); color: var(--bg); padding: 0 6px; font-weight: 700; }
 
 /* ---------------------------------------------------------------- round */
@@ -162,7 +192,7 @@ input[type="text"] {
   font: 700 2rem/1 var(--font);
   caret-color: var(--green);
 }
-input[type="text"]::placeholder { color: #3a3a3a; }
+input::placeholder { color: #6f6f6f; }
 /* Blue at rest, green while you type in it. */
 input[type="text"]:focus { outline: none; border-color: var(--green); }
 
@@ -182,7 +212,22 @@ button,
 button:hover,
 .btn:hover,
 button:focus-visible,
-.btn:focus-visible { background: var(--green); border-color: var(--green); color: var(--bg); outline: none; }
+.btn:focus-visible { background: var(--green); border-color: var(--green); color: var(--bg); }
+button:active,
+.btn:active { translate: 0 1px; }
+
+/* The way in, in blue. The text on it is --bg, not --hi: white on this blue
+   is 3.5:1 and fails AA at this size, dark on it is 5:1. */
+.btn.play { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+.btn.play:hover,
+.btn.play:focus-visible { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+
+/* The way to yesterday's numbers, under the guess box: present, but never
+   louder than locking a number in. */
+.lastlink { margin: 22px 0 0; }
+/* A plain way on, under a chart. The top margin clears the number labels,
+   which hang outside the chart's box. */
+.morelink { margin: 34px 0 0; }
 .guessform button { font-size: 1.1rem; }
 
 .btn.ghost,
@@ -230,8 +275,8 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 .notice.ok b { color: var(--green); }
 .notice.error { border-color: var(--red); }
 .notice.error b { color: var(--red); }
-.notice.warn { border-color: var(--yellow); }
-.notice.warn b { color: var(--yellow); }
+.notice.warn { border-color: var(--blue); }
+.notice.warn b { color: var(--blue); }
 
 /* ---------------------------------------------------------------- rules */
 
@@ -265,7 +310,8 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   list-style: none;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  /* Always three across, so the top three read as one line, even on a phone. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-top: var(--rule);
   border-bottom: var(--rule);
   margin-bottom: 12px;
@@ -274,13 +320,16 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 .podium li + li { padding-left: 18px; border-left: var(--rule); }
 .podium .rank { color: var(--dim); }
 .podium .wins { font-size: 2.6rem; line-height: 1.1; }
+.podium .wins-unit { color: var(--dim); font-size: 0.85rem; }
 .podium .who { color: var(--hi); font-weight: 700; overflow-wrap: anywhere; }
 .podium .p1 .rank, .podium .p1 .wins { color: var(--green); }
 
 /* Search and jump-to-day, side by side. */
-.finders { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-bottom: 16px; }
-.finder { display: flex; }
-.finder input[type="text"],
+.finders { display: flex; flex-wrap: wrap; gap: 14px 28px; margin-bottom: 18px; }
+.finder { display: flex; flex-direction: column; gap: 6px; flex: 1 1 260px; max-width: 420px; }
+.finder label { color: var(--dim); }
+.finder-row { display: flex; }
+.finder input[type="search"],
 .finder input[type="date"] {
   flex: 1 1 200px;
   padding: 6px 10px;
@@ -291,8 +340,10 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   font: inherit;
   color-scheme: dark;
 }
-.finder input:focus { outline: none; border-color: var(--green); }
-.finder button { padding: 6px 14px; }
+/* 16px, or iPhones zoom into the field when it is tapped. */
+.finder input { font-size: 16px; }
+.finder input:focus { border-color: var(--green); }
+.finder button { padding: 8px 16px; }
 .listed { margin-top: 10px; }
 
 .leaders { list-style: none; padding: 0; border-top: var(--rule); }
@@ -338,11 +389,6 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 
 .diff { width: auto; margin-bottom: 8px; }
 .diff td { font-size: 1.05rem; }
-.diff .sign { width: 2ch; font-weight: 700; }
-.diff .arrow { color: var(--dim); padding-inline: 8px; }
-.diff tr.up .sign, .diff tr.up td.b { color: var(--green); }
-.diff tr.down .sign, .diff tr.down td.b { color: var(--red); }
-.diff tr.same .sign { color: var(--dim); }
 
 /* A value with a bar beside it: the bar is the value against the largest in
    the table, so the column reads as a chart without losing the number. */
@@ -353,12 +399,16 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   vertical-align: middle;
   width: calc(var(--w) * 0.7);
   height: 10px;
-  background: var(--cyan);
+  background: var(--hi);
 }
 .barcell.win .minibar { background: var(--green); }
 .barcell.win b { color: var(--green); }
 
-details summary { cursor: pointer; color: var(--hi); font-weight: 700; }
+details summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--hi); font-weight: 700; list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+/* The disclosure state, drawn explicitly since the native marker is gone. */
+details summary::before { content: "+"; width: 2ch; color: var(--green); }
+details[open] summary::before { content: "-"; }
 details summary:hover { color: var(--green); }
 details[open] summary { margin-bottom: 12px; }
 
@@ -367,19 +417,20 @@ details[open] summary { margin-bottom: 12px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 12px; color: var(--dim); }
 .legend i { font-style: normal; }
 .legend .win { color: var(--green); }
-.legend .once, .legend .picked { color: var(--cyan); }
+.legend .once { color: var(--hi); }
+.legend .picked { color: var(--blue); }
 .legend .many { color: var(--blue); }
 
 /* One column per number, all sharing the width: the more numbers, the
    thinner each column, down to a pixel. They stand on a thick baseline. */
 .chart { position: relative; padding-top: 22px; }
 .chart-max { position: absolute; top: 0; left: 0; color: var(--dim); font-size: 0.8rem; }
-.chart-max::after { content: " picks"; }
 /* Every pick above the chart, one chip per number. */
 .tail-head { margin: 6px 0 8px; color: var(--hi); font-weight: 700; }
 .tail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.tail li { padding: 1px 7px; border: 1px solid #3a3a3a; white-space: nowrap; }
-.tail li b { color: var(--cyan); font-weight: 700; }
+.tail li { padding: 3px 8px; border: 1px solid #3a3a3a; white-space: nowrap; }
+.tail .won-tag { color: var(--green); font-weight: 700; }
+.tail li b { color: var(--hi); font-weight: 700; }
 .tail li span { margin-left: 4px; color: var(--dim); }
 .tail li.won { border-color: var(--green); }
 .tail li.won b { color: var(--green); }
@@ -389,6 +440,9 @@ details[open] summary { margin-bottom: 12px; }
   grid-template-columns: repeat(var(--n), minmax(0, 1fr));
   height: 300px;
   border-bottom: var(--rule);
+  /* Faint lines at each quarter of the scale, so heights can be compared. */
+  background-image: linear-gradient(to top, #262626 1px, transparent 1px);
+  background-size: 100% 25%;
 }
 .col { position: relative; display: flex; flex-direction: column; min-width: 0; }
 /* The plot area; a bar's height is a share of it. */
@@ -398,18 +452,30 @@ details[open] summary { margin-bottom: 12px; }
   height: var(--h);
   /* A sliver of gap between neighbours that shrinks with the column. */
   margin-inline: 12%;
-  background: var(--cyan);
+  background: var(--hi);
   transform-origin: bottom;
   animation: grow 420ms steps(6) both;
   animation-delay: calc(var(--b, 0) * var(--beat) + min(var(--i, 0) * 12ms, 600ms));
 }
+/* A chart that starts below the fold waits for the scroll instead of growing
+   where nobody is looking. app.js adds .hold, then .seen when it comes into
+   view; with no script, or no IntersectionObserver, neither class is ever set
+   and the bars animate on load as before. Held bars drop the section beat from
+   their delay -- the ordering of sections stopped mattering by the time the
+   visitor scrolled down -- and keep the per-column stagger that sweeps the
+   chart left to right. */
+.chart.hold .col-bar {
+  animation-play-state: paused;
+  animation-delay: min(var(--i, 0) * 12ms, 600ms);
+}
+.chart.hold.seen .col-bar { animation-play-state: running; }
 /* Labels hang below the baseline and may be wider than their column. */
 .col-n { position: absolute; top: 100%; left: 50%; padding-top: 4px; }
 .col-n span {
   display: block;
   translate: -50% 0;
   color: var(--dim);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 .chart { margin-bottom: 1.6em; }
@@ -427,16 +493,42 @@ details[open] summary { margin-bottom: 12px; }
   white-space: nowrap;
 }
 .win .col-bar { background: var(--green); }
-.once .col-bar, .picked .col-bar { background: var(--cyan); }
+.once .col-bar { background: var(--hi); }
+/* Trends: numbers that never won a day are blue, winners green. */
+.picked .col-bar { background: var(--blue); }
 .many .col-bar { background: var(--blue); }
 .col:hover .col-c { visibility: visible; }
-.col:hover .col-n span { color: var(--hi); }
+/* Every column carries its number under the axis; only round numbers show
+   it, the rest appear while hovered, drawn over their neighbours. */
+.col-n span:not(.shown) { visibility: hidden; }
+.col:hover .col-n span { visibility: visible; position: relative; z-index: 2; padding: 0 3px; background: var(--hi); color: var(--bg); }
+/* The winner is marked by a shape as well as by colour. */
+.col-mark {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  translate: -50% 0;
+  color: var(--green);
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+.col:hover .col-mark { visibility: hidden; }
 .col:hover .col-bar { filter: brightness(1.35); }
 
 /* --------------------------------------------------------------- trends */
 
 .ranges { display: flex; gap: 10px; font-weight: 400; }
-.ranges a { color: var(--fg); text-decoration: none; padding: 0 6px; border: 1px solid var(--dim); }
+.ranges a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--dim);
+  color: var(--fg);
+  text-decoration: none;
+}
 .ranges a.on { background: var(--hi); border-color: var(--hi); color: var(--bg); font-weight: 700; }
 
 .analyse { color: var(--dim); }
@@ -456,7 +548,7 @@ details[open] summary { margin-bottom: 12px; }
 .testbanner {
   margin: 0;
   padding: 6px 20px;
-  background: var(--yellow);
+  background: var(--blue);
   color: var(--bg);
 }
 .testbanner b { color: var(--bg); }
@@ -493,7 +585,7 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 
 /* --------------------------------------------------------------- motion */
 /* Hard steps only. Sections switch on one after another like lines printed
-   to a terminal; bars fill cell by cell; the stamp lands in three frames. */
+   to a terminal; bars fill cell by cell. */
 
 @keyframes show { from { visibility: hidden; } }
 @keyframes fill { from { width: 1ch; } }
@@ -504,18 +596,114 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
   50% { transform: rotate(4deg) scale(0.9); }
   100% { transform: rotate(4deg); }
 }
+/* A number locked in just now gets the stamp slammed on, in three frames. */
+.notice.ok ~ .sealed .stamp { animation: stamp 300ms steps(3) 350ms both; }
 
 .sec, .card { animation: show 1ms both; animation-delay: calc(var(--b, 0) * var(--beat)); }
 .meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; width: 32ch; animation: fill 420ms steps(30) 80ms both; }
-.notice.ok ~ .sealed .stamp { animation: stamp 300ms steps(3) 350ms both; }
 
 button.is-busy { pointer-events: none; }
 
+
+/* ---------------------------------------------------------- accessibility */
+
+/* One visible focus ring for everything reachable by keyboard. */
+:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
+main:focus { outline: none; }
+
+a, button, summary, input, label { touch-action: manipulation; }
+
+.skip {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 100;
+  padding: 10px 14px;
+  background: var(--green);
+  color: var(--bg);
+  font-weight: 700;
+  text-decoration: none;
+}
+.skip:focus { top: 12px; }
+
+.rule label { cursor: pointer; }
+
+
+/* Keep running text to a readable measure. */
+.sec > p.dim, .notice, .message, .rules { max-width: 72ch; }
+
+
+/* The rest of a long tail, folded away. */
+.tail-more { margin-top: 8px; }
+.tail-more .tail { margin-top: 8px; }
+
+/* Plain-language notes next to the numbers on the trends page. */
+.explain { margin-bottom: 14px; color: var(--dim); max-width: 80ch; }
+.explain b { color: var(--fg); }
+/* "what changed": label on the left, "before -> after  change" on the right. */
+.diff { width: 100%; max-width: 640px; }
+.diff td { vertical-align: baseline; }
+.diff .num { white-space: nowrap; }
+.diff .after { font-weight: 700; color: var(--hi); }
+.diff .change { display: inline-block; min-width: 7ch; font-weight: 700; text-align: right; }
+.diff tr.up .change, .diff tr.up .after { color: var(--green); }
+.diff tr.down .change, .diff tr.down .after { color: var(--red); }
+.diff tr.same .change { color: var(--dim); }
+/* The two lists sit side by side and start on the same line. */
+.pair { align-items: start; margin-top: 8px; }
+.ranked em { font-style: normal; font-weight: 700; }
+/* Rising numbers are green, falling ones red, each with a triangle too. */
+.ranked .up em { color: var(--green); }
+.ranked .down em { color: var(--red); }
+.ranked .up em::after { content: " \25B2"; }
+.ranked .down em::after { content: " \25BC"; }
+
+/* Your own status in the third box on the home page. */
+.figures .you b { color: var(--fg); }
+.figures .you.in b { color: var(--green); }
+
+/* Headings wrap into balanced lines; running text avoids one-word last lines. */
+.rule span, .question, .message { text-wrap: balance; }
+p, li { text-wrap: pretty; }
+
+/* Table rows light up under the pointer, to keep your place along a row. */
+.grid tbody tr:hover td, .history tbody tr:hover td { background: #161616; }
+
+/* Coarse pointers (phones) get the full 44px on every small control. */
+@media (pointer: coarse) {
+  .top nav a, .status .out, .status .signin { display: inline-flex; align-items: center; min-height: 44px; }
+  .top nav a.on { padding: 0 6px; }
+  .ranges a { min-height: 44px; }
+  .tail li { padding: 8px 10px; }
+  .finder button, .finder input { min-height: 44px; }
+}
+
 @media (max-width: 640px) {
-  body { font-size: 14px; }
   .top, main, footer { padding-inline: 14px; }
   .status .clock { display: none; }
-  .figures p + p { padding-left: 0; border-left: 0; border-top: 1px solid #2a2a2a; }
+  /* Two rows on a phone: brand and account, then the navigation. */
+  .top { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
+  .top nav { grid-column: 1 / -1; grid-row: 2; margin: 0 -10px; }
+  .status { margin-left: 0; gap: 10px; }
+  .podium li { padding: 10px 8px 10px 0; }
+  .podium li + li { padding-left: 10px; }
+  .podium .wins { font-size: 2rem; }
+  .podium .dim { display: none; }
+  .figures { grid-template-columns: 1fr 1fr; }
+  .figures p + p { padding-left: 0; border-left: 0; }
+  .figures p:nth-child(2) { padding-left: 14px; border-left: 1px solid #2a2a2a; }
+  .figures p:nth-child(3) { grid-column: 1 / -1; border-top: 1px solid #2a2a2a; }
+  .figures b { font-size: 2rem; }
+  /* "what changed": the label on its own line, the numbers under it. */
+  .diff tr { display: block; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
+  .diff td { display: block; padding: 0; border: 0; }
+  .diff td.num { text-align: left; margin-top: 2px; }
+  .diff .change { min-width: 0; margin-left: 8px; }
+  /* The "analysing" bar gets a line of its own instead of breaking mid-way. */
+  .analyse-bar { display: block; }
+  /* Short lists (most / least picked) stay side by side. */
+  .split.duo { grid-template-columns: 1fr 1fr; gap: 0 20px; }
+  .duo .ranked b { font-size: 1.25rem; }
   .sealed { display: block; }
   .kv { grid-template-columns: 1fr; gap: 0; }
   .kv dd { margin-bottom: 6px; }
@@ -527,5 +715,9 @@ button.is-busy { pointer-events: none; }
     animation-duration: 0.01ms !important;
     animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
+    /* app.js does not hold anything when reduced motion is asked for, but if
+       a class ever survives a cached page, a paused bar would sit invisible
+       at scaleY(0) forever. */
+    animation-play-state: running !important;
   }
 }

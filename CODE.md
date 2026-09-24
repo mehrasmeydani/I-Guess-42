@@ -1769,6 +1769,16 @@ template — this project keeps it to trivial cases like `is_empty` and `len`.
 
 ## `static/` — CSS and the script
 
+### Caching
+
+`base.html` links the stylesheet and script as `/static/style.css?v=...`. The
+number is `templates::ASSET_VERSION`, an FNV-1a hash of both files computed at
+compile time; `include_bytes!` makes cargo rebuild when either file changes,
+so the URL changes with the content and no browser can pair a new page with
+an old cached stylesheet. `/static` also answers with `Cache-Control:
+no-cache` (set in `main.rs`), so browsers keep the files but check back,
+which costs a 304 when nothing changed.
+
 ### `app.js`
 
 The only JavaScript in the project. Everything works without it.
@@ -1841,6 +1851,19 @@ height is the server-computed share (`--h`), with a gap that is a percentage
 of the column so it shrinks too. Labels hang below the thick baseline and may
 be wider than their column. The count shows on hover, and the whole column is
 the hover target, so even an empty number reports "nobody".
+
+Accessibility is part of the look, not an afterthought. Secondary text
+(`--dim`, `#8f8f8f`) is 6:1 against the background; every colour used for text
+is at least 4.5:1. Everything reachable by keyboard gets the same 3px green
+`:focus-visible` ring, a "skip to content" link appears on the first Tab, and
+each page has a (visually hidden) `h1`. Navigation links, the range switches,
+fold-out toggles and the account button are at least 44px tall, and on touch
+screens (`pointer: coarse`) the smaller controls grow to 44px too. Text stays
+16px on phones, because iOS zooms into any input set smaller. The winner is
+marked on the chart by a ▼ as well as by colour. The loading spinner writes
+its glyphs into an `aria-hidden` span and its message once into a
+`role="status"` span, so a screen reader says "loading /results" once instead
+of reading every frame.
 
 Motion is in hard steps, never fades: sections switch on one after another
 (`--b` is each section's position, `--beat` the gap), the countdown's bar and
@@ -2033,19 +2056,6 @@ shows certificate problems, which is where they always turn up.
 
 This is why the app itself speaks only plain HTTP and knows nothing about
 certificates.
-
-### `deploy/`
-
-- **`provision.sh`** — creates the EC2 instance, security group, key pair and
-  Elastic IP. Idempotent: each step checks for an existing resource first, so
-  re-running is safe.
-- **`cloud-init.sh`** — runs once on first boot to install Docker and add a
-  swap file, because a t3.micro's 1 GB of RAM is tight.
-- **`deploy.sh`** — builds the image **locally** and pipes it over SSH
-  (`docker save | gzip | ssh 'docker load'`). Compiling Rust on a 1 GB instance
-  would fail; this needs no container registry either.
-- **`teardown.sh`** — deletes everything, so the billing stops. Requires typing
-  the instance id to confirm.
 
 ---
 

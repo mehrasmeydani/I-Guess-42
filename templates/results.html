@@ -1,20 +1,49 @@
 {% extends "base.html" %}
 {% block title %}Results &middot; i guess low{% endblock %}
-{% block nav_results %}on{% endblock %}
+{% block h1 %}results{% endblock %}
+{% block nav_results %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
-<section class="sec" style="--b: 0">
+{# The day that just closed, with the day page's own chart. Always here: not
+   behind the range switches, and not replaced by a search. #}
+{% match latest %}
+  {% when Some with (r) %}
+    <section class="sec" style="--b: 0">
+      <h2 class="rule"><span>last round</span><span class="tag">{{ r.date_key }}</span></h2>
+      {% match r.winner %}
+        {% when Some with (w) %}
+          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }} &middot; {{ r.total }} played</span></p>
+        {% when None %}
+          <p class="verdict"><b class="lose">&times;</b> <span>no winner &middot; {{ r.total }} played</span></p>
+      {% endmatch %}
+      {% match chart %}
+        {% when Some with (chart) %}
+          {# The same legend the day page prints over the same chart. #}
+          <p class="legend">
+            <span><i class="win">&#9608;</i> winner</span>
+            <span><i class="once">&#9608;</i> picked by one player</span>
+            <span><i class="many">&#9608;</i> shared</span>
+          </p>
+          {% include "chart.html" %}
+        {% when None %}
+      {% endmatch %}
+      <p class="morelink"><a href="/day/{{ r.date_key }}">details &rarr;</a></p>
+    </section>
+  {% when None %}
+{% endmatch %}
+
+<section class="sec" style="--b: 1">
   <h2 class="rule"><span>most days won</span></h2>
   {% if leaders.is_empty() %}
     <p class="dim">nobody has won a round yet.</p>
   {% else %}
     <ol class="podium">
       {% for l in leaders %}
-        <li class="p{{ loop.index }}">
+        <li class="p{{ loop.index }}" title="{{ l.display_name }}">
           <span class="rank">{{ "{:02}"|format(loop.index) }}</span>
           <b class="wins">{{ l.wins }}</b>
+          <span class="wins-unit">{% if l.wins == 1 %}day{% else %}days{% endif %} won</span>
           <span class="who">{{ l.login }}</span>
-          <span class="dim">{{ l.display_name }}</span>
         </li>
       {% endfor %}
     </ol>
@@ -22,11 +51,12 @@
       <details>
         <summary>show everyone ({{ rest.len() }} more)</summary>
         <table class="grid">
+          <thead><tr><th class="num">#</th><th>login</th><th class="num">days won</th></tr></thead>
           <tbody>
             {% for l in rest %}
-              <tr>
+              <tr title="{{ l.display_name }}">
                 <td class="num dim">{{ "{:02}"|format(loop.index + 3) }}</td>
-                <td>{{ l.login }} <span class="dim">{{ l.display_name }}</span></td>
+                <td>{{ l.login }}</td>
                 <td class="num b">{{ l.wins }}</td>
               </tr>
             {% endfor %}
@@ -37,7 +67,7 @@
   {% endif %}
 </section>
 
-<section class="sec" style="--b: 1">
+<section class="sec" style="--b: 2">
   <h2 class="rule"><span>rounds</span>
     <span class="ranges">
       <a class="{% if q.is_empty() && show == "7" %}on{% endif %}" href="/results">7</a>
@@ -47,16 +77,20 @@
   </h2>
 
   <div class="finders">
-    <form method="get" action="/results" class="finder">
-      <label class="sr" for="q">search rounds</label>
-      <input id="q" name="q" type="text" value="{{ q }}" placeholder="login, number or 2026-08"
-             autocomplete="off" spellcheck="false">
-      <button type="submit">search</button>
+    <form method="get" action="/results" class="finder" role="search">
+      <label for="q">search rounds</label>
+      <div class="finder-row">
+        <input id="q" name="q" type="search" value="{{ q }}" placeholder="login, number or month"
+               autocomplete="off" spellcheck="false" enterkeyhint="search">
+        <button type="submit">search</button>
+      </div>
     </form>
     <form method="get" action="/results" class="finder">
-      <label class="sr" for="date">go to a day</label>
-      <input id="date" name="date" type="date">
-      <button type="submit">go to day</button>
+      <label for="date">go to a day</label>
+      <div class="finder-row">
+        <input id="date" name="date" type="date" required>
+        <button type="submit">open</button>
+      </div>
     </form>
   </div>
 
@@ -86,7 +120,7 @@
         {% endfor %}
       </tbody>
     </table>
-    <p class="dim listed">
+    <p class="dim listed" role="status">
       {% if q.is_empty() %}
         {{ rounds.len() }} of {{ total_rounds }} rounds.
         {% if rounds.len() < total_rounds %}

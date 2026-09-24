@@ -3,5 +3,6 @@
 .env
 .env.*
 !.env.example
-deploy/.host
-deploy/.proxmox
+
+# Server-specific overrides (ports, reverse proxy) stay on the server.
+compose.override.yml

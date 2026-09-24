@@ -154,6 +154,21 @@ pub async fn results(
 
     let all = db::closed_rounds(&state.db, &round_key, HISTORY_LIMIT).await?;
     let total_rounds = all.len();
+
+    // The round that closed most recently, with the same chart the day page
+    // draws. It is what most people open /results for, so it sits above the
+    // leaderboard and stays there whatever the range switch or a search does
+    // to the table below. One extra day's tallies; the page is already doing
+    // more work than this.
+    let (latest, chart) = match all.first().cloned() {
+        Some(newest) => {
+            let tallies = db::round_tallies(&state.db, &newest.round_date).await?;
+            let day = stats::analyse(&tallies);
+            let chart = stats::day_chart(&tallies, &day);
+            (Some(RoundView::from(newest)), Some(chart))
+        }
+        None => (None, None),
+    };
     let q = query.q.unwrap_or_default().trim().to_string();
     let show: &'static str = match query.show.as_deref() {
         Some("30") => "30",
@@ -184,6 +199,8 @@ pub async fn results(
         user: user.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
+        latest,
+        chart,
         rounds,
         total_rounds,
         q,

@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0c0c0c">
   <title>{% block title %}i guess low{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/app.js" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v={{ crate::templates::ASSET_VERSION }}">
+  <script src="/static/app.js?v={{ crate::templates::ASSET_VERSION }}" defer></script>
 </head>
 <body>
+  <a class="skip" href="#main">skip to content</a>
+
   {% if test_mode %}
   <div class="testbanner">
     <b>test instance</b> &mdash;
@@ -29,28 +31,38 @@
 
   <header class="top">
     <a class="brand" href="/">i guess <b>low</b></a>
-    <nav>
-      <a class="{% block nav_round %}{% endblock %}" href="/">round</a>
-      <a class="{% block nav_results %}{% endblock %}" href="/results">results</a>
-      <a class="{% block nav_trends %}{% endblock %}" href="/trends">trends</a>
+    <nav aria-label="main">
+      <a {% block nav_round %}{% endblock %} href="/">round</a>
+      <a {% block nav_results %}{% endblock %} href="/results">results</a>
+      <a {% block nav_trends %}{% endblock %} href="/trends">trends</a>
+    </nav>
+    <div class="status">
+      {# The spinner glyphs are decoration; only the one-off message is read out. #}
+      <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>
+      <span class="clock"></span>
       {% match user %}
         {% when Some with (u) %}
+          {# Your login is only your name; logging out is its own button. #}
+          <span class="who" title="{{ u.display_name }}">{{ u.login }}</span>
           <form method="post" action="/logout" class="inline">
-            <button class="linkish" type="submit" title="sign out">{{ u.login }} &times;</button>
+            <button class="linkish out" type="submit" aria-label="log out {{ u.login }}">log out</button>
           </form>
         {% when None %}
-          <a href="/login">sign in</a>
+          <a class="signin" href="/login">log in to play</a>
       {% endmatch %}
-    </nav>
-    <span class="status"><span class="busy" aria-live="polite"></span><span class="clock"></span></span>
+    </div>
   </header>
 
-  <main>{% block content %}{% endblock %}</main>
+  <main id="main" tabindex="-1">
+    <h1 class="sr">{% block h1 %}i guess low{% endblock %}</h1>
+    {% block content %}{% endblock %}
+  </main>
 
   <footer>
     <span>lowest unique number wins</span>
     <span>every day 12:42 vienna</span>
     <span>made by students, for students</span>
+    <span class="ver">v{{ crate::templates::VERSION }}</span>
   </footer>
 </body>
 </html>

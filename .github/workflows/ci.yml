@@ -1,0 +1,70 @@
+# Runs on every pull request and on pushes to dev and main.
+#
+# The contributor checklist in the README is `cargo test` and
+# `cargo clippy --all-targets`; this runs exactly those, plus a build of the
+# production image so a broken Dockerfile is caught before a deploy rather
+# than during one. Nothing here deploys: rolling out stays a manual step.
+#
+# `cargo fmt` is deliberately absent — the tree has never been rustfmt'd and
+# checking it would fail on every file.
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+# A new push to the same branch cancels the run still going for the old one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: clippy + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # Caches ~/.cargo and target/ keyed on Cargo.lock, so only the first run
+      # pays for compiling the dependency tree.
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # Warnings are errors here. The tree is clippy-clean today; keeping it
+      # that way is cheaper than cleaning it up later.
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # The suite is self-contained: in-memory SQLite, no env vars, no network.
+      - name: Tests
+        run: cargo test
+
+  image:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Built, not pushed: this only proves the multi-stage build still works.
+      # Layers are cached in the Actions cache between runs.
+      - name: Build the production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ round.date_key }} &middot; i guess low{% endblock %}
-{% block nav_results %}on{% endblock %}
+{% block h1 %}round {{ round.date_key }}{% endblock %}
+{% block nav_results %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
 <section class="sec" style="--b: 0">
@@ -25,7 +26,7 @@
   {% include "chart.html" %}
 </section>
 
-<div class="split">
+<div class="split duo">
   <section class="sec" style="--b: 2">
     <h2 class="rule"><span>most picked</span></h2>
     <ol class="ranked">

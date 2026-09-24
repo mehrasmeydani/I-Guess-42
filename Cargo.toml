@@ -1,6 +1,6 @@
 [package]
 name = "i_guess_42"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.80"
 
@@ -8,7 +8,7 @@ rust-version = "1.80"
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["fs", "trace"] }
+tower-http = { version = "0.6", features = ["fs", "trace", "set-header"] }
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",
     "sqlite",
