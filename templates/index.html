@@ -30,12 +30,6 @@
     {% when None %}
   {% endmatch %}
 
-  {% match last_round %}
-    {% when Some with (r) %}
-      <p class="lastlink"><a class="btn ghost" href="/day/{{ r.date_key }}">analyse yesterday &rarr;</a></p>
-    {% when None %}
-  {% endmatch %}
-
   {% match user %}
     {% when Some with (_u) %}
       {% match my_guess_label %}
@@ -60,6 +54,12 @@
     {% when None %}
       <h2 class="rule"><span>play</span></h2>
       <a class="btn play" href="/login">log in to play &rarr;</a>
+  {% endmatch %}
+
+  {% match last_round %}
+    {% when Some with (r) %}
+      <p class="lastlink"><a class="btn ghost" href="/day/{{ r.date_key }}">analyse yesterday &rarr;</a></p>
+    {% when None %}
   {% endmatch %}
 </section>
 
