@@ -1769,6 +1769,16 @@ template — this project keeps it to trivial cases like `is_empty` and `len`.
 
 ## `static/` — CSS and the script
 
+### Caching
+
+`base.html` links the stylesheet and script as `/static/style.css?v=...`. The
+number is `templates::ASSET_VERSION`, an FNV-1a hash of both files computed at
+compile time; `include_bytes!` makes cargo rebuild when either file changes,
+so the URL changes with the content and no browser can pair a new page with
+an old cached stylesheet. `/static` also answers with `Cache-Control:
+no-cache` (set in `main.rs`), so browsers keep the files but check back,
+which costs a 304 when nothing changed.
+
 ### `app.js`
 
 The only JavaScript in the project. Everything works without it.

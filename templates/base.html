@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0c0c0c">
   <title>{% block title %}i guess low{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/app.js" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v={{ crate::templates::ASSET_VERSION }}">
+  <script src="/static/app.js?v={{ crate::templates::ASSET_VERSION }}" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">skip to content</a>

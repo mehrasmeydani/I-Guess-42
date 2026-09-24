@@ -6,6 +6,26 @@ use crate::db::{GuessRow, LeaderboardRow, RoundSummary, User};
 use crate::round;
 use crate::stats::{self, Chart, Tally, Trend};
 
+/// A fingerprint of the stylesheet and script, put in their URLs
+/// (`style.css?v=...`) so a browser can never pair a new page with an old
+/// cached stylesheet. Computed at compile time; `include_bytes!` also makes
+/// cargo rebuild whenever either file changes.
+pub const ASSET_VERSION: u64 = {
+    let css = fnv1a(include_bytes!("../static/style.css"), 0xcbf2_9ce4_8422_2325);
+    fnv1a(include_bytes!("../static/app.js"), css)
+};
+
+/// FNV-1a, 64-bit: tiny, and good enough to notice that a file changed.
+const fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
+    let mut i = 0;
+    while i < bytes.len() {
+        hash ^= bytes[i] as u64;
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+        i += 1;
+    }
+    hash
+}
+
 /// Insert thin separators every three digits, so a 19-digit guess is readable.
 pub fn group_digits(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
@@ -213,16 +233,12 @@ pub struct DayLineView {
 /// An older-half vs newer-half comparison, printed as `before -> after`.
 pub struct ChangeView {
     pub label: &'static str,
-    /// What the numbers count, printed after them.
-    pub unit: &'static str,
-    /// One line on what the row means.
+    /// One line on what the row means, shown on hover.
     pub explain: &'static str,
     pub before: String,
     pub after: String,
     /// Signed difference, e.g. "+47.6"; empty if either side is missing.
     pub delta: String,
-    /// Relative change, e.g. "+28%"; empty when it would mean nothing.
-    pub pct: String,
     /// "up", "down" or "same".
     pub dir: &'static str,
 }
@@ -230,7 +246,6 @@ pub struct ChangeView {
 impl ChangeView {
     fn new(
         label: &'static str,
-        unit: &'static str,
         explain: &'static str,
         before: Option<i64>,
         after: Option<i64>,
@@ -241,18 +256,16 @@ impl ChangeView {
             (Some(b), Some(a)) if a < b => "down",
             _ => "same",
         };
-        let (delta, pct) = match (before, after) {
-            (Some(b), Some(a)) => (stats::signed_hundredths(a - b), stats::percent_change(b, a)),
-            _ => (String::new(), String::new()),
+        let delta = match (before, after) {
+            (Some(b), Some(a)) => stats::signed_hundredths(a - b),
+            _ => String::new(),
         };
         Self {
             label,
-            unit,
             explain,
             before: show(before),
             after: show(after),
             delta,
-            pct,
             dir,
         }
     }
@@ -293,12 +306,9 @@ pub struct TrendsTemplate {
     /// Newest first, every day in the range.
     pub days: Vec<DayLineView>,
     pub changes: Vec<ChangeView>,
-    /// The two halves being compared, as "first to last" date ranges, and
-    /// how many days each holds.
+    /// The two halves being compared, as short date ranges.
     pub older_range: String,
     pub newer_range: String,
-    pub older_days: usize,
-    pub newer_days: usize,
     pub rising: Vec<MoverView>,
     pub falling: Vec<MoverView>,
     pub regulars: Vec<RegularView>,
@@ -321,14 +331,18 @@ impl TrendsTemplate {
             delta: stats::permille_points(m.after_permille - m.before_permille),
         };
         let date_span = |(from, to): &(String, String)| {
-            if from == to { from.clone() } else { format!("{from} to {to}") }
+            // The year is the same on both sides almost always; leave it out.
+            let short = |d: &str| d.get(5..).unwrap_or(d).to_string();
+            if from == to {
+                short(from)
+            } else {
+                format!("{} to {}", short(from), short(to))
+            }
         };
         let (older_range, newer_range) = trend
             .halves
             .as_ref()
             .map_or_else(Default::default, |h| (date_span(&h.older), date_span(&h.newer)));
-        let older_days = trend.days.len() / 2;
-        let newer_days = trend.days.len() - older_days;
         let most_players = trend.days.iter().map(|d| d.players).max().unwrap_or(1).max(1);
         let top_winner = trend.days.iter().filter_map(|d| d.winner).max().unwrap_or(1).max(1);
         // Rounded up, so any non-zero value shows at least a sliver.
@@ -337,21 +351,18 @@ impl TrendsTemplate {
             vec![
                 ChangeView::new(
                     "players per day",
-                    "players",
                     "average number of people who guessed each day",
                     Some(h.players.0),
                     Some(h.players.1),
                 ),
                 ChangeView::new(
                     "winning number",
-                    "",
                     "average of the numbers that won; days with no winner are skipped",
                     h.winner.0,
                     h.winner.1,
                 ),
                 ChangeView::new(
                     "lowest free number",
-                    "",
                     "average lowest number nobody picked - the easiest win there was",
                     Some(h.lowest_free.0),
                     Some(h.lowest_free.1),
@@ -383,8 +394,6 @@ impl TrendsTemplate {
             changes,
             older_range,
             newer_range,
-            older_days,
-            newer_days,
             rising: trend.rising.iter().map(mover).collect(),
             falling: trend.falling.iter().map(mover).collect(),
             regulars: trend

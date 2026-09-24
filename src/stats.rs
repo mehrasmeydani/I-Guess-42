@@ -480,20 +480,6 @@ pub fn signed_hundredths(n: i64) -> String {
     format!("{sign}{}", hundredths(n.abs()))
 }
 
-/// `+28%` for the relative change from `before` to `after`; empty when
-/// `before` is zero, where a percentage means nothing.
-pub fn percent_change(before: i64, after: i64) -> String {
-    if before == 0 {
-        return String::new();
-    }
-    let pct = (after - before) * 100 / before;
-    if pct >= 0 {
-        format!("+{pct}%")
-    } else {
-        format!("{pct}%")
-    }
-}
-
 /// `+1.7 pts` / `-0.9 pts`: a difference between two shares, in percentage
 /// points, from tenths of a percent.
 pub fn permille_points(n: i64) -> String {
@@ -709,9 +695,6 @@ mod tests {
     fn changes_are_printed_with_sign_and_unit() {
         assert_eq!(signed_hundredths(4760), "+47.6");
         assert_eq!(signed_hundredths(-80), "-0.8");
-        assert_eq!(percent_change(1696, 2172), "+28%");
-        assert_eq!(percent_change(1600, 1520), "-5%");
-        assert_eq!(percent_change(0, 5), "");
         assert_eq!(permille_points(17), "+1.7 pts");
         assert_eq!(permille_points(-20), "-2 pts");
     }

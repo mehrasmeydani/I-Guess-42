@@ -14,7 +14,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use axum::routing::{get, post};
 use axum::Router;
+use axum::http::{header, HeaderValue};
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeader;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -83,7 +85,17 @@ async fn main() -> Result<()> {
         .route("/admin/impersonate", post(handlers::admin_impersonate))
         // Not admin-gated: the caller is a demo account by the time they need it.
         .route("/admin/return", post(handlers::admin_return))
-        .nest_service("/static", ServeDir::new("static"))
+        // no-cache: browsers keep the files but check back each time (a cheap
+        // 304 when nothing changed), so a new stylesheet reaches everyone on
+        // their next page load instead of whenever their cache expires.
+        .nest_service(
+            "/static",
+            SetResponseHeader::overriding(
+                ServeDir::new("static"),
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-cache"),
+            ),
+        )
         .fallback(handlers::not_found)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

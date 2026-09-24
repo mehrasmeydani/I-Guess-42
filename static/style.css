@@ -387,11 +387,6 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 
 .diff { width: auto; margin-bottom: 8px; }
 .diff td { font-size: 1.05rem; }
-.diff .sign { width: 2ch; font-weight: 700; }
-.diff .arrow { color: var(--dim); padding-inline: 8px; }
-.diff tr.up .sign, .diff tr.up td.b { color: var(--green); }
-.diff tr.down .sign, .diff tr.down td.b { color: var(--red); }
-.diff tr.same .sign { color: var(--dim); }
 
 /* A value with a bar beside it: the bar is the value against the largest in
    the table, so the column reads as a chart without losing the number. */
@@ -620,21 +615,30 @@ a, button, summary, input, label { touch-action: manipulation; }
 .sec > p.dim, .notice, .message, .rules { max-width: 72ch; }
 
 
+/* The rest of a long tail, folded away. */
+.tail-more { margin-top: 8px; }
+.tail-more .tail { margin-top: 8px; }
+
 /* Plain-language notes next to the numbers on the trends page. */
 .explain { margin-bottom: 14px; color: var(--dim); max-width: 80ch; }
 .explain b { color: var(--fg); }
-.row-explain { display: block; color: var(--dim); font-size: 0.85rem; }
-.diff .change { white-space: nowrap; font-weight: 700; }
-.diff tr.up .change { color: var(--green); }
-.diff tr.down .change { color: var(--red); }
+/* "what changed": label on the left, "before -> after  change" on the right. */
+.diff { width: 100%; max-width: 640px; }
+.diff td { vertical-align: baseline; }
+.diff .num { white-space: nowrap; }
+.diff .after { font-weight: 700; color: var(--hi); }
+.diff .change { display: inline-block; min-width: 7ch; font-weight: 700; text-align: right; }
+.diff tr.up .change, .diff tr.up .after { color: var(--green); }
+.diff tr.down .change, .diff tr.down .after { color: var(--red); }
 .diff tr.same .change { color: var(--dim); }
-.diff .change .dim { font-weight: 400; }
-.ranked em { margin-left: 6px; color: var(--fg); font-style: normal; }
+/* The two lists sit side by side and start on the same line. */
+.pair { align-items: start; margin-top: 8px; }
+.ranked em { font-style: normal; font-weight: 700; }
 /* Rising numbers are green, falling ones red, each with a triangle too. */
 .ranked .up em { color: var(--green); }
 .ranked .down em { color: var(--red); }
-.ranked .up em::before { content: "\25B2  "; }
-.ranked .down em::before { content: "\25BC  "; }
+.ranked .up em::after { content: " \25B2"; }
+.ranked .down em::after { content: " \25BC"; }
 
 /* Headings wrap into balanced lines; running text avoids one-word last lines. */
 .rule span, .question, .message { text-wrap: balance; }
@@ -667,7 +671,16 @@ p, li { text-wrap: pretty; }
   .figures p:nth-child(2) { padding-left: 14px; border-left: 1px solid #2a2a2a; }
   .figures p:nth-child(3) { grid-column: 1 / -1; border-top: 1px solid #2a2a2a; }
   .figures b { font-size: 2rem; }
-  .grid { display: block; overflow-x: auto; }
+  /* "what changed": the label on its own line, the numbers under it. */
+  .diff tr { display: block; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
+  .diff td { display: block; padding: 0; border: 0; }
+  .diff td.num { text-align: left; margin-top: 2px; }
+  .diff .change { min-width: 0; margin-left: 8px; }
+  /* The "analysing" bar gets a line of its own instead of breaking mid-way. */
+  .analyse-bar { display: block; }
+  /* Short lists (most / least picked) stay side by side. */
+  .split.duo { grid-template-columns: 1fr 1fr; gap: 0 20px; }
+  .duo .ranked b { font-size: 1.25rem; }
   .sealed { display: block; }
   .kv { grid-template-columns: 1fr; gap: 0; }
   .kv dd { margin-bottom: 6px; }
