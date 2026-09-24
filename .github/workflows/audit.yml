@@ -49,3 +49,12 @@ jobs:
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # RUSTSEC-2023-0071 (rsa, Marvin timing sidechannel) has no fixed
+          # release. It reaches Cargo.lock through sqlx-mysql, which this crate
+          # never builds: sqlx is `default-features = false` with the `sqlite`
+          # feature only, and a full build produces sqlx_core, sqlx_macros and
+          # sqlx_sqlite - no mysql backend, and no rsa artifact. Cargo.lock
+          # lists it, the binary does not contain it. Ignored so the weekly run
+          # does not file the same non-issue every Monday; drop this line if a
+          # MySQL backend is ever switched on.
+          ignore: RUSTSEC-2023-0071
