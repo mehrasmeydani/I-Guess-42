@@ -256,16 +256,6 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   border: 2px solid var(--green);
 }
 .sealed-value { color: var(--hi); font-size: clamp(2.6rem, 10vw, 5rem); font-weight: 700; line-height: 1; word-break: break-all; }
-.stamp {
-  position: absolute;
-  top: -14px;
-  right: -12px;
-  padding: 2px 8px;
-  background: var(--red);
-  color: var(--bg);
-  font-weight: 700;
-  transform: rotate(4deg);
-}
 
 /* ------------------------------------------------------------- messages */
 
@@ -565,21 +555,14 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 
 /* --------------------------------------------------------------- motion */
 /* Hard steps only. Sections switch on one after another like lines printed
-   to a terminal; bars fill cell by cell; the stamp lands in three frames. */
+   to a terminal; bars fill cell by cell. */
 
 @keyframes show { from { visibility: hidden; } }
 @keyframes fill { from { width: 1ch; } }
 @keyframes grow { from { transform: scaleY(0); } }
-@keyframes stamp {
-  0% { visibility: hidden; }
-  1% { visibility: visible; transform: rotate(4deg) scale(2.2); }
-  50% { transform: rotate(4deg) scale(0.9); }
-  100% { transform: rotate(4deg); }
-}
 
 .sec, .card { animation: show 1ms both; animation-delay: calc(var(--b, 0) * var(--beat)); }
 .meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; width: 32ch; animation: fill 420ms steps(30) 80ms both; }
-.notice.ok ~ .sealed .stamp { animation: stamp 300ms steps(3) 350ms both; }
 
 button.is-busy { pointer-events: none; }
 
@@ -607,9 +590,6 @@ a, button, summary, input, label { touch-action: manipulation; }
 
 .rule label { cursor: pointer; }
 
-/* Your own status on the home page. */
-.figures .you b { color: var(--fg); }
-.figures .you.in b { color: var(--green); }
 
 /* Keep running text to a readable measure. */
 .sec > p.dim, .notice, .message, .rules { max-width: 72ch; }
@@ -639,6 +619,23 @@ a, button, summary, input, label { touch-action: manipulation; }
 .ranked .down em { color: var(--red); }
 .ranked .up em::after { content: " \25B2"; }
 .ranked .down em::after { content: " \25BC"; }
+
+/* Home: what you can do sits right under the clock, then two quiet stats. */
+.play { margin-top: 26px; display: grid; gap: 10px; justify-items: start; }
+.play .guessform, .play .notice { width: 100%; }
+.play-label { color: var(--hi); font-weight: 700; }
+/* The login button carries a whole sentence; let it wrap on a phone. */
+.play .btn { white-space: normal; }
+.stats-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 28px;
+  margin-top: 26px;
+  padding-top: 12px;
+  border-top: var(--rule);
+  color: var(--dim);
+}
+.stats-line b { color: var(--hi); }
 
 /* Headings wrap into balanced lines; running text avoids one-word last lines. */
 .rule span, .question, .message { text-wrap: balance; }

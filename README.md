@@ -71,6 +71,14 @@ If you want to rebuild this yourself rather than read the finished code,
 which sources are authoritative, and the design questions you should decide for
 yourself. It deliberately withholds the answers.
 
+## Where it is going
+
+Today there is one pool: everyone allowed in (42 Vienna by default,
+`ALLOWED_CAMPUS_IDS`) plays against everyone else. The plan is to open it to
+other campuses, each with its **own pool**, and maybe to merge pools later;
+a worldwide pool is a far-off idea. The groundwork that needs: a campus on
+each guess, and the winner query grouped per campus as well as per day.
+
 ## Getting started
 
 Everything runs on your own machine: a Rust toolchain, a SQLite file, and a

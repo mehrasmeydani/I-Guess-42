@@ -9,73 +9,62 @@
   {# role=timer is not announced on every tick; the visible clock is enough. #}
   <p class="countdown" role="timer" aria-label="time left in this round" data-seconds="{{ seconds_left }}">{{ time_left }}</p>
   <p class="meter" aria-hidden="true"><span class="meter-bar">{{ progress_bar }}</span> <span class="meter-pct">{{ progress_pct }}%</span></p>
-  <div class="figures">
-    <p><b>{{ guess_count }}</b><span>{% if guess_count == 1 %}guess{% else %}guesses{% endif %} in, all hidden</span></p>
-    <p><b>12:42</b><span>closes, vienna time</span></p>
+
+  {# The one thing to do here comes straight after the clock. #}
+  <div class="play">
+    {% match notice %}
+      {% when Some with (n) %}
+        <p class="notice {{ n.kind }}" {% if n.kind == "error" %}role="alert"{% else %}role="status"{% endif %}><b>{{ n.kind }}</b> {{ n.text }}</p>
+      {% when None %}
+    {% endmatch %}
+
     {% match user %}
       {% when Some with (_u) %}
         {% match my_guess_label %}
-          {% when Some with (_g) %}<p class="you in"><b>you're in</b><span>your number is locked</span></p>
-          {% when None %}<p class="you"><b>not yet</b><span>you haven't guessed today</span></p>
+          {% when Some with (g) %}
+            <p class="play-label">your number</p>
+            <p class="sealed"><span class="sealed-value">{{ g }}</span></p>
+            <p class="dim">hidden until 12:42</p>
+          {% when None %}
+            <label class="play-label" for="guess">your number</label>
+            <form class="guessform" method="post" action="/guess">
+              <input type="hidden" name="round" value="{{ round_key }}">
+              <input id="guess" name="guess" type="text" inputmode="numeric" enterkeyhint="go"
+                     pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
+                     placeholder="e.g. 7" aria-describedby="guess-hint" required>
+              <button type="submit">lock it in &rarr;</button>
+            </form>
+            <p class="dim" id="guess-hint">final once you confirm</p>
         {% endmatch %}
-      {% when None %}<p class="you"><b>guest</b><span>sign in to play</span></p>
+      {% when None %}
+        <a class="btn" href="/login">log in with 42 intra &rarr;</a>
     {% endmatch %}
   </div>
+
+  <p class="stats-line">
+    <span><b>{{ guess_count }}</b> {% if guess_count == 1 %}person{% else %}people{% endif %} guessed</span>
+    <span>closes <b>12:42</b> vienna</span>
+  </p>
 </section>
 
 <section class="sec" style="--b: 1">
-  {% match notice %}
-    {% when Some with (n) %}
-      <p class="notice {{ n.kind }}" {% if n.kind == "error" %}role="alert"{% else %}role="status"{% endif %}><b>{{ n.kind }}</b> {{ n.text }}</p>
-    {% when None %}
-  {% endmatch %}
-
-  {% match user %}
-    {% when Some with (_u) %}
-      {% match my_guess_label %}
-        {% when Some with (g) %}
-          <h2 class="rule"><span>your number</span></h2>
-          <div class="sealed">
-            <p class="sealed-value">{{ g }}</p>
-            <span class="stamp">sealed</span>
-          </div>
-          <p class="dim">final. nobody else can see it. find out after 12:42.</p>
-        {% when None %}
-          <h2 class="rule"><label for="guess">your number</label></h2>
-          <form class="guessform" method="post" action="/guess">
-            <input type="hidden" name="round" value="{{ round_key }}">
-            <input id="guess" name="guess" type="text" inputmode="numeric" enterkeyhint="go"
-                   pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
-                   placeholder="e.g. 7" aria-describedby="guess-hint" required>
-            <button type="submit">lock it in &rarr;</button>
-          </form>
-          <p class="dim" id="guess-hint">a whole number, 1 or higher. you get one per round, and you'll confirm it on the next screen.</p>
-      {% endmatch %}
-    {% when None %}
-      <h2 class="rule"><span>play</span></h2>
-      <a class="btn" href="/login">sign in with your 42 account &rarr;</a>
-      <p class="dim">it keeps your 42 login, display name and profile picture link, to show who won. nothing else.</p>
-  {% endmatch %}
-</section>
-
-<section class="sec" style="--b: 2">
   <h2 class="rule"><span>rules</span></h2>
   <ol class="rules">
-    <li><b>01</b> pick one whole number, 1 or higher. one shot a day.</li>
-    <li><b>02</b> nobody sees anybody's number until 12:42.</li>
-    <li><b>03</b> the lowest number exactly one person picked wins. pick 1 with a friend and you both lose it.</li>
+    <li><b>01</b> pick a whole number above 0. one guess per day.</li>
+    <li><b>02</b> everyone's number gets revealed at 12:42 each day.</li>
+    <li><b>03</b> you win if you picked the lowest number that no one else chose. if someone else picked the same number as you, you both lose.</li>
   </ol>
 </section>
 
 {% match last_round %}
   {% when Some with (r) %}
-    <section class="sec" style="--b: 3">
-      <h2 class="rule"><span>last round {{ r.date_key }}</span><a class="tag" href="/day/{{ r.date_key }}">see the spread &rarr;</a></h2>
+    <section class="sec" style="--b: 2">
+      <h2 class="rule"><span>last round</span><a class="tag" href="/day/{{ r.date_key }}">{{ r.date_key }} &rarr;</a></h2>
       {% match r.winner %}
         {% when Some with (w) %}
-          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }}, the only one who picked it. {{ r.total }} played.</span></p>
+          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }} &middot; {{ r.total }} played</span></p>
         {% when None %}
-          <p class="verdict"><b class="lose">&times;</b> <span>no winner: every number was picked by at least two people. {{ r.total }} played.</span></p>
+          <p class="verdict"><b class="lose">&times;</b> <span>no winner &middot; {{ r.total }} played</span></p>
       {% endmatch %}
     </section>
   {% when None %}
