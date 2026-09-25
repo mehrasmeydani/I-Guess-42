@@ -4,35 +4,7 @@
 {% block nav_results %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
-{# The day that just closed, with the day page's own chart. Always here: not
-   behind the range switches, and not replaced by a search. #}
-{% match latest %}
-  {% when Some with (r) %}
-    <section class="sec" style="--b: 0">
-      <h2 class="rule"><span>last round</span><span class="tag">{{ r.date_key }}</span></h2>
-      {% match r.winner %}
-        {% when Some with (w) %}
-          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }} &middot; {{ r.total }} played</span></p>
-        {% when None %}
-          <p class="verdict"><b class="lose">&times;</b> <span>no winner &middot; {{ r.total }} played</span></p>
-      {% endmatch %}
-      {% match chart %}
-        {% when Some with (chart) %}
-          {# The same legend the day page prints over the same chart. #}
-          <p class="legend">
-            <span><i class="win">&#9608;</i> winner</span>
-            <span><i class="once">&#9608;</i> picked by one player</span>
-            <span><i class="many">&#9608;</i> shared</span>
-          </p>
-          {% include "chart.html" %}
-        {% when None %}
-      {% endmatch %}
-      <p class="morelink"><a href="/day/{{ r.date_key }}">details &rarr;</a></p>
-    </section>
-  {% when None %}
-{% endmatch %}
-
-<section class="sec" style="--b: 1">
+<section class="sec" style="--b: 0">
   <h2 class="rule"><span>most days won</span></h2>
   {% if leaders.is_empty() %}
     <p class="dim">nobody has won a round yet.</p>
@@ -67,6 +39,34 @@
   {% endif %}
 </section>
 
+{# The day that just closed, with the day page's own chart. Always here: not
+   behind the range switches, and not replaced by a search. #}
+{% match latest %}
+  {% when Some with (r) %}
+    <section class="sec" style="--b: 1">
+      <h2 class="rule"><span>last round</span><span class="tag">{{ r.date_key }}</span></h2>
+      {% match r.winner %}
+        {% when Some with (w) %}
+          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }} &middot; {{ r.total }} played</span></p>
+        {% when None %}
+          <p class="verdict"><b class="lose">&times;</b> <span>no winner &middot; {{ r.total }} played</span></p>
+      {% endmatch %}
+      {% match chart %}
+        {% when Some with (chart) %}
+          {# The same legend the day page prints over the same chart. #}
+          <p class="legend">
+            <span><i class="win">&#9608;</i> winner</span>
+            <span><i class="once">&#9608;</i> picked by one player</span>
+            <span><i class="many">&#9608;</i> shared</span>
+          </p>
+          {% include "chart.html" %}
+        {% when None %}
+      {% endmatch %}
+      <p class="morelink"><a href="/day/{{ r.date_key }}">details &rarr;</a></p>
+    </section>
+  {% when None %}
+{% endmatch %}
+
 <section class="sec" style="--b: 2">
   <h2 class="rule"><span>rounds</span>
     <span class="ranges">
@@ -80,7 +80,7 @@
     <form method="get" action="/results" class="finder" role="search">
       <label for="q">search rounds</label>
       <div class="finder-row">
-        <input id="q" name="q" type="search" value="{{ q }}" placeholder="login, number or month"
+        <input id="q" name="q" type="search" value="{{ q }}" placeholder="{% if names_visible %}login, number or month{% else %}number or month{% endif %}"
                autocomplete="off" spellcheck="false" enterkeyhint="search">
         <button type="submit">search</button>
       </div>

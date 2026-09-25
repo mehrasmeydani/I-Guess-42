@@ -5,7 +5,10 @@ name = "i_guess_42"
 # recompiles every crate, so it stays put unless the crate itself is published.
 version = "1.1.0"
 edition = "2021"
-rust-version = "1.80"
+# Verified by the `msrv` job in CI, not asserted. 1.88 is the real floor: the
+# `time` and `icu_*` crates in Cargo.lock declare it, and 1.80 had not built
+# since `cpufeatures` moved to edition 2024 (which needs cargo 1.85).
+rust-version = "1.88"
 
 [dependencies]
 axum = "0.8"

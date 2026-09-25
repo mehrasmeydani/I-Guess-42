@@ -4,6 +4,38 @@
 {% block nav_round %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
+{# The round that just closed, announced over the page for half an hour after
+   12:42. The window is measured on the server (announce_left); the checkbox
+   is the dismiss control, so it works with JavaScript off, and app.js only
+   makes the dismissal stick and takes the whole thing down when the half
+   hour runs out. #}
+{% match announce_left %}
+  {% when Some with (left) %}
+    {% match last_round %}
+      {% when Some with (r) %}
+        <div class="announce" data-left="{{ left }}">
+          <input type="checkbox" id="announce-done" class="announce-x sr" aria-label="dismiss the result" data-round="{{ r.date_key }}">
+          <div class="announce-card" role="status">
+            <p class="announce-when">round {{ r.date_key }} just closed</p>
+            {% match r.winner %}
+              {% when Some with (w) %}
+                <p class="announce-num"><b class="win">{{ w.value_label }}</b></p>
+                <p class="announce-who">{{ w.login }} had it, alone &middot; {{ r.total }} played</p>
+              {% when None %}
+                <p class="announce-num"><b class="lose">&times;</b></p>
+                <p class="announce-who">nobody won &middot; no number was picked just once &middot; {{ r.total }} played</p>
+            {% endmatch %}
+            <p class="announce-links">
+              <a href="/day/{{ r.date_key }}">the whole round &rarr;</a>
+              <label class="announce-close" for="announce-done">dismiss</label>
+            </p>
+          </div>
+        </div>
+      {% when None %}
+    {% endmatch %}
+  {% when None %}
+{% endmatch %}
+
 <section class="sec" style="--b: 0" aria-labelledby="round-h">
   <h2 class="rule" id="round-h"><span>round {{ round_key }}</span><span class="tag live">open</span></h2>
   {# role=timer is not announced on every tick; the visible clock is enough. #}

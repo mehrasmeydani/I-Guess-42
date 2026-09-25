@@ -11,7 +11,30 @@
   var bar = document.querySelector('.meter-bar');
   var pct = document.querySelector('.meter-pct');
   var DAY = 24 * 60 * 60;
+  // How many cells fit is a question about the screen, and the server cannot
+  // see the screen: it paints a short bar that fits the narrowest phone, and
+  // fit() widens it here. Without this file the short one is what stays.
   var CELLS = 30;
+
+  // The bar is monospace text, so one cell is one character: measure the row
+  // it lives on, take off what the percentage beside it needs, and the rest
+  // divided by a character's width is the cell count.
+  function fit() {
+    if (!bar) return;
+    var row = bar.parentNode;
+    var text = bar.textContent || '';
+    if (!row || !text.length) return;
+    var ch = bar.offsetWidth / text.length;
+    if (!(ch > 0)) return;
+    // Reserve the percentage's widest reading, "100%", plus a character of
+    // gap -- measuring the label as it stands now would fit the bar around
+    // "0%" in the morning and push it off the edge by the afternoon.
+    var room = row.clientWidth - 5 * ch;
+    // The two brackets are not cells.
+    var cells = Math.floor(room / ch) - 2;
+    if (!isFinite(cells)) return;
+    CELLS = Math.max(10, Math.min(300, cells));
+  }
 
   function pad(n) { return n < 10 ? '0' + n : String(n); }
 
@@ -33,7 +56,15 @@
     if (pct) pct.textContent = Math.floor(done * 100 / DAY) + '%';
   }
 
+  fit();
   render();
+
+  // A rotated phone or a dragged window is a different number of cells.
+  var refit = null;
+  window.addEventListener('resize', function () {
+    if (refit) clearTimeout(refit);
+    refit = setTimeout(function () { fit(); render(); }, 120);
+  });
 
   var timer = setInterval(function () {
     left -= 1;
@@ -169,4 +200,39 @@
   }, { rootMargin: '0px 0px -10% 0px' });
 
   held.forEach(function (c) { io.observe(c); });
+})();
+
+// The round that just closed, announced for half an hour. The panel and its
+// dismiss control are both server-rendered and work on their own; this only
+// makes a dismissal stick across a reload, and takes the panel down when the
+// half hour is up instead of leaving it there until the next page load.
+(function () {
+  var box = document.querySelector('.announce-x');
+  if (!box) return;
+  var wrap = box.parentNode;
+  var round = box.dataset.round || '';
+  var KEY = 'ig42-announce-seen';
+
+  // Private windows and blocked site data throw on the first touch, not on
+  // use, so ask once and carry on without it.
+  var store = null;
+  try { store = window.localStorage; } catch (e) { store = null; }
+
+  // Only this round's dismissal counts: tomorrow's result is a new one.
+  try {
+    if (store && store.getItem(KEY) === round) box.checked = true;
+  } catch (e) { /* unreadable: show it, which is the safe way round */ }
+
+  box.addEventListener('change', function () {
+    if (!store) return;
+    try {
+      if (box.checked) store.setItem(KEY, round);
+      else store.removeItem(KEY);
+    } catch (e) { /* full or refused: dismissing still works, it just forgets */ }
+  });
+
+  var left = parseInt(wrap.dataset.left, 10);
+  if (isFinite(left) && left > 0) {
+    setTimeout(function () { wrap.parentNode.removeChild(wrap); }, left * 1000);
+  }
 })();

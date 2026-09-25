@@ -588,7 +588,9 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
    to a terminal; bars fill cell by cell. */
 
 @keyframes show { from { visibility: hidden; } }
-@keyframes fill { from { width: 1ch; } }
+/* The round bar wipes in. Clipped, not widened: the bar is text and app.js
+   sizes it to the screen, so its final width is not a number CSS can know. */
+@keyframes fill { from { clip-path: inset(0 100% 0 0); } }
 @keyframes grow { from { transform: scaleY(0); } }
 @keyframes stamp {
   0% { visibility: hidden; }
@@ -600,9 +602,52 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .notice.ok ~ .sealed .stamp { animation: stamp 300ms steps(3) 350ms both; }
 
 .sec, .card { animation: show 1ms both; animation-delay: calc(var(--b, 0) * var(--beat)); }
-.meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; width: 32ch; animation: fill 420ms steps(30) 80ms both; }
+.meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; clip-path: inset(0); animation: fill 420ms steps(30) 80ms both; }
 
 button.is-busy { pointer-events: none; }
+
+
+/* ------------------------------------------ the round that just closed */
+
+/* For half an hour after 12:42 the closed round is announced over the page.
+   It sits at the bottom so it never covers the guess box, and the checkbox
+   in front of it is the dismiss control: with JavaScript off it still goes
+   away, it just does not stay away across a reload. */
+.announce-x:checked ~ .announce-card { display: none; }
+
+.announce-card {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 20;
+  width: min(400px, calc(100vw - 28px));
+  padding: 14px 16px;
+  background: var(--bg);
+  border: var(--rule);
+  /* A ring of background under the drop shadow, so the panel reads as lifted
+     off the page rather than drawn on it. */
+  box-shadow: 0 0 0 4px var(--bg), 0 12px 34px #000;
+  transform: translateX(-50%);
+  animation: announce 480ms steps(6) 240ms both;
+}
+
+.announce-when { margin: 0; color: var(--dim); }
+.announce-num { margin: 4px 0 2px; font-size: 2.6rem; line-height: 1.1; }
+/* The number is what everyone came for, so it lands after the panel does. */
+.announce-num b { display: inline-block; animation: land 360ms steps(4) 700ms both; }
+.announce-who { margin: 0; color: var(--hi); }
+.announce-links { display: flex; justify-content: space-between; gap: 12px; margin: 10px 0 0; }
+.announce-close { color: var(--dim); cursor: pointer; text-decoration: underline; }
+.announce-close:hover { color: var(--hi); }
+/* The checkbox is off-screen, so the ring has to show on what stands in for
+   it -- otherwise tabbing to the dismiss control shows nothing at all. */
+.announce-x:focus-visible ~ .announce-card .announce-close {
+  outline: 3px solid var(--green);
+  outline-offset: 3px;
+}
+
+@keyframes announce { from { transform: translate(-50%, 150%); } }
+@keyframes land { from { transform: scale(2.6); } }
 
 
 /* ---------------------------------------------------------- accessibility */
@@ -676,6 +721,7 @@ p, li { text-wrap: pretty; }
   .ranges a { min-height: 44px; }
   .tail li { padding: 8px 10px; }
   .finder button, .finder input { min-height: 44px; }
+  .announce-close { display: inline-flex; align-items: center; min-height: 44px; }
 }
 
 @media (max-width: 640px) {

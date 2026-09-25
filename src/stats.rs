@@ -219,15 +219,33 @@ pub fn day_chart(tallies: &[Tally], stats: &DayStats) -> Chart {
 }
 
 /// Several days added together. Numbers that won at least one of those days
-/// are marked, with how often in the hover text.
+/// are marked, and the hover says *when* - a green bar is otherwise a fact
+/// with no date on it. `trend.days` already carries every day's winner, so
+/// the dates cost no extra query.
+///
+/// Over a long range a number can win more than once, and the hover cannot
+/// grow with it: one win names its day, several give the count and the most
+/// recent. `trend.days` is oldest first, so that is the last one.
 pub fn range_chart(trend: &Trend) -> Chart {
-    let wins = |value: i64| trend.wins.iter().find(|w| w.value == value).map(|w| w.count);
+    let mut won_on: HashMap<i64, Vec<&str>> = HashMap::new();
+    for day in &trend.days {
+        if let Some(value) = day.winner {
+            won_on.entry(value).or_default().push(&day.date);
+        }
+    }
     let keep = trend.wins.iter().map(|w| w.value).max().unwrap_or(0);
-    build(&trend.totals, keep, |value, count| match (count, wins(value)) {
-        (0, _) => ("none", String::new()),
-        (_, Some(1)) => ("win", ", won 1 day".to_string()),
-        (_, Some(n)) => ("win", format!(", won {n} days")),
-        (_, None) => ("picked", String::new()),
+    build(&trend.totals, keep, |value, count| {
+        if count == 0 {
+            return ("none", String::new());
+        }
+        match won_on.get(&value).map(Vec::as_slice) {
+            None => ("picked", String::new()),
+            Some([date]) => ("win", format!(", won {date}")),
+            Some(dates) => (
+                "win",
+                format!(", won {} days, last {}", dates.len(), dates[dates.len() - 1]),
+            ),
+        }
     })
 }
 
@@ -504,13 +522,20 @@ pub fn permille(n: i64) -> String {
 
 // ---------------------------------------------------------- the round bar
 
+/// How many cells the bar is drawn with server-side. The bar should run the
+/// full width of the page, but how many characters that is depends on the
+/// screen, and the server cannot see the screen. So this is the short bar
+/// that fits the narrowest phone without spilling; app.js measures the row
+/// and redraws it wider. A visitor without JavaScript keeps this one.
+const BAR_CELLS: i64 = 30;
+
 /// `[#########-----------]`: the share of the round already gone, as a text
 /// bar. Rounds are taken as a flat 24 hours; on the two DST days a year it is
 /// off by an hour's worth, which is decoration, not game logic. app.js draws
-/// the same bar every second.
+/// the same bar every second, at [`BAR_CELLS`] or wider.
 pub fn progress_bar(seconds_left: i64) -> (i64, String) {
     const DAY: i64 = 24 * 60 * 60;
-    const CELLS: i64 = 30;
+    const CELLS: i64 = BAR_CELLS;
     let done = (DAY - seconds_left).clamp(0, DAY);
     let filled = done * CELLS / DAY;
     let bar = format!(
@@ -644,9 +669,15 @@ mod tests {
 
     #[test]
     fn the_progress_bar_fills_as_the_day_goes() {
-        assert_eq!(progress_bar(24 * 60 * 60), (0, format!("[{}]", "-".repeat(30))));
+        // Bracketed, and as many cells as the server draws -- app.js counts on
+        // both, so neither is free to drift.
+        let cells = BAR_CELLS as usize;
+        assert_eq!(progress_bar(24 * 60 * 60), (0, format!("[{}]", "-".repeat(cells))));
         assert_eq!(progress_bar(12 * 60 * 60).0, 50);
-        assert_eq!(progress_bar(0), (100, format!("[{}]", "#".repeat(30))));
+        assert_eq!(progress_bar(0), (100, format!("[{}]", "#".repeat(cells))));
+        let (_, half) = progress_bar(12 * 60 * 60);
+        assert_eq!(half.len(), cells + 2);
+        assert_eq!(half.matches('#').count(), cells / 2);
     }
 
     #[test]
@@ -706,4 +737,35 @@ mod tests {
         assert_eq!(permille(714), "71.4%");
         assert_eq!(permille(250), "25%");
     }
+
+    #[test]
+    fn a_green_bar_says_which_day_that_number_won() {
+        // 7 is alone on the first and third day and wins both; on the second
+        // day 3 is also alone and lower, so it takes that one. 9 and 5 are
+        // shared, so they never win.
+        let mut rows = day("2026-01-01", &[(7, 1), (9, 2)]);
+        rows.extend(day("2026-01-02", &[(3, 1), (7, 1)]));
+        rows.extend(day("2026-01-03", &[(5, 2), (7, 1)]));
+        let c = range_chart(&trend(&rows));
+
+        let title = |label: &str| {
+            c.columns
+                .iter()
+                .find(|col| col.label == label)
+                .map(|col| col.title.as_str())
+                .unwrap_or("<no such column>")
+        };
+
+        // More than one win: the count, plus the most recent day - not every
+        // date, which would grow with the range.
+        assert_eq!(title("7"), "7: 3 picks, won 2 days, last 2026-01-03");
+        // Exactly one win names its day.
+        assert_eq!(title("3"), "3: 1 pick, won 2026-01-02");
+        // Never won, so no date and no green.
+        assert_eq!(title("9"), "9: 2 picks");
+        let kind = |label: &str| c.columns.iter().find(|col| col.label == label).unwrap().kind;
+        assert_eq!(kind("7"), "win");
+        assert_eq!(kind("9"), "picked");
+    }
+
 }

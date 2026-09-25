@@ -157,8 +157,8 @@ disk and only need a reload. Keep to the look described at the top of
 
 Each deployed version is tagged (`v1.0.0`, ...). To deploy, bump
 `version.txt`, merge `dev` into `main`, tag the merge with the same number, and
-roll it out. The footer of every page prints that file, so you can tell what is
-running on a site without looking at the server.
+[roll it out](#deploying). The footer of every page prints that file, so you can
+tell what is running on a site without looking at the server.
 
 It is `version.txt` and not `version` in `Cargo.toml` for a build reason: the
 Dockerfile compiles the dependencies in a layer keyed on `Cargo.toml`, so
@@ -184,6 +184,140 @@ the app needs to be reachable from outside the compose network.
 `compose.override.yml`, which Compose merges on top and git ignores, so each
 server keeps its own. It also writes down the two settings that bite quietly
 once Caddy is gone.
+
+## Deploying
+
+Updating a site that is already serving, as opposed to the first install
+above. Roughly ten minutes, most of it the build. Steps are in order because
+step 2 is the one you cannot do afterwards.
+
+### 1. Cut the release
+
+On your own machine, not the server.
+
+```sh
+printf '1.2.0\n' > version.txt
+git commit -am "v1.2.0" && git push origin dev
+
+git checkout main
+git merge --no-ff dev          # --no-ff: main carries merge commits, so it cannot fast-forward
+git push origin main
+
+git tag -a v1.2.0 -m "v1.2.0" $(git rev-parse main)
+git push origin v1.2.0
+```
+
+Two things that have each gone wrong before:
+
+- **Tag an explicit commit, never an implicit `HEAD`.** During a conflicted
+  merge `HEAD` is still the *pre-merge* commit, so a bare `git tag` quietly
+  captures the old `version.txt` and the deploy serves the previous version
+  number.
+- **Do not chain the merge and the tag on one `&&` line.** A failed merge
+  short-circuits the push, but the next command still runs, against a
+  half-merged tree.
+
+One check before going near the server:
+
+```sh
+git show v1.2.0:version.txt    # must print the version you just tagged
+```
+
+### 2. Back up the database
+
+The whole game is a single SQLite file in the `game_data` volume — every
+round, every guess, every session. There is no second copy anywhere, and three
+routine-looking commands delete it: `docker compose down -v`,
+`docker volume prune`, and `docker system prune -a --volumes` (which also takes
+`caddy_data`, so the site comes back without its certificates). Plain
+`docker compose down` is safe; so is `up -d --build`, which is all a deploy
+needs.
+
+```sh
+docker compose stop app        # SQLite in WAL mode: copy it cold, not under a writer
+docker run --rm \
+  -v "$(docker volume ls -q --filter name=game_data)":/data \
+  -v "$PWD":/out \
+  alpine tar czf "/out/game_data-$(date +%F-%H%M).tgz" -C /data .
+docker compose start app
+```
+
+The tarball is written by a container, so it lands owned by `root` — moving or
+deleting it later needs `sudo`, or another throwaway container.
+
+Copy that file off the box. To restore it, the reverse, with the app stopped:
+
+```sh
+docker run --rm -v "$(docker volume ls -q --filter name=game_data)":/data -v "$PWD":/in \
+  alpine sh -c 'rm -rf /data/* && tar xzf /in/game_data-XXXX.tgz -C /data'
+```
+
+### 3. Roll it out
+
+On the server:
+
+```sh
+git fetch --tags --force origin
+git checkout v1.2.0
+cat version.txt                # sanity: the number you expect
+docker compose up -d --build
+```
+
+`--force` on the fetch is not optional: **git will not move a tag it already
+has**, so without it the box silently rebuilds the old commit while reporting
+the new tag name.
+
+How long the build takes:
+
+- **~30 seconds** for a normal release — one that touches only `version.txt`,
+  `src/`, `templates/` and `static/`. The dependency layer is reused.
+- **two to three minutes** when `Cargo.toml` or `Cargo.lock` changed, which
+  invalidates that layer and recompiles all 281 crates. Dependency updates and
+  MSRV bumps land in this bucket.
+
+### 4. Verify
+
+```sh
+curl -fsS https://iguesslow.com/healthz    # "ok"; it runs a query, so a wedged pool fails here
+docker compose ps                          # app healthy, not restarting
+```
+
+Then load a page and read the footer: it prints `version.txt`, so it tells you
+which commit is actually serving. That is the check that the right thing
+shipped — not the tag name, which is what lies when step 1 went wrong.
+
+### 5. If it does not come back
+
+```sh
+docker compose logs --tail=50 app
+```
+
+Migrations run at startup (`src/db.rs`), so a bad one is not a broken page, it
+is a container that will not boot — and `restart: unless-stopped` turns that
+into a crash loop rather than a stopped container. `running migrations` in the
+log is the signature. Recovery is the backup from step 2 plus a rollback;
+migrations are forward-only and there is nothing to un-apply.
+
+### Rolling back
+
+```sh
+git checkout v1.1.0
+docker compose up -d --build
+```
+
+This puts back the old **code**, not the old **schema**: `sqlx::migrate!` has
+no down scripts, so whatever the new version applied is still there. That is
+fine when the migration only added something the old code ignores, which has
+been true so far. When it is not, restore the backup instead — that is the
+only path that actually reverses a migration.
+
+### When not to deploy
+
+Avoid the minutes around **12:42 Europe/Vienna**. Nothing breaks: winners are
+derived on read (`src/db.rs`), so there is no scheduled job to miss, and
+sessions live in SQLite rather than in memory, so a restart does not log anyone
+out. But the close is the one moment the site is interesting and people are
+watching it, and a container restart drops whatever requests are in flight.
 
 ## Environment
 
