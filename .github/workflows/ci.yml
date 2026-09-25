@@ -3,7 +3,10 @@
 # The contributor checklist in the README is `cargo test` and
 # `cargo clippy --all-targets`; this runs exactly those, plus a build of the
 # production image so a broken Dockerfile is caught before a deploy rather
-# than during one. Nothing here deploys: rolling out stays a manual step.
+# than during one, and a build on the oldest rustc Cargo.toml claims to
+# support. Nothing here deploys: rolling out stays a manual step.
+#
+# Advisories are a separate workflow, `audit.yml`, on its own schedule.
 #
 # `cargo fmt` is deliberately absent — the tree has never been rustfmt'd and
 # checking it would fail on every file.
@@ -68,3 +71,31 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  msrv:
+    name: builds on the declared MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `rust-version` in Cargo.toml is a claim about what this builds on, and
+      # an unverified claim rots: it read 1.80 for a long time after
+      # `cpufeatures` moved to edition 2024 and made that impossible. Pin this
+      # to the same number.
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88
+
+      # Its own cache key, so it does not fight the stable job's cache.
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+
+      # check, not clippy: clippy lints move between releases and this job is
+      # about whether the code compiles on the oldest supported rustc.
+      - name: Check
+        run: cargo check --all-targets
+
+      - name: Tests
+        run: cargo test
+
