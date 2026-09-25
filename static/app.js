@@ -201,3 +201,38 @@
 
   held.forEach(function (c) { io.observe(c); });
 })();
+
+// The round that just closed, announced for half an hour. The panel and its
+// dismiss control are both server-rendered and work on their own; this only
+// makes a dismissal stick across a reload, and takes the panel down when the
+// half hour is up instead of leaving it there until the next page load.
+(function () {
+  var box = document.querySelector('.announce-x');
+  if (!box) return;
+  var wrap = box.parentNode;
+  var round = box.dataset.round || '';
+  var KEY = 'ig42-announce-seen';
+
+  // Private windows and blocked site data throw on the first touch, not on
+  // use, so ask once and carry on without it.
+  var store = null;
+  try { store = window.localStorage; } catch (e) { store = null; }
+
+  // Only this round's dismissal counts: tomorrow's result is a new one.
+  try {
+    if (store && store.getItem(KEY) === round) box.checked = true;
+  } catch (e) { /* unreadable: show it, which is the safe way round */ }
+
+  box.addEventListener('change', function () {
+    if (!store) return;
+    try {
+      if (box.checked) store.setItem(KEY, round);
+      else store.removeItem(KEY);
+    } catch (e) { /* full or refused: dismissing still works, it just forgets */ }
+  });
+
+  var left = parseInt(wrap.dataset.left, 10);
+  if (isFinite(left) && left > 0) {
+    setTimeout(function () { wrap.parentNode.removeChild(wrap); }, left * 1000);
+  }
+})();

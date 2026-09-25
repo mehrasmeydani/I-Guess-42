@@ -159,6 +159,12 @@ pub struct IndexTemplate {
     pub my_guess_label: Option<String>,
     pub guess_count: i64,
     pub last_round: Option<RoundView>,
+    /// How much of the announcement window is left, in seconds, or `None`
+    /// once it is over. While it is `Some`, the round in `last_round` is
+    /// announced over the page. Counted on the server, like `seconds_left`:
+    /// a visitor whose clock is wrong must not get their own idea of when
+    /// 12:42 was.
+    pub announce_left: Option<i64>,
     pub notice: Option<Notice>,
 }
 

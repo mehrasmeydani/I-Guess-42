@@ -60,6 +60,14 @@ impl Round {
             .expect("date is far from the calendar limit")
     }
 
+    /// How long ago the round before this one closed, in seconds. The open
+    /// round began at that instant, so this is also how long it has been
+    /// running. Read off the server's clock on purpose: whether the result of
+    /// 12:42 is still fresh must not depend on the visitor's own clock.
+    pub fn since_previous_close(&self, now: DateTime<Utc>) -> i64 {
+        (now - cutoff_on(self.previous_date())).num_seconds().max(0)
+    }
+
     pub fn key(&self) -> String {
         self.date.format("%Y-%m-%d").to_string()
     }
@@ -141,6 +149,25 @@ mod tests {
         assert_eq!(format_duration(59), "0:59");
         assert_eq!(format_duration(724), "12:04");
         assert_eq!(format_duration(11_524), "3:12:04");
+    }
+
+    #[test]
+    fn the_previous_round_closed_when_this_one_opened() {
+        // 2026-09-06 12:52 Vienna: ten minutes past the deadline, so the round
+        // that closed at 12:42 is the one labelled 2026-09-06 and the open one
+        // is 2026-09-07.
+        let r = Round::current(utc("2026-09-06T10:52:00Z"));
+        assert_eq!(r.key(), "2026-09-07");
+        assert_eq!(r.since_previous_close(utc("2026-09-06T10:52:00Z")), 600);
+
+        // Just before the deadline the open round is still today's, and the
+        // one before it closed nearly a full day ago.
+        let r = Round::current(utc("2026-09-06T10:41:00Z"));
+        assert_eq!(r.key(), "2026-09-06");
+        assert_eq!(
+            r.since_previous_close(utc("2026-09-06T10:41:00Z")),
+            24 * 60 * 60 - 60
+        );
     }
 
     #[test]

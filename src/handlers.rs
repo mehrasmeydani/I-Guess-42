@@ -91,6 +91,14 @@ pub async fn index(
     .await?
     .map(RoundView::from);
 
+    // For half an hour after 12:42 the round that just closed is announced
+    // over the page: it is the one moment the game has, and without this it
+    // goes by unnoticed. Only ever the closed round -- guesses are secret
+    // until the deadline and this is the first thing to say them out loud.
+    const ANNOUNCE_FOR: i64 = 30 * 60;
+    let announce_left = Some(ANNOUNCE_FOR - round.since_previous_close(now))
+        .filter(|left| *left > 0 && last_round.is_some());
+
     let seconds_left = round.seconds_left(now);
     let (progress_pct, progress_bar) = stats::progress_bar(seconds_left);
     let guess_count = db::guess_count(&state.db, &round_key).await?;
@@ -106,6 +114,7 @@ pub async fn index(
         my_guess_label,
         guess_count,
         last_round,
+        announce_left,
         notice: notice_for(query.msg.as_deref()),
     }))
 }
