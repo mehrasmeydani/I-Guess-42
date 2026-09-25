@@ -43,5 +43,12 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    # The MSRV job pins dtolnay/rust-toolchain to the oldest Rust we claim to
+    # support, so the version in `uses:` is the assertion, not a stale pin.
+    # Dependabot reads it as an action version and offers current stable, which
+    # both breaks the job (there is no such action tag) and would quietly turn
+    # the job into a second stable build if it ever resolved. Never propose it.
+    ignore:
+      - dependency-name: dtolnay/rust-toolchain
     commit-message:
       prefix: ci
