@@ -80,7 +80,7 @@
     <form method="get" action="/results" class="finder" role="search">
       <label for="q">search rounds</label>
       <div class="finder-row">
-        <input id="q" name="q" type="search" value="{{ q }}" placeholder="login, number or month"
+        <input id="q" name="q" type="search" value="{{ q }}" placeholder="{% if names_visible %}login, number or month{% else %}number or month{% endif %}"
                autocomplete="off" spellcheck="false" enterkeyhint="search">
         <button type="submit">search</button>
       </div>

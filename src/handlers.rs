@@ -61,6 +61,18 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
     })
 }
 
+/// Whether this visitor may be shown who played. A login and a real name are
+/// a 42 student's personal data, so they leave the server only for a visitor
+/// who signed in through intra; everyone else gets `templates::MASK`.
+///
+/// Signing in and being a 42 student are the same thing today, because intra
+/// OAuth is the only way in. They would stop being the same if plain accounts
+/// ever land (#6), and this is the one line that then has to be re-answered
+/// instead of six templates.
+fn names_visible(user: Option<&db::User>) -> bool {
+    user.is_some()
+}
+
 #[derive(Deserialize)]
 pub struct IndexQuery {
     msg: Option<String>,
@@ -89,7 +101,7 @@ pub async fn index(
         &round.previous_date().format("%Y-%m-%d").to_string(),
     )
     .await?
-    .map(RoundView::from);
+    .map(|r| RoundView::new(r, names_visible(user.as_ref())));
 
     // For half an hour after 12:42 the round that just closed is announced
     // over the page: it is the one moment the game has, and without this it
@@ -132,7 +144,12 @@ pub struct ResultsQuery {
 /// Whether a closed round matches a search. The query is matched against the
 /// date as a prefix (`2026-08` finds August), the winner's login as a
 /// substring, and the winning number exactly (separators allowed).
-fn round_matches(r: &db::RoundSummary, query: &str) -> bool {
+///
+/// `names_visible` also governs searching, not just display: a visitor who may
+/// not see logins may not search them either. A match would otherwise answer
+/// "which rounds did this student win?" for anyone who can guess a login, with
+/// the name masked in a result that only exists because the name matched.
+fn round_matches(r: &db::RoundSummary, query: &str, names_visible: bool) -> bool {
     let q = query.trim().to_lowercase();
     if q.is_empty() {
         return true;
@@ -140,7 +157,7 @@ fn round_matches(r: &db::RoundSummary, query: &str) -> bool {
     if r.round_date.starts_with(&q) {
         return true;
     }
-    if r.winner_login.as_deref().is_some_and(|l| l.to_lowercase().contains(&q)) {
+    if names_visible && r.winner_login.as_deref().is_some_and(|l| l.to_lowercase().contains(&q)) {
         return true;
     }
     matches!((parse_guess(&q), r.winning_value), (Ok(n), Some(v)) if n == v)
@@ -161,6 +178,8 @@ pub async fn results(
     let round_key = Round::current(state.now()).key();
     let user = current_user(&state, &jar).await?;
 
+    let named = names_visible(user.as_ref());
+
     let all = db::closed_rounds(&state.db, &round_key, HISTORY_LIMIT).await?;
     let total_rounds = all.len();
 
@@ -174,7 +193,7 @@ pub async fn results(
             let tallies = db::round_tallies(&state.db, &newest.round_date).await?;
             let day = stats::analyse(&tallies);
             let chart = stats::day_chart(&tallies, &day);
-            (Some(RoundView::from(newest)), Some(chart))
+            (Some(RoundView::new(newest, named)), Some(chart))
         }
         None => (None, None),
     };
@@ -192,15 +211,15 @@ pub async fn results(
     };
     let rounds: Vec<RoundView> = all
         .into_iter()
-        .filter(|r| round_matches(r, &q))
+        .filter(|r| round_matches(r, &q, named))
         .take(limit)
-        .map(RoundView::from)
+        .map(|r| RoundView::new(r, named))
         .collect();
 
     let mut leaders: Vec<templates::LeaderView> = db::leaderboard(&state.db, &round_key, LEADERBOARD_LIMIT)
         .await?
         .into_iter()
-        .map(Into::into)
+        .map(|r| templates::LeaderView::new(r, named))
         .collect();
     let rest = leaders.split_off(leaders.len().min(PODIUM));
 
@@ -214,6 +233,7 @@ pub async fn results(
         total_rounds,
         q,
         show,
+        names_visible: named,
         leaders,
         rest,
     }))
@@ -246,12 +266,13 @@ pub async fn day(
     let stats = stats::analyse(&tallies);
     let chart = stats::day_chart(&tallies, &stats);
     let user = current_user(&state, &jar).await?;
+    let named = names_visible(user.as_ref());
 
     Ok(templates::render(&DayTemplate {
         user: user.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
-        round: RoundView::from(summary),
+        round: RoundView::new(summary, named),
         distinct: stats.distinct,
         lowest_unpicked_label: group_digits(stats.lowest_unpicked),
         most: stats.most.iter().map(Into::into).collect(),
@@ -446,7 +467,8 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
         &round.previous_date().format("%Y-%m-%d").to_string(),
     )
     .await?
-    .map(RoundView::from);
+    // An admin is signed in through intra by definition.
+    .map(|r| RoundView::new(r, true));
 
     Ok(templates::render(&AdminTemplate {
         user: Some(UserView::from(user)),
@@ -787,7 +809,7 @@ pub async fn not_found() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_guess, round_matches};
+    use super::{names_visible, parse_guess, round_matches};
     use crate::db::RoundSummary;
 
     fn round(date: &str, winner: Option<(&str, i64)>) -> RoundSummary {
@@ -803,19 +825,69 @@ mod tests {
     #[test]
     fn search_finds_rounds_by_date_login_or_number() {
         let r = round("2026-08-14", Some(("megardes", 1_337)));
-        assert!(round_matches(&r, ""));
-        assert!(round_matches(&r, "2026-08"));
-        assert!(round_matches(&r, "2026-08-14"));
-        assert!(round_matches(&r, "MEGA"));
-        assert!(round_matches(&r, "1337"));
-        assert!(round_matches(&r, "1 337"));
-        assert!(!round_matches(&r, "2026-09"));
-        assert!(!round_matches(&r, "133"));
-        assert!(!round_matches(&r, "someone"));
+        assert!(round_matches(&r, "", true));
+        assert!(round_matches(&r, "2026-08", true));
+        assert!(round_matches(&r, "2026-08-14", true));
+        assert!(round_matches(&r, "MEGA", true));
+        assert!(round_matches(&r, "1337", true));
+        assert!(round_matches(&r, "1 337", true));
+        assert!(!round_matches(&r, "2026-09", true));
+        assert!(!round_matches(&r, "133", true));
+        assert!(!round_matches(&r, "someone", true));
 
         let nobody = round("2026-08-15", None);
-        assert!(!round_matches(&nobody, "megardes"));
-        assert!(round_matches(&nobody, "2026-08"));
+        assert!(!round_matches(&nobody, "megardes", true));
+        assert!(round_matches(&nobody, "2026-08", true));
+    }
+
+    #[test]
+    fn a_visitor_who_cannot_see_logins_cannot_search_them() {
+        let r = round("2026-08-14", Some(("megardes", 1_337)));
+        // A match is itself an answer: the row would come back with the name
+        // masked, but only because the name matched.
+        assert!(!round_matches(&r, "megardes", false));
+        assert!(!round_matches(&r, "MEGA", false));
+        // Everything impersonal still searches.
+        assert!(round_matches(&r, "2026-08", false));
+        assert!(round_matches(&r, "1337", false));
+        assert!(round_matches(&r, "", false));
+    }
+
+    #[test]
+    fn names_are_shown_to_a_signed_in_visitor_and_masked_for_everyone_else() {
+        use crate::db::{LeaderboardRow, User};
+        use crate::templates::{LeaderView, RoundView, MASK};
+
+        let me = User {
+            id: 1,
+            login: "megardes".to_string(),
+            display_name: "Meg Ardes".to_string(),
+            image_url: None,
+        };
+        assert!(names_visible(Some(&me)));
+        assert!(!names_visible(None));
+
+        let r = round("2026-08-14", Some(("megardes", 1_337)));
+        let shown = RoundView::new(r.clone(), true).winner.unwrap();
+        assert_eq!(shown.login, "megardes");
+        assert_eq!(shown.value_label, "1\u{202f}337");
+
+        let hidden = RoundView::new(r, false).winner.unwrap();
+        assert_eq!(hidden.login, MASK);
+        assert_eq!(hidden.display_name, MASK);
+        // The number is the game, not personal data: it stays.
+        assert_eq!(hidden.value_label, "1\u{202f}337");
+
+        let row = LeaderboardRow {
+            login: "megardes".to_string(),
+            display_name: "Meg Ardes".to_string(),
+            wins: 12,
+        };
+        assert_eq!(LeaderView::new(row.clone(), true).login, "megardes");
+        let hidden = LeaderView::new(row, false);
+        assert_eq!(hidden.login, MASK);
+        assert_eq!(hidden.display_name, MASK);
+        assert_eq!(hidden.wins, 12);
     }
 
     #[test]

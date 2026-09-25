@@ -68,6 +68,17 @@ impl From<User> for UserView {
     }
 }
 
+/// What stands in for a login or a real name when the visitor is not allowed
+/// to see it.
+pub const MASK: &str = "*****";
+
+/// A login or display name, shown only to a visitor who may see who played.
+/// Everything that carries a student's identity goes through here, so hiding
+/// it is not something a template can forget to do.
+fn named(value: String, reveal: bool) -> String {
+    if reveal { value } else { MASK.to_string() }
+}
+
 pub struct WinnerView {
     pub login: String,
     pub display_name: String,
@@ -82,14 +93,17 @@ pub struct RoundView {
     pub winner: Option<WinnerView>,
 }
 
-impl From<RoundSummary> for RoundView {
-    fn from(r: RoundSummary) -> Self {
+impl RoundView {
+    /// `reveal` is whether this visitor may be shown who won; a winner's
+    /// login and name are replaced with [`MASK`] when they may not. There is
+    /// deliberately no `From<RoundSummary>`: every caller has to answer.
+    pub fn new(r: RoundSummary, reveal: bool) -> Self {
         // The winner columns are filled in together or not at all: a round
         // only has a winner if some value was picked exactly once.
         let winner = match (r.winner_login, r.winner_name, r.winning_value) {
             (Some(login), Some(display_name), Some(value)) => Some(WinnerView {
-                login,
-                display_name,
+                login: named(login, reveal),
+                display_name: named(display_name, reveal),
                 value_label: group_digits(value),
             }),
             _ => None,
@@ -109,11 +123,13 @@ pub struct LeaderView {
     pub wins: i64,
 }
 
-impl From<LeaderboardRow> for LeaderView {
-    fn from(r: LeaderboardRow) -> Self {
+impl LeaderView {
+    /// As [`RoundView::new`]: `reveal` decides whether the player is named or
+    /// masked. No `From<LeaderboardRow>`, for the same reason.
+    pub fn new(r: LeaderboardRow, reveal: bool) -> Self {
         Self {
-            login: r.login,
-            display_name: r.display_name,
+            login: named(r.login, reveal),
+            display_name: named(r.display_name, reveal),
             wins: r.wins,
         }
     }
@@ -204,6 +220,9 @@ pub struct ResultsTemplate {
     pub q: String,
     /// "7", "30" or "all".
     pub show: &'static str,
+    /// Whether this visitor may see who played. Only the search box reads it:
+    /// the names themselves are already masked by the time they get here.
+    pub names_visible: bool,
     /// The top of the leaderboard, always shown.
     pub leaders: Vec<LeaderView>,
     /// Everyone else, folded away.
