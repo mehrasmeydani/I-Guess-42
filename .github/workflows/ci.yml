@@ -32,7 +32,7 @@ jobs:
     name: clippy + tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -57,15 +57,15 @@ jobs:
     name: docker build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # Built, not pushed: this only proves the multi-stage build still works.
       # Layers are cached in the Actions cache between runs.
       - name: Build the production image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
@@ -76,14 +76,14 @@ jobs:
     name: builds on the declared MSRV
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # `rust-version` in Cargo.toml is a claim about what this builds on, and
       # an unverified claim rots: it read 1.80 for a long time after
       # `cpufeatures` moved to edition 2024 and made that impossible. Pin this
       # to the same number.
       - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@1.88
+        uses: dtolnay/rust-toolchain@1.120
 
       # Its own cache key, so it does not fight the stable job's cache.
       - name: Cache cargo build
