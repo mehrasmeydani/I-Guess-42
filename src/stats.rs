@@ -522,13 +522,20 @@ pub fn permille(n: i64) -> String {
 
 // ---------------------------------------------------------- the round bar
 
+/// How many cells the bar is drawn with server-side. The bar should run the
+/// full width of the page, but how many characters that is depends on the
+/// screen, and the server cannot see the screen. So this is the short bar
+/// that fits the narrowest phone without spilling; app.js measures the row
+/// and redraws it wider. A visitor without JavaScript keeps this one.
+const BAR_CELLS: i64 = 30;
+
 /// `[#########-----------]`: the share of the round already gone, as a text
 /// bar. Rounds are taken as a flat 24 hours; on the two DST days a year it is
 /// off by an hour's worth, which is decoration, not game logic. app.js draws
-/// the same bar every second.
+/// the same bar every second, at [`BAR_CELLS`] or wider.
 pub fn progress_bar(seconds_left: i64) -> (i64, String) {
     const DAY: i64 = 24 * 60 * 60;
-    const CELLS: i64 = 30;
+    const CELLS: i64 = BAR_CELLS;
     let done = (DAY - seconds_left).clamp(0, DAY);
     let filled = done * CELLS / DAY;
     let bar = format!(
@@ -662,9 +669,15 @@ mod tests {
 
     #[test]
     fn the_progress_bar_fills_as_the_day_goes() {
-        assert_eq!(progress_bar(24 * 60 * 60), (0, format!("[{}]", "-".repeat(30))));
+        // Bracketed, and as many cells as the server draws -- app.js counts on
+        // both, so neither is free to drift.
+        let cells = BAR_CELLS as usize;
+        assert_eq!(progress_bar(24 * 60 * 60), (0, format!("[{}]", "-".repeat(cells))));
         assert_eq!(progress_bar(12 * 60 * 60).0, 50);
-        assert_eq!(progress_bar(0), (100, format!("[{}]", "#".repeat(30))));
+        assert_eq!(progress_bar(0), (100, format!("[{}]", "#".repeat(cells))));
+        let (_, half) = progress_bar(12 * 60 * 60);
+        assert_eq!(half.len(), cells + 2);
+        assert_eq!(half.matches('#').count(), cells / 2);
     }
 
     #[test]

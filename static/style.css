@@ -588,7 +588,9 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
    to a terminal; bars fill cell by cell. */
 
 @keyframes show { from { visibility: hidden; } }
-@keyframes fill { from { width: 1ch; } }
+/* The round bar wipes in. Clipped, not widened: the bar is text and app.js
+   sizes it to the screen, so its final width is not a number CSS can know. */
+@keyframes fill { from { clip-path: inset(0 100% 0 0); } }
 @keyframes grow { from { transform: scaleY(0); } }
 @keyframes stamp {
   0% { visibility: hidden; }
@@ -600,7 +602,7 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .notice.ok ~ .sealed .stamp { animation: stamp 300ms steps(3) 350ms both; }
 
 .sec, .card { animation: show 1ms both; animation-delay: calc(var(--b, 0) * var(--beat)); }
-.meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; width: 32ch; animation: fill 420ms steps(30) 80ms both; }
+.meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; clip-path: inset(0); animation: fill 420ms steps(30) 80ms both; }
 
 button.is-busy { pointer-events: none; }
 
