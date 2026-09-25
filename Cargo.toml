@@ -12,22 +12,22 @@ rust-version = "1.88"
 
 [dependencies]
 axum = "0.8"
-axum-extra = { version = "0.10", features = ["cookie"] }
+axum-extra = { version = "0.12", features = ["cookie"] }
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["fs", "trace", "set-header"] }
-sqlx = { version = "0.8", default-features = false, features = [
+tower-http = { version = "0.7", features = ["fs", "trace", "set-header"] }
+sqlx = { version = "0.9", default-features = false, features = [
     "runtime-tokio",
     "sqlite",
     "derive",  # #[derive(FromRow)]
     "macros",  # sqlx::migrate!
     "migrate",
 ] }
-askama = "0.12"
+askama = "0.16"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 chrono = "0.4"
 chrono-tz = "0.10"
-rand = "0.8"
+rand = "0.10"
 # Cookie max-age is expressed with `time::Duration` (the type the `cookie`
 # crate behind axum-extra uses); cargo unifies this with that copy of time.
 time = "0.3"
