@@ -517,6 +517,53 @@ pub async fn leaderboard(db: &Db, open_round: &str, limit: i64) -> Result<Vec<Le
     Ok(rows)
 }
 
+// -------------------------------------------------------------- payouts
+
+/// The intra id of the player who won `round_date`, if that round is closed,
+/// has a winner, and has not been settled yet. Stand-ins (negative ids) never
+/// qualify: they are not 42 accounts and cannot receive points.
+pub async fn unpaid_winner(db: &Db, open_round: &str, round_date: &str) -> Result<Option<i64>> {
+    let sql = format!(
+        "{WINNER_CTE}
+         SELECT g.user_id
+         FROM winners w
+         JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
+                        AND g.participates = 1
+         WHERE w.round_date = ?2 AND g.user_id > 0
+           AND NOT EXISTS (SELECT 1 FROM payouts p WHERE p.round_date = w.round_date)"
+    );
+    let row: Option<(i64,)> = sqlx::query_as(&sql)
+        .bind(open_round)
+        .bind(round_date)
+        .fetch_optional(db)
+        .await?;
+    Ok(row.map(|r| r.0))
+}
+
+/// Marks a round as settled, so its points are never sent a second time.
+/// `outcome` is `given` or `already` (the API had paid out today already).
+pub async fn record_payout(
+    db: &Db,
+    round_date: &str,
+    user_id: i64,
+    outcome: &str,
+    message: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO payouts (round_date, user_id, outcome, message, paid_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(round_date) DO NOTHING",
+    )
+    .bind(round_date)
+    .bind(user_id)
+    .bind(outcome)
+    .bind(message)
+    .bind(ts(Utc::now()))
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -853,6 +900,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn the_winner_is_owed_points_until_the_round_is_settled() {
+        let t = temp_db().await;
+        seed(&t.db, "2026-09-05", &[(11, 1), (12, 1), (13, 2)]).await;
+
+        assert_eq!(
+            unpaid_winner(&t.db, "2026-09-06", "2026-09-05").await.unwrap(),
+            Some(13)
+        );
+        record_payout(&t.db, "2026-09-05", 13, "given", "ok").await.unwrap();
+        assert_eq!(
+            unpaid_winner(&t.db, "2026-09-06", "2026-09-05").await.unwrap(),
+            None
+        );
+        // Settling twice keeps the first record.
+        record_payout(&t.db, "2026-09-05", 13, "already", "").await.unwrap();
+        let (outcome,): (String,) =
+            sqlx::query_as("SELECT outcome FROM payouts WHERE round_date = '2026-09-05'")
+                .fetch_one(&t.db)
+                .await
+                .unwrap();
+        assert_eq!(outcome, "given");
+    }
+
+    #[tokio::test]
+    async fn nobody_is_owed_points_for_an_open_round_a_draw_or_a_stand_in() {
+        let t = temp_db().await;
+        // Still open.
+        seed(&t.db, "2026-09-06", &[(21, 1)]).await;
+        assert_eq!(unpaid_winner(&t.db, "2026-09-06", "2026-09-06").await.unwrap(), None);
+
+        // No unique number.
+        seed(&t.db, "2026-09-04", &[(22, 3), (23, 3)]).await;
+        assert_eq!(unpaid_winner(&t.db, "2026-09-06", "2026-09-04").await.unwrap(), None);
+
+        // Won by a stand-in, which has no 42 account.
+        let bot = create_test_user(&t.db, "bot-001").await.unwrap();
+        insert_guess(&t.db, "2026-09-03", bot.id, 1, true).await.unwrap();
+        assert_eq!(unpaid_winner(&t.db, "2026-09-06", "2026-09-03").await.unwrap(), None);
     }
 
     #[test]
