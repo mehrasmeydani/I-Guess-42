@@ -20,6 +20,10 @@ pub struct Config {
     /// 42 campus ids whose students may sign in, matched against the primary
     /// campus on the intra account. Empty lets every campus in.
     pub allowed_campus_ids: Vec<i64>,
+    /// Key for the 42 Vienna coalition points API. None (unset or empty)
+    /// turns payouts off; see points.rs.
+    pub points_api_key: Option<String>,
+    pub points_api_url: String,
 }
 
 impl Config {
@@ -38,6 +42,9 @@ impl Config {
                 .collect(),
             allowed_campus_ids: parse_ids(&opt("ALLOWED_CAMPUS_IDS", DEFAULT_CAMPUS_IDS))
                 .context("ALLOWED_CAMPUS_IDS must be comma-separated campus ids")?,
+            points_api_key: Some(opt("IGLCP_API_KEY", "").trim().to_string())
+                .filter(|k| !k.is_empty()),
+            points_api_url: opt("IGLCP_API_URL", crate::points::DEFAULT_API_URL),
         })
     }
 
@@ -93,6 +100,8 @@ mod tests {
             secure_cookies: false,
             admin_logins: Vec::new(),
             allowed_campus_ids: ids.to_vec(),
+            points_api_key: None,
+            points_api_url: String::new(),
         }
     }
 

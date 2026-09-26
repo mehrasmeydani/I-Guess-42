@@ -4,6 +4,7 @@ mod config;
 mod db;
 mod demo;
 mod handlers;
+mod points;
 mod round;
 mod stats;
 mod templates;
@@ -61,6 +62,19 @@ async fn main() -> Result<()> {
     let cfg = Arc::new(cfg);
     if cfg.test_mode() {
         tracing::warn!(admins = ?cfg.admin_logins, "TEST MODE: /admin is reachable");
+    }
+    match (&cfg.points_api_key, cfg.test_mode()) {
+        (Some(key), false) => {
+            let api = points::Api {
+                url: cfg.points_api_url.clone(),
+                key: key.clone(),
+            };
+            tokio::spawn(points::run(db.clone(), http.clone(), api));
+        }
+        (Some(_), true) => {
+            tracing::warn!("IGLCP_API_KEY is ignored on a test instance: no coalition points")
+        }
+        (None, _) => {}
     }
     let state = AppState::new(db, cfg, http);
 
