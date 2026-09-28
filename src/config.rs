@@ -54,6 +54,14 @@ impl Config {
             || campus_id.is_some_and(|id| self.allowed_campus_ids.contains(&id))
     }
 
+    /// Whether the front page says out loud that a round pays coalition points.
+    /// True when this instance really pays them, and on a test instance, where
+    /// the banner already says nothing here is live -- otherwise the note could
+    /// not be seen anywhere before production.
+    pub fn points_announced(&self) -> bool {
+        self.points_api_key.is_some() || self.test_mode()
+    }
+
     /// True when this instance is a test instance.
     pub fn test_mode(&self) -> bool {
         !self.admin_logins.is_empty()
@@ -119,6 +127,17 @@ mod tests {
         assert!(cfg.campus_allowed(Some(53)));
         assert!(!cfg.campus_allowed(Some(1)));
         assert!(!cfg.campus_allowed(None));
+    }
+
+    #[test]
+    fn the_points_note_shows_where_points_are_real_or_pretend() {
+        let mut cfg = with_campuses(&[]);
+        assert!(!cfg.points_announced(), "no key and no admins: nothing to say");
+        cfg.points_api_key = Some("k".to_string());
+        assert!(cfg.points_announced());
+        cfg.points_api_key = None;
+        cfg.admin_logins = vec!["megardes".to_string()];
+        assert!(cfg.points_announced(), "a test instance shows the note to try it");
     }
 
     #[test]

@@ -133,7 +133,7 @@ have something to show.
 ### 5. Before you open a pull request
 
 ```sh
-cargo test                   # 49 tests
+cargo test                   # 67 tests
 cargo clippy --all-targets   # should print no warnings
 ```
 
@@ -331,7 +331,7 @@ watching it, and a container restart drops whatever requests are in flight.
 | `SECURE_COOKIES` | no | `false` |
 | `ADMIN_LOGINS` | no | empty (test mode off) |
 | `ALLOWED_CAMPUS_IDS` | no | `53` (42 Vienna); empty lets every campus in |
-| `IGLCP_API_KEY` | no | empty (no coalition points); pays each round's winner, ignored in test mode |
+| `IGLCP_API_KEY` | no | empty (no coalition points); pays everyone who played a round and more to its winner, ignored in test mode |
 | `IGLCP_API_URL` | no | `https://iglcp-api.42vienna.com` |
 | `RUST_LOG` | no | `i_guess_42=info,tower_http=warn` |
 | `ENV_FILE` | no | `.env`; point it at another file to keep two setups side by side |
@@ -342,7 +342,7 @@ watching it, and a container restart drops whatever requests are in flight.
 src/
   main.rs        router, startup, hourly session sweep
   config.rs      environment
-  points.rs      coalition points for each round's winner (42 Vienna API)
+  points.rs      coalition points for players and winners (42 Vienna API)
   round.rs       12:42 Europe/Vienna round boundaries (+ DST handling)
   stats.rs       day and multi-day statistics and charts
   demo.rs        random bot history for test instances

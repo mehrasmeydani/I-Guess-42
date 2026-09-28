@@ -12,7 +12,8 @@ pub struct Tally {
     pub count: i64,
 }
 
-/// How many numbers the "most" and "least picked" lists show.
+/// How many numbers the "most picked", "least picked" and "never picked"
+/// lists show, on a day page and over a whole range alike.
 const TOP: usize = 5;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -76,6 +77,12 @@ const MIN_COLS: i64 = 10;
 const MAX_COLS: i64 = 100;
 /// Roughly how many numbers get a label along the axis.
 const LABELS: i64 = 12;
+/// A run of this many numbers with nothing on them ends the chart. Past such a
+/// gap the columns are a flat line of zeros, and whatever sits out there is an
+/// outlier the tail can list by name. Only once most of the picks are already
+/// on the axis, so a day where the crowd went high is still drawn rather than
+/// pushed wholesale into the tail.
+const GAP: i64 = 10;
 
 /// One number's column.
 pub struct Column {
@@ -149,6 +156,13 @@ fn build(
     let mut covered = 0;
     let mut reach = 1;
     for t in tallies {
+        // Coverage alone cannot tell an outlier from the crowd on a quiet day:
+        // 95% of eighteen picks is all eighteen, so one player off at 100 used
+        // to drag the axis out there with ninety empty columns behind it. A
+        // wide stretch of nothing is the other end of the bulk.
+        if covered * 2 >= total && t.value - reach > GAP {
+            break;
+        }
         covered += t.count;
         reach = t.value;
         if covered >= need {
@@ -156,7 +170,20 @@ fn build(
         }
     }
     let keep = if keep <= MAX_COLS { keep } else { 0 };
-    let span = reach.max(keep).clamp(MIN_COLS, MAX_COLS);
+    let reach = reach.max(keep).clamp(MIN_COLS, MAX_COLS);
+    // A handful of stray high picks can drag `reach` up, or run it straight
+    // into MAX_COLS, long after the last number anyone actually went near.
+    // Those picks are in the tail either way and all they leave behind is
+    // empty columns, so the axis stops at the last number with something on
+    // it -- the winner's column included, which is why `keep` is in here too.
+    let span = tallies
+        .iter()
+        .map(|t| t.value)
+        .filter(|&v| v <= reach)
+        .max()
+        .unwrap_or(0)
+        .max(keep)
+        .max(MIN_COLS);
     let step = nice_step(span, LABELS);
 
     let mut by_value = tallies.iter().filter(|t| t.value <= span).peekable();
@@ -275,16 +302,6 @@ pub struct Mover {
     pub after_permille: i64,
 }
 
-/// A number people kept coming back to.
-pub struct Regular {
-    pub value: i64,
-    pub rounds: usize,
-    /// How often it was picked across the whole range.
-    pub picks: i64,
-    /// Those picks as a share of all picks, in tenths of a percent.
-    pub share_permille: i64,
-}
-
 /// Averages over the older and the newer half of the range, in hundredths
 /// so they stay integers. `None` where a half had no winners at all.
 pub struct Halves {
@@ -305,12 +322,17 @@ pub struct Trend {
     pub wins: Vec<Tally>,
     pub rising: Vec<Mover>,
     pub falling: Vec<Mover>,
-    pub regulars: Vec<Regular>,
+    /// The crowd's favourites over the whole range, most picked first; ties go
+    /// to the lower number.
+    pub most: Vec<Tally>,
+    /// The lowest numbers nobody picked on any day of the range. Every one of
+    /// them would have won each of those rounds, which is the useful part.
+    pub never: Vec<i64>,
     /// Needs at least two days to compare.
     pub halves: Option<Halves>,
 }
 
-/// How many movers and regulars to list.
+/// How many rising and falling numbers to list.
 const TREND_TOP: usize = 3;
 
 /// Groups rows (sorted by date, then value, as the database returns them)
@@ -418,31 +440,25 @@ pub fn trend(rows: &[DayTally]) -> Trend {
         .map(|m| Mover { ..*m })
         .collect();
 
-    // Each day lists a value at most once, so counting rows per value counts
-    // the days it was picked on.
-    let mut seen: HashMap<i64, usize> = HashMap::new();
-    for (_, list) in &days {
-        for t in list {
-            *seen.entry(t.value).or_insert(0) += 1;
-        }
-    }
-    let all_picks: i64 = totals.iter().map(|t| t.count).sum();
-    let picks_of: HashMap<i64, i64> = totals.iter().map(|t| (t.value, t.count)).collect();
-    let mut regulars: Vec<Regular> = seen
-        .into_iter()
-        .filter(|&(_, rounds)| rounds >= 2)
-        .map(|(value, rounds)| {
-            let picks = picks_of.get(&value).copied().unwrap_or(0);
-            Regular {
-                value,
-                rounds,
-                picks,
-                share_permille: if all_picks == 0 { 0 } else { picks * 1000 / all_picks },
+    let mut most = totals.clone();
+    most.sort_by(|a, b| b.count.cmp(&a.count).then(a.value.cmp(&b.value)));
+    most.truncate(TOP);
+
+    // Walk up from 1 and collect the holes. `totals` is sorted by value, so
+    // the numbers that were picked are stepped through alongside the count,
+    // rather than searched for once per candidate.
+    let mut never = Vec::with_capacity(TOP);
+    let mut picked = totals.iter().peekable();
+    let mut value = 1;
+    while never.len() < TOP {
+        match picked.peek() {
+            Some(t) if t.value == value => {
+                picked.next();
             }
-        })
-        .collect();
-    regulars.sort_by(|a, b| b.rounds.cmp(&a.rounds).then(a.value.cmp(&b.value)));
-    regulars.truncate(TREND_TOP);
+            _ => never.push(value),
+        }
+        value += 1;
+    }
 
     let halves = (days.len() >= 2).then(|| {
         let (a, b) = lines.split_at(mid);
@@ -476,7 +492,8 @@ pub fn trend(rows: &[DayTally]) -> Trend {
         wins,
         rising,
         falling,
-        regulars,
+        most,
+        never,
         halves,
     }
 }
@@ -651,6 +668,60 @@ mod tests {
     }
 
     #[test]
+    fn a_lone_high_pick_does_not_stretch_a_quiet_day_across_the_page() {
+        // Eighteen players, seventeen of them under 18 and one off at 100.
+        // 95% of eighteen picks is all eighteen, so coverage alone kept 100 on
+        // the axis with eighty-odd empty columns in front of it.
+        let mut pairs: Vec<(i64, i64)> = (1..=17).map(|v| (v, 1)).collect();
+        pairs.push((100, 1));
+        let tallies = t(&pairs);
+        let c = day_chart(&tallies, &analyse(&tallies));
+        assert_eq!(c.span, 17);
+        assert_eq!(c.tail.len(), 1, "the stray pick is listed, not drawn");
+        assert_eq!(c.tail[0].label, "100");
+        assert_eq!(c.tail_picks, 1);
+    }
+
+    #[test]
+    fn a_crowd_that_went_high_is_still_drawn_rather_than_all_tail() {
+        // The gap rule only fires once most of the picks are on the axis:
+        // here they are all up in the sixties, and cutting at the first gap
+        // would leave an empty chart and a tail holding the whole round.
+        let tallies = t(&[(1, 1), (61, 3), (62, 2), (63, 4)]);
+        let c = day_chart(&tallies, &analyse(&tallies));
+        assert_eq!(c.span, 63);
+        assert!(c.tail.is_empty());
+    }
+
+    #[test]
+    fn the_axis_never_ends_in_a_run_of_empty_columns() {
+        // One pick low and eleven far out of reach: covering them runs past
+        // MAX_COLS, and a hundred columns for a bar on 5 is ninety-five of
+        // them empty.
+        let mut pairs = vec![(5, 1)];
+        pairs.extend((150..=160).map(|v| (v, 1)));
+        let tallies = t(&pairs);
+        let c = day_chart(&tallies, &analyse(&tallies));
+        assert_eq!(c.span, MIN_COLS);
+        assert_eq!(c.tail.len(), 11);
+    }
+
+    #[test]
+    fn a_stray_high_pick_does_not_leave_the_axis_running_into_nothing() {
+        // Eleven players, ten of them on 1..=10 and one off at 200. Covering
+        // 95% of so few picks needs every one of them, so the reach runs past
+        // MAX_COLS -- but 200 is listed in the tail, and the axis has no
+        // business carrying on out there after it.
+        let mut pairs: Vec<(i64, i64)> = (1..=10).map(|v| (v, 1)).collect();
+        pairs.push((200, 1));
+        let tallies = t(&pairs);
+        let c = day_chart(&tallies, &analyse(&tallies));
+        assert_eq!(c.span, 10);
+        assert_eq!(c.columns.len(), 10);
+        assert_eq!(c.tail.len(), 1, "the stray pick is still listed");
+    }
+
+    #[test]
     fn a_winner_gets_a_column_if_it_is_close_enough() {
         let mut pairs: Vec<(i64, i64)> = (1..=40).map(|v| (v, 2)).collect();
         pairs.push((77, 1));
@@ -701,12 +772,10 @@ mod tests {
         assert_eq!(tr.falling[0].after_permille, 83);
         assert_eq!(tr.rising[0].value, 2);
 
-        // 1, 2 and 3 each turned up on several days; 5 only once.
-        let regulars: Vec<(i64, usize)> = tr.regulars.iter().map(|r| (r.value, r.rounds)).collect();
-        assert_eq!(regulars, [(1, 3), (2, 3), (3, 2)]);
-        // 1 was picked 6 times out of 19.
-        assert_eq!(tr.regulars[0].picks, 6);
-        assert_eq!(tr.regulars[0].share_permille, 315);
+        // 2 took 7 of the 19 picks, 1 took 6; ties below them go to the lower
+        // number. Nobody ever took 4, and 6 upwards is untouched too.
+        assert_eq!(tr.most, t(&[(2, 7), (1, 6), (3, 3), (5, 3)]));
+        assert_eq!(tr.never, [4, 6, 7, 8, 9]);
 
         let h = tr.halves.unwrap();
         assert_eq!(h.older, ("2026-09-01".to_string(), "2026-09-02".to_string()));

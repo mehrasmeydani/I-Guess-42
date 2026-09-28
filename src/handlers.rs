@@ -22,6 +22,9 @@ const HISTORY_LIMIT: i64 = i64::MAX;
 const LEADERBOARD_LIMIT: i64 = i64::MAX;
 /// Shown up front on the results page; the rest of the leaderboard folds away.
 const PODIUM: usize = 3;
+/// How many earlier rounds a day page lists under itself. A fortnight is
+/// enough to find your way around without turning the page into /results.
+const DAY_HISTORY: i64 = 14;
 
 async fn current_user(state: &AppState, jar: &CookieJar) -> Result<Option<User>, AppError> {
     let Some(token) = auth::session_token(jar) else {
@@ -111,6 +114,10 @@ pub async fn index(
     let announce_left = Some(ANNOUNCE_FOR - round.since_previous_close(now))
         .filter(|left| *left > 0 && last_round.is_some());
 
+    // The points line is for players, not for the shop window: it says what
+    // this round is worth to *you*, so it waits until there is a you.
+    let points_announced = user.is_some() && state.cfg.points_announced();
+
     let seconds_left = round.seconds_left(now);
     let (progress_pct, progress_bar) = stats::progress_bar(seconds_left);
     let guess_count = db::guess_count(&state.db, &round_key).await?;
@@ -127,6 +134,7 @@ pub async fn index(
         guess_count,
         last_round,
         announce_left,
+        points_announced,
         notice: notice_for(query.msg.as_deref()),
     }))
 }
@@ -268,6 +276,17 @@ pub async fn day(
     let user = current_user(&state, &jar).await?;
     let named = names_visible(user.as_ref());
 
+    // The neighbouring rounds, so one day leads to the next without a detour
+    // through /results. Backwards by the listful, forwards one step, which is
+    // all it takes to climb back out of the history.
+    let earlier: Vec<RoundView> = db::rounds_before(&state.db, &open_round, &date, DAY_HISTORY)
+        .await?
+        .into_iter()
+        .map(|r| RoundView::new(r, named))
+        .collect();
+    let newer = db::round_after(&state.db, &open_round, &date).await?;
+    let total_rounds = db::closed_round_count(&state.db, &open_round).await?;
+
     Ok(templates::render(&DayTemplate {
         user: user.map(UserView::from),
         test_mode: state.cfg.test_mode(),
@@ -279,6 +298,9 @@ pub async fn day(
         least: stats.least.iter().map(Into::into).collect(),
         all: tallies.iter().map(Into::into).collect(),
         chart,
+        earlier,
+        newer,
+        total_rounds,
     }))
 }
 

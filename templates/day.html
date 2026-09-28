@@ -58,4 +58,43 @@
     </table>
   </details>
 </section>
+
+{# The rounds before this one, so reading yesterday and the day before that is
+   a walk down the page rather than a trip back to /results. The newer round is
+   the way back up: without it the list would only ever go one way. #}
+<section class="sec" style="--b: 4">
+  <h2 class="rule"><span>earlier rounds</span>
+    {% match newer %}
+      {% when Some with (d) %}<a class="tag" href="/day/{{ d }}">{{ d }} &rarr;</a>
+      {% when None %}<span class="tag">newest</span>
+    {% endmatch %}
+  </h2>
+  {% if earlier.is_empty() %}
+    <p class="dim">nothing before this one. it is the first round played.</p>
+  {% else %}
+    <table class="grid">
+      <thead><tr><th>date</th><th>winner</th><th class="num">number</th><th class="num">played</th></tr></thead>
+      <tbody>
+        {% for r in earlier %}
+          <tr>
+            <td><a href="/day/{{ r.date_key }}">{{ r.date_key }}</a></td>
+            {% match r.winner %}
+              {% when Some with (w) %}
+                <td>{{ w.login }}</td>
+                <td class="num win">{{ w.value_label }}</td>
+              {% when None %}
+                <td class="dim">nobody</td>
+                <td class="num dim">&times;</td>
+            {% endmatch %}
+            <td class="num">{{ r.total }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="dim listed">
+      the {{ earlier.len() }} {% if earlier.len() == 1 %}round{% else %}rounds{% endif %} before this one, of {{ total_rounds }} closed in all.
+      <a href="/results">every round &rarr;</a>
+    </p>
+  {% endif %}
+</section>
 {% endblock %}

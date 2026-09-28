@@ -1447,6 +1447,18 @@ grouped and nothing dropped:
 - **The tail**: every number picked above the last column, listed lowest
   first with its count (`420 ×7`), winners marked.
 
+Two rules keep the axis off empty ground, because coverage alone cannot tell
+an outlier from the crowd on a quiet day — 95% of eighteen picks is all
+eighteen of them, one player off at 100 included:
+
+- a run of more than `GAP` numbers with nothing on them ends the columns, and
+  what is beyond it goes to the tail. It only applies once half the picks are
+  already on the axis, so a day where everybody went high is still drawn
+  rather than pushed into the tail wholesale;
+- whatever the rules above settle on, the axis is then pulled back to the last
+  number that actually has picks (the winner's column included). Running out to
+  100 for a chart whose last bar is on 5 is 95 columns of nothing.
+
 Heights are a share of the tallest column, rounded up so a single pick always
 shows. Only round numbers (from `nice_step`) get a label on the axis, so labels
 never collide; winners are told apart by colour, and every column has its
@@ -1471,8 +1483,10 @@ How many days a number won is in its hover text.
 - **rising** / **falling**: each value's share of all picks in the older half
   against the newer half, in tenths of a percent (`permille`). Values picked
   only once in the whole range are skipped as noise;
-- **regulars**: the values picked on the most different days, the part that
-  did not change.
+- **most**: the values with the most picks over the whole range, and
+  **never**: the lowest values nobody picked on any day of it. Every one of
+  those would have won every round in the range, which is the useful half of
+  the pair.
 
 Shares and day counts are looked up in `HashMap`s. A year of rounds holds tens
 of thousands of distinct values, and scanning lists for each one made the
@@ -1741,6 +1755,14 @@ nothing.
 
 The hidden fields carry the state between steps, which is why the server
 re-validates both.
+
+### `day.html`
+
+Under the numbers, a day lists the rounds before it (`db::rounds_before`, a
+fortnight of them) and links the one after it (`db::round_after`), so reading
+back through the history never goes via `/results`. Both stay below the open
+round, which is what keeps today's guesses secret: the same `open_round` bound
+as every other read.
 
 ### `results.html`
 
