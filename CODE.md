@@ -1447,6 +1447,18 @@ grouped and nothing dropped:
 - **The tail**: every number picked above the last column, listed lowest
   first with its count (`420 ×7`), winners marked.
 
+Two rules keep the axis off empty ground, because coverage alone cannot tell
+an outlier from the crowd on a quiet day — 95% of eighteen picks is all
+eighteen of them, one player off at 100 included:
+
+- a run of more than `GAP` numbers with nothing on them ends the columns, and
+  what is beyond it goes to the tail. It only applies once half the picks are
+  already on the axis, so a day where everybody went high is still drawn
+  rather than pushed into the tail wholesale;
+- whatever the rules above settle on, the axis is then pulled back to the last
+  number that actually has picks (the winner's column included). Running out to
+  100 for a chart whose last bar is on 5 is 95 columns of nothing.
+
 Heights are a share of the tallest column, rounded up so a single pick always
 shows. Only round numbers (from `nice_step`) get a label on the axis, so labels
 never collide; winners are told apart by colour, and every column has its

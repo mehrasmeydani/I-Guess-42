@@ -77,6 +77,12 @@ const MIN_COLS: i64 = 10;
 const MAX_COLS: i64 = 100;
 /// Roughly how many numbers get a label along the axis.
 const LABELS: i64 = 12;
+/// A run of this many numbers with nothing on them ends the chart. Past such a
+/// gap the columns are a flat line of zeros, and whatever sits out there is an
+/// outlier the tail can list by name. Only once most of the picks are already
+/// on the axis, so a day where the crowd went high is still drawn rather than
+/// pushed wholesale into the tail.
+const GAP: i64 = 10;
 
 /// One number's column.
 pub struct Column {
@@ -150,6 +156,13 @@ fn build(
     let mut covered = 0;
     let mut reach = 1;
     for t in tallies {
+        // Coverage alone cannot tell an outlier from the crowd on a quiet day:
+        // 95% of eighteen picks is all eighteen, so one player off at 100 used
+        // to drag the axis out there with ninety empty columns behind it. A
+        // wide stretch of nothing is the other end of the bulk.
+        if covered * 2 >= total && t.value - reach > GAP {
+            break;
+        }
         covered += t.count;
         reach = t.value;
         if covered >= need {
@@ -157,7 +170,20 @@ fn build(
         }
     }
     let keep = if keep <= MAX_COLS { keep } else { 0 };
-    let span = reach.max(keep).clamp(MIN_COLS, MAX_COLS);
+    let reach = reach.max(keep).clamp(MIN_COLS, MAX_COLS);
+    // A handful of stray high picks can drag `reach` up, or run it straight
+    // into MAX_COLS, long after the last number anyone actually went near.
+    // Those picks are in the tail either way and all they leave behind is
+    // empty columns, so the axis stops at the last number with something on
+    // it -- the winner's column included, which is why `keep` is in here too.
+    let span = tallies
+        .iter()
+        .map(|t| t.value)
+        .filter(|&v| v <= reach)
+        .max()
+        .unwrap_or(0)
+        .max(keep)
+        .max(MIN_COLS);
     let step = nice_step(span, LABELS);
 
     let mut by_value = tallies.iter().filter(|t| t.value <= span).peekable();
@@ -639,6 +665,60 @@ mod tests {
         assert_eq!(c.columns[3].pct, 100);
         assert_eq!(c.columns[0].pct, 50);
         assert!(c.tail.is_empty());
+    }
+
+    #[test]
+    fn a_lone_high_pick_does_not_stretch_a_quiet_day_across_the_page() {
+        // Eighteen players, seventeen of them under 18 and one off at 100.
+        // 95% of eighteen picks is all eighteen, so coverage alone kept 100 on
+        // the axis with eighty-odd empty columns in front of it.
+        let mut pairs: Vec<(i64, i64)> = (1..=17).map(|v| (v, 1)).collect();
+        pairs.push((100, 1));
+        let tallies = t(&pairs);
+        let c = day_chart(&tallies, &analyse(&tallies));
+        assert_eq!(c.span, 17);
+        assert_eq!(c.tail.len(), 1, "the stray pick is listed, not drawn");
+        assert_eq!(c.tail[0].label, "100");
+        assert_eq!(c.tail_picks, 1);
+    }
+
+    #[test]
+    fn a_crowd_that_went_high_is_still_drawn_rather_than_all_tail() {
+        // The gap rule only fires once most of the picks are on the axis:
+        // here they are all up in the sixties, and cutting at the first gap
+        // would leave an empty chart and a tail holding the whole round.
+        let tallies = t(&[(1, 1), (61, 3), (62, 2), (63, 4)]);
+        let c = day_chart(&tallies, &analyse(&tallies));
+        assert_eq!(c.span, 63);
+        assert!(c.tail.is_empty());
+    }
+
+    #[test]
+    fn the_axis_never_ends_in_a_run_of_empty_columns() {
+        // One pick low and eleven far out of reach: covering them runs past
+        // MAX_COLS, and a hundred columns for a bar on 5 is ninety-five of
+        // them empty.
+        let mut pairs = vec![(5, 1)];
+        pairs.extend((150..=160).map(|v| (v, 1)));
+        let tallies = t(&pairs);
+        let c = day_chart(&tallies, &analyse(&tallies));
+        assert_eq!(c.span, MIN_COLS);
+        assert_eq!(c.tail.len(), 11);
+    }
+
+    #[test]
+    fn a_stray_high_pick_does_not_leave_the_axis_running_into_nothing() {
+        // Eleven players, ten of them on 1..=10 and one off at 200. Covering
+        // 95% of so few picks needs every one of them, so the reach runs past
+        // MAX_COLS -- but 200 is listed in the tail, and the axis has no
+        // business carrying on out there after it.
+        let mut pairs: Vec<(i64, i64)> = (1..=10).map(|v| (v, 1)).collect();
+        pairs.push((200, 1));
+        let tallies = t(&pairs);
+        let c = day_chart(&tallies, &analyse(&tallies));
+        assert_eq!(c.span, 10);
+        assert_eq!(c.columns.len(), 10);
+        assert_eq!(c.tail.len(), 1, "the stray pick is still listed");
     }
 
     #[test]
