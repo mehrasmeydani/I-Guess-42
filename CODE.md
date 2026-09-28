@@ -1756,6 +1756,14 @@ nothing.
 The hidden fields carry the state between steps, which is why the server
 re-validates both.
 
+### `day.html`
+
+Under the numbers, a day lists the rounds before it (`db::rounds_before`, a
+fortnight of them) and links the one after it (`db::round_after`), so reading
+back through the history never goes via `/results`. Both stay below the open
+round, which is what keeps today's guesses secret: the same `open_round` bound
+as every other read.
+
 ### `results.html`
 
 ```html

@@ -133,7 +133,7 @@ have something to show.
 ### 5. Before you open a pull request
 
 ```sh
-cargo test                   # 62 tests
+cargo test                   # 67 tests
 cargo clippy --all-targets   # should print no warnings
 ```
 

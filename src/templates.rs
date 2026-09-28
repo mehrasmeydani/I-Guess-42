@@ -265,6 +265,14 @@ pub struct DayTemplate {
     /// Every picked value, for readers who want the numbers rather than the chart.
     pub all: Vec<TallyView>,
     pub chart: Chart,
+    /// The rounds before this one, newest first, so the calendar is reachable
+    /// from the round itself instead of only from /results.
+    pub earlier: Vec<RoundView>,
+    /// The round after this one, `None` on the newest closed round. Without it
+    /// the list below would only ever walk backwards.
+    pub newer: Option<String>,
+    /// How many closed rounds there are in all, to say what the list leaves out.
+    pub total_rounds: i64,
 }
 
 /// One day on the trends timeline.

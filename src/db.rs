@@ -464,6 +464,66 @@ pub async fn round_summary(db: &Db, open_round: &str, date: &str) -> Result<Opti
     Ok(row)
 }
 
+/// How many rounds have closed. A count rather than a list: the day page only
+/// wants to say what its own short list leaves out.
+pub async fn closed_round_count(db: &Db, open_round: &str) -> Result<i64> {
+    let n: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT round_date) FROM guesses
+         WHERE round_date < ?1 AND participates = 1",
+    )
+    .bind(open_round)
+    .fetch_one(db)
+    .await?;
+    Ok(n)
+}
+
+/// The closed rounds just before `date`, newest first: the day page's own way
+/// back through the calendar, so reading one round to the next never goes
+/// through /results.
+pub async fn rounds_before(
+    db: &Db,
+    open_round: &str,
+    date: &str,
+    limit: i64,
+) -> Result<Vec<RoundSummary>> {
+    let sql = format!(
+        "{WINNER_CTE}
+         SELECT r.round_date, r.total,
+                w.value    AS winning_value,
+                u.login    AS winner_login,
+                u.display_name AS winner_name
+         FROM rounds r
+         LEFT JOIN winners w ON w.round_date = r.round_date
+         LEFT JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
+                            AND g.participates = 1
+         LEFT JOIN users   u ON u.id = g.user_id
+         WHERE r.round_date < ?2
+         ORDER BY r.round_date DESC
+         LIMIT ?3"
+    );
+    let rows = sqlx::query_as::<_, RoundSummary>(&sql)
+        .bind(open_round)
+        .bind(date)
+        .bind(limit)
+        .fetch_all(db)
+        .await?;
+    Ok(rows)
+}
+
+/// The closed round right after `date`, if `date` is not the newest one. Stays
+/// below `open_round`, so today never leaks out as a link.
+pub async fn round_after(db: &Db, open_round: &str, date: &str) -> Result<Option<String>> {
+    let row: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT MIN(round_date) FROM guesses
+         WHERE round_date > ?1 AND round_date < ?2 AND participates = 1",
+    )
+    .bind(date)
+    .bind(open_round)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.flatten())
+}
+
 /// How many players picked each value in a round, lowest value first. Ghosts
 /// are left out, as everywhere else in the game. Callers must only ask about
 /// closed rounds - this does not check, and an open round's numbers are secret.
@@ -691,6 +751,38 @@ mod tests {
             .unwrap();
         assert_eq!(r.winning_value, Some(9_000_000_000));
         assert_eq!(r.winner_login.as_deref(), Some("p1"));
+    }
+
+    #[tokio::test]
+    async fn a_day_knows_the_rounds_around_it() {
+        let t = temp_db().await;
+        seed(&t.db, "2026-09-03", &[(1, 1), (2, 1)]).await; // nobody won
+        seed(&t.db, "2026-09-04", &[(1, 2), (2, 3)]).await;
+        seed(&t.db, "2026-09-05", &[(1, 4)]).await;
+        seed(&t.db, "2026-09-06", &[(1, 5), (2, 6)]).await; // still open
+
+        let open = "2026-09-06";
+        let earlier = rounds_before(&t.db, open, "2026-09-05", 10).await.unwrap();
+        let dates: Vec<&str> = earlier.iter().map(|r| r.round_date.as_str()).collect();
+        assert_eq!(dates, ["2026-09-04", "2026-09-03"], "newest first, and not itself");
+        assert_eq!(earlier[0].winning_value, Some(2));
+        assert_eq!(earlier[1].winning_value, None, "every number collided that day");
+
+        // The limit cuts the oldest rounds, not the nearest ones.
+        let one = rounds_before(&t.db, open, "2026-09-05", 1).await.unwrap();
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].round_date, "2026-09-04");
+
+        assert_eq!(
+            round_after(&t.db, open, "2026-09-04").await.unwrap().as_deref(),
+            Some("2026-09-05")
+        );
+        // The open round is not a round to link to, and the first day has
+        // nothing before it.
+        assert_eq!(round_after(&t.db, open, "2026-09-05").await.unwrap(), None);
+        assert!(rounds_before(&t.db, open, "2026-09-03", 10).await.unwrap().is_empty());
+
+        assert_eq!(closed_round_count(&t.db, open).await.unwrap(), 3);
     }
 
     #[tokio::test]
