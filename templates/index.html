@@ -102,6 +102,13 @@
     <li><b>02</b> everyone's number gets revealed at 12:42 each day.</li>
     <li><b>03</b> you win if you picked the lowest number that no one else chose. if someone else picked the same number as you, you both lose.</li>
   </ol>
+  {# Coalition points, said once and quietly: playing is worth something and
+     winning is worth a lot more, but the game is the number, not the payout. #}
+  {% if points_announced %}
+    <p class="footnote dim">coalition points land after 12:42 &mdash;
+      <b>{{ crate::points::PARTICIPANT_POINTS }}</b> to everyone who played,
+      <b class="win">{{ crate::points::WINNER_POINTS }}</b> to the one who won.</p>
+  {% endif %}
 </section>
 
 {% match last_round %}

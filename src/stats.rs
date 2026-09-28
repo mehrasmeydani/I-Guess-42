@@ -12,7 +12,8 @@ pub struct Tally {
     pub count: i64,
 }
 
-/// How many numbers the "most" and "least picked" lists show.
+/// How many numbers the "most picked", "least picked" and "never picked"
+/// lists show, on a day page and over a whole range alike.
 const TOP: usize = 5;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -275,16 +276,6 @@ pub struct Mover {
     pub after_permille: i64,
 }
 
-/// A number people kept coming back to.
-pub struct Regular {
-    pub value: i64,
-    pub rounds: usize,
-    /// How often it was picked across the whole range.
-    pub picks: i64,
-    /// Those picks as a share of all picks, in tenths of a percent.
-    pub share_permille: i64,
-}
-
 /// Averages over the older and the newer half of the range, in hundredths
 /// so they stay integers. `None` where a half had no winners at all.
 pub struct Halves {
@@ -305,12 +296,17 @@ pub struct Trend {
     pub wins: Vec<Tally>,
     pub rising: Vec<Mover>,
     pub falling: Vec<Mover>,
-    pub regulars: Vec<Regular>,
+    /// The crowd's favourites over the whole range, most picked first; ties go
+    /// to the lower number.
+    pub most: Vec<Tally>,
+    /// The lowest numbers nobody picked on any day of the range. Every one of
+    /// them would have won each of those rounds, which is the useful part.
+    pub never: Vec<i64>,
     /// Needs at least two days to compare.
     pub halves: Option<Halves>,
 }
 
-/// How many movers and regulars to list.
+/// How many rising and falling numbers to list.
 const TREND_TOP: usize = 3;
 
 /// Groups rows (sorted by date, then value, as the database returns them)
@@ -418,31 +414,25 @@ pub fn trend(rows: &[DayTally]) -> Trend {
         .map(|m| Mover { ..*m })
         .collect();
 
-    // Each day lists a value at most once, so counting rows per value counts
-    // the days it was picked on.
-    let mut seen: HashMap<i64, usize> = HashMap::new();
-    for (_, list) in &days {
-        for t in list {
-            *seen.entry(t.value).or_insert(0) += 1;
-        }
-    }
-    let all_picks: i64 = totals.iter().map(|t| t.count).sum();
-    let picks_of: HashMap<i64, i64> = totals.iter().map(|t| (t.value, t.count)).collect();
-    let mut regulars: Vec<Regular> = seen
-        .into_iter()
-        .filter(|&(_, rounds)| rounds >= 2)
-        .map(|(value, rounds)| {
-            let picks = picks_of.get(&value).copied().unwrap_or(0);
-            Regular {
-                value,
-                rounds,
-                picks,
-                share_permille: if all_picks == 0 { 0 } else { picks * 1000 / all_picks },
+    let mut most = totals.clone();
+    most.sort_by(|a, b| b.count.cmp(&a.count).then(a.value.cmp(&b.value)));
+    most.truncate(TOP);
+
+    // Walk up from 1 and collect the holes. `totals` is sorted by value, so
+    // the numbers that were picked are stepped through alongside the count,
+    // rather than searched for once per candidate.
+    let mut never = Vec::with_capacity(TOP);
+    let mut picked = totals.iter().peekable();
+    let mut value = 1;
+    while never.len() < TOP {
+        match picked.peek() {
+            Some(t) if t.value == value => {
+                picked.next();
             }
-        })
-        .collect();
-    regulars.sort_by(|a, b| b.rounds.cmp(&a.rounds).then(a.value.cmp(&b.value)));
-    regulars.truncate(TREND_TOP);
+            _ => never.push(value),
+        }
+        value += 1;
+    }
 
     let halves = (days.len() >= 2).then(|| {
         let (a, b) = lines.split_at(mid);
@@ -476,7 +466,8 @@ pub fn trend(rows: &[DayTally]) -> Trend {
         wins,
         rising,
         falling,
-        regulars,
+        most,
+        never,
         halves,
     }
 }
@@ -701,12 +692,10 @@ mod tests {
         assert_eq!(tr.falling[0].after_permille, 83);
         assert_eq!(tr.rising[0].value, 2);
 
-        // 1, 2 and 3 each turned up on several days; 5 only once.
-        let regulars: Vec<(i64, usize)> = tr.regulars.iter().map(|r| (r.value, r.rounds)).collect();
-        assert_eq!(regulars, [(1, 3), (2, 3), (3, 2)]);
-        // 1 was picked 6 times out of 19.
-        assert_eq!(tr.regulars[0].picks, 6);
-        assert_eq!(tr.regulars[0].share_permille, 315);
+        // 2 took 7 of the 19 picks, 1 took 6; ties below them go to the lower
+        // number. Nobody ever took 4, and 6 upwards is untouched too.
+        assert_eq!(tr.most, t(&[(2, 7), (1, 6), (3, 3), (5, 3)]));
+        assert_eq!(tr.never, [4, 6, 7, 8, 9]);
 
         let h = tr.halves.unwrap();
         assert_eq!(h.older, ("2026-09-01".to_string(), "2026-09-02".to_string()));

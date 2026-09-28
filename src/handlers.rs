@@ -111,6 +111,10 @@ pub async fn index(
     let announce_left = Some(ANNOUNCE_FOR - round.since_previous_close(now))
         .filter(|left| *left > 0 && last_round.is_some());
 
+    // The points line is for players, not for the shop window: it says what
+    // this round is worth to *you*, so it waits until there is a you.
+    let points_announced = user.is_some() && state.cfg.points_announced();
+
     let seconds_left = round.seconds_left(now);
     let (progress_pct, progress_bar) = stats::progress_bar(seconds_left);
     let guess_count = db::guess_count(&state.db, &round_key).await?;
@@ -127,6 +131,7 @@ pub async fn index(
         guess_count,
         last_round,
         announce_left,
+        points_announced,
         notice: notice_for(query.msg.as_deref()),
     }))
 }

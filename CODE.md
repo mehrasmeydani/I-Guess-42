@@ -1471,8 +1471,10 @@ How many days a number won is in its hover text.
 - **rising** / **falling**: each value's share of all picks in the older half
   against the newer half, in tenths of a percent (`permille`). Values picked
   only once in the whole range are skipped as noise;
-- **regulars**: the values picked on the most different days, the part that
-  did not change.
+- **most**: the values with the most picks over the whole range, and
+  **never**: the lowest values nobody picked on any day of it. Every one of
+  those would have won every round in the range, which is the useful half of
+  the pair.
 
 Shares and day counts are looked up in `HashMap`s. A year of rounds holds tens
 of thousands of distinct values, and scanning lists for each one made the

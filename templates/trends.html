@@ -69,17 +69,29 @@
   {% endif %}
 </section>
 
+{# The crowd's favourites, and the low numbers it keeps leaving alone: any of
+   those would have won every round in this range. #}
 <section class="sec" style="--b: 5">
-  <h2 class="rule"><span>what didn't</span></h2>
-  {% if regulars.is_empty() %}
-    <p class="dim">no number came back on more than one day.</p>
-  {% else %}
-    <ol class="ranked">
-      {% for r in regulars %}
-        <li title="{{ r.picks }} picks"><b>{{ r.value_label }}</b><span>{{ r.rounds }}/{{ rounds }} days &middot; {{ r.share }}</span></li>
-      {% endfor %}
-    </ol>
-  {% endif %}
+  <h2 class="rule"><span>the numbers themselves</span><span class="tag">{{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}</span></h2>
+  <div class="split duo">
+    <div>
+      <p class="sub">most picked</p>
+      <ol class="ranked">
+        {% for t in most %}
+          <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
+        {% endfor %}
+      </ol>
+    </div>
+    <div>
+      <p class="sub">never picked, lowest first</p>
+      <ol class="ranked">
+        {% for n in never %}
+          <li><b>{{ n }}</b><span>free every day</span></li>
+        {% endfor %}
+      </ol>
+    </div>
+  </div>
+  <p class="dim">every number on the right would have won each of these rounds. the crowd never went there.</p>
 </section>
 
 <section class="sec" style="--b: 6">

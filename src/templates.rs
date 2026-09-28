@@ -181,6 +181,11 @@ pub struct IndexTemplate {
     /// a visitor whose clock is wrong must not get their own idea of when
     /// 12:42 was.
     pub announce_left: Option<i64>,
+    /// Whether to print the line about coalition points under the rules. Only
+    /// for a signed-in player, and off on an instance that pays none, so the
+    /// page never promises points that are not coming; see
+    /// `Config::points_announced`.
+    pub points_announced: bool,
     pub notice: Option<Notice>,
 }
 
@@ -322,14 +327,6 @@ pub struct MoverView {
     pub delta: String,
 }
 
-pub struct RegularView {
-    pub value_label: String,
-    pub rounds: usize,
-    pub picks: i64,
-    /// Share of all picks in the range, e.g. "9.8%".
-    pub share: String,
-}
-
 /// Several closed rounds taken together: the summed spread, a timeline, and
 /// what changed between the older and the newer half.
 #[derive(Template)]
@@ -354,7 +351,10 @@ pub struct TrendsTemplate {
     pub newer_range: String,
     pub rising: Vec<MoverView>,
     pub falling: Vec<MoverView>,
-    pub regulars: Vec<RegularView>,
+    /// The most picked numbers of the whole range.
+    pub most: Vec<TallyView>,
+    /// The lowest numbers nobody picked in the range, as labels.
+    pub never: Vec<String>,
     /// How long reading and analysing the range took, e.g. "12.4 ms".
     pub took: String,
 }
@@ -439,16 +439,8 @@ impl TrendsTemplate {
             newer_range,
             rising: trend.rising.iter().map(mover).collect(),
             falling: trend.falling.iter().map(mover).collect(),
-            regulars: trend
-                .regulars
-                .iter()
-                .map(|r| RegularView {
-                    value_label: group_digits(r.value),
-                    rounds: r.rounds,
-                    picks: r.picks,
-                    share: stats::permille(r.share_permille),
-                })
-                .collect(),
+            most: trend.most.iter().map(Into::into).collect(),
+            never: trend.never.iter().copied().map(group_digits).collect(),
             took: String::new(),
         }
     }

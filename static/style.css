@@ -281,6 +281,8 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 /* ---------------------------------------------------------------- rules */
 
 .rules { list-style: none; padding: 0; display: grid; gap: 10px; max-width: 720px; }
+/* An aside under a section: there to be found, not to be announced. */
+.footnote { margin-top: 18px; max-width: 720px; font-size: 0.95rem; }
 .rules li { display: grid; grid-template-columns: 3ch 1fr; gap: 12px; }
 .rules b { color: var(--green); }
 
@@ -423,7 +425,10 @@ details[open] summary { margin-bottom: 12px; }
 
 /* One column per number, all sharing the width: the more numbers, the
    thinner each column, down to a pixel. They stand on a thick baseline. */
-.chart { position: relative; padding-top: 22px; }
+/* The padding is the gap under the scale label: it sits on the chart's top
+   edge, and the tallest bar reaches the line right below it, so without the
+   room the two touch. */
+.chart { position: relative; padding-top: 34px; }
 .chart-max { position: absolute; top: 0; left: 0; color: var(--dim); font-size: 0.8rem; }
 /* Every pick above the chart, one chip per number. */
 .tail-head { margin: 6px 0 8px; color: var(--hi); font-weight: 700; }
@@ -725,7 +730,9 @@ p, li { text-wrap: pretty; }
 }
 
 @media (max-width: 640px) {
-  .top, main, footer { padding-inline: 14px; }
+  /* A phone still gets a gutter. Text running into the bezel reads as a page
+     that does not fit, and the chart is happier for the breathing room too. */
+  .top, main, footer { padding-inline: 20px; }
   .status .clock { display: none; }
   /* Two rows on a phone: brand and account, then the navigation. */
   .top { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }

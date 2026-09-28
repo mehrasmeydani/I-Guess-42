@@ -1,11 +1,21 @@
-//! Coalition points for each round's winner, through the 42 Vienna points API
+//! Coalition points for everyone who played a round, and a bigger share for
+//! its winner, through the 42 Vienna points API
 //! (https://iglcp-api.42vienna.com/docs).
 //!
 //! Shortly after every 12:42 deadline, and once at startup, the round that
-//! just closed is settled: its winner's intra id goes to the API, and the
-//! answer is recorded in `payouts` so the same round is never paid twice. The
-//! API itself refuses a second payout on the same day (429), which covers the
-//! gap between a request succeeding and the row being written.
+//! just closed is settled: the winner's intra id and every participant's go to
+//! the API in one request, and the answer is recorded in `payouts` so the same
+//! round is never paid twice. The API itself refuses a second payout on the
+//! same day (429), which covers the gap between a request succeeding and the
+//! row being written.
+//!
+//! How much each id is worth is the API's business, not ours: we name who
+//! played and who won, it pays [`PARTICIPANT_POINTS`] and [`WINNER_POINTS`].
+//! Those two constants exist only so the front page can say the amounts out
+//! loud, and they have to be kept in step with the API by hand.
+//!
+//! A round nobody won pays nobody: `winner_user_id` is required, so there is
+//! no request to make for a day where every number collided.
 //!
 //! Off unless IGLCP_API_KEY is set, and never on a test instance, whose rounds
 //! are full of invented players and a clock an admin can move.
@@ -18,10 +28,15 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use crate::db::{self, Db};
+use crate::db::{self, Db, Payout};
 use crate::round::Round;
 
 pub const DEFAULT_API_URL: &str = "https://iglcp-api.42vienna.com";
+
+/// What the API pays each player who took part in a round...
+pub const PARTICIPANT_POINTS: i64 = 5;
+/// ...and what it pays the one who won it.
+pub const WINNER_POINTS: i64 = 100;
 
 /// Wait this long past 12:42 before settling, so the last guesses have landed.
 const AFTER_DEADLINE: Duration = Duration::from_secs(30);
@@ -36,9 +51,11 @@ pub struct Api {
     pub key: String,
 }
 
+/// The request body the spec asks for: who won, and everyone who played.
 #[derive(Serialize)]
-struct GivePoints {
-    user_id: i64,
+struct GivePoints<'a> {
+    winner_user_id: i64,
+    participant_user_ids: &'a [i64],
 }
 
 #[derive(Deserialize)]
@@ -87,14 +104,17 @@ fn classify(status: StatusCode, reply: Option<Reply>) -> (Outcome, String) {
     (outcome, detail)
 }
 
-async fn give_points(http: &reqwest::Client, api: &Api, user_id: i64) -> (Outcome, String) {
+async fn give_points(http: &reqwest::Client, api: &Api, payout: &Payout) -> (Outcome, String) {
     let url = format!("{}/api/give_points", api.url.trim_end_matches('/'));
     let sent = http
         .post(url)
         .header(AUTHORIZATION, &api.key)
         // Exactly the type the spec names; .json() keeps a type already set.
         .header(CONTENT_TYPE, "application/json; charset=utf-8")
-        .json(&GivePoints { user_id })
+        .json(&GivePoints {
+            winner_user_id: payout.winner_id,
+            participant_user_ids: &payout.participant_ids,
+        })
         .send()
         .await;
     match sent {
@@ -110,16 +130,23 @@ async fn give_points(http: &reqwest::Client, api: &Api, user_id: i64) -> (Outcom
 
 /// Pays out `round_date` if it has an unpaid winner.
 async fn settle(db: &Db, http: &reqwest::Client, api: &Api, open_round: &str, round_date: &str) -> Result<()> {
-    let Some(user_id) = db::unpaid_winner(db, open_round, round_date).await? else {
+    let Some(payout) = db::unpaid_round(db, open_round, round_date).await? else {
         return Ok(());
     };
     let mut delay = FIRST_RETRY;
     for attempt in 1..=ATTEMPTS {
-        let (outcome, detail) = give_points(http, api, user_id).await;
+        let (outcome, detail) = give_points(http, api, &payout).await;
         match outcome {
             Outcome::Given | Outcome::AlreadyGiven => {
-                db::record_payout(db, round_date, user_id, outcome.as_str(), &detail).await?;
-                tracing::info!(round = round_date, user_id, outcome = outcome.as_str(), %detail, "coalition points settled");
+                db::record_payout(db, round_date, &payout, outcome.as_str(), &detail).await?;
+                tracing::info!(
+                    round = round_date,
+                    winner = payout.winner_id,
+                    players = payout.participant_ids.len(),
+                    outcome = outcome.as_str(),
+                    %detail,
+                    "coalition points settled"
+                );
                 return Ok(());
             }
             Outcome::Failed => bail!("the points API refused: {detail}"),
@@ -137,7 +164,12 @@ async fn settle(db: &Db, http: &reqwest::Client, api: &Api, open_round: &str, ro
 /// Runs for the life of the server. Uses the real clock on purpose: the admin
 /// clock only exists on test instances, which never get here.
 pub async fn run(db: Db, http: reqwest::Client, api: Api) {
-    tracing::info!(url = %api.url, "coalition points on for each round's winner");
+    tracing::info!(
+        url = %api.url,
+        participant = PARTICIPANT_POINTS,
+        winner = WINNER_POINTS,
+        "coalition points on for every player and each round's winner"
+    );
     loop {
         let open = Round::current(Utc::now());
         let closed = open.previous_date().format("%Y-%m-%d").to_string();
@@ -191,7 +223,8 @@ mod tests {
     }
 
     /// Against a stand-in API on localhost: the request carries the key, the
-    /// spec's content type and the intra id, and the answer is read back.
+    /// spec's content type, the winner's intra id and every participant's, and
+    /// the answer is read back.
     #[tokio::test]
     async fn sends_what_the_spec_asks_for() {
         use axum::http::HeaderMap;
@@ -203,7 +236,7 @@ mod tests {
                 && headers
                     .get(CONTENT_TYPE)
                     .is_some_and(|v| v == "application/json; charset=utf-8")
-                && body == r#"{"user_id":4242}"#;
+                && body == r#"{"winner_user_id":4242,"participant_user_ids":[7,19,4242]}"#;
             if ok {
                 (StatusCode::OK, Json(serde_json::json!({ "success": true, "message": "given" })))
             } else {
@@ -220,7 +253,11 @@ mod tests {
             url: format!("http://{addr}/"),
             key: "secret".to_string(),
         };
-        let (o, detail) = give_points(&reqwest::Client::new(), &api, 4242).await;
+        let payout = Payout {
+            winner_id: 4242,
+            participant_ids: vec![7, 19, 4242],
+        };
+        let (o, detail) = give_points(&reqwest::Client::new(), &api, &payout).await;
         assert_eq!(o, Outcome::Given, "{detail}");
     }
 }
