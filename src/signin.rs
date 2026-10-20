@@ -81,7 +81,7 @@ async fn send(state: &AppState, mail: mail::Mail) -> bool {
 }
 
 /// Makes a verification link for `account_id` and mails it to `email`.
-async fn send_verification(state: &AppState, account_id: i64, email: &str) -> Result<bool, AppError> {
+pub(crate) async fn send_verification(state: &AppState, account_id: i64, email: &str) -> Result<bool, AppError> {
     let (token, hash) = credentials::new_link_token();
     db::store_link_token(&state.db, account_id, "verify", &hash, VERIFY_FOR).await?;
     let link = format!("{}/verify?token={token}", state.cfg.public_url);

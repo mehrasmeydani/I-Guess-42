@@ -67,6 +67,8 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
         "resent" => Notice::ok("Sent another link. It works for 24 hours."),
         "resend_wait" => Notice::error("We sent a few links already. Give it an hour."),
         "mail_failed" => Notice::error("The mail didn't go out. Try again later."),
+        "welcome" => Notice::ok("Welcome. Pick a number: lowest one nobody else picks wins."),
+        "deleted" => Notice::ok("Your account is deleted."),
         "unverified" => Notice::error(
             "Verify your email address to play: open the link we sent you.",
         ),

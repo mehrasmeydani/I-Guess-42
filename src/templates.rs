@@ -634,6 +634,40 @@ pub struct VerifyTemplate {
     pub token: String,
 }
 
+/// One way of signing in on the account page.
+pub struct LoginView {
+    /// The provider key, for the link and unlink forms.
+    pub key: &'static str,
+    pub name: &'static str,
+    pub linked: bool,
+    /// What it signs in as: an email, a 42 login.
+    pub detail: String,
+    /// Offered on this instance, so it can be added.
+    pub available: bool,
+    pub can_unlink: bool,
+    /// Why it cannot be removed, when it cannot.
+    pub why_not: &'static str,
+}
+
+#[derive(Template)]
+#[template(path = "account.html")]
+pub struct AccountTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub notice: Option<Notice>,
+    pub account_id: i64,
+    pub username: String,
+    pub plays_42: bool,
+    pub can_rename: bool,
+    pub rename_hint: String,
+    pub logins: Vec<LoginView>,
+    pub password_email: Option<String>,
+    pub password_verified: bool,
+    pub email_signup: bool,
+}
+
 /// Render a template, or fall back to a bare 500 if the template itself is broken.
 pub fn render<T: Template>(template: &T) -> Response {
     match template.render() {

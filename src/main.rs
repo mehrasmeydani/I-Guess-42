@@ -1,3 +1,4 @@
+mod account;
 mod app;
 mod auth;
 mod config;
@@ -115,6 +116,11 @@ async fn main() -> Result<()> {
         .route("/reset", get(signin::reset_page_handler).post(signin::reset))
         .route("/auth/callback", get(oauth::callback_42))
         .route("/logout", post(handlers::logout))
+        .route("/account", get(account::account))
+        .route("/account/username", post(account::rename))
+        .route("/account/unlink", post(account::unlink))
+        .route("/account/password", post(account::password))
+        .route("/account/delete", post(account::delete))
         .route("/healthz", get(handlers::healthz))
         // 404 unless ADMIN_LOGINS names the signed-in user.
         .route("/admin", get(handlers::admin))

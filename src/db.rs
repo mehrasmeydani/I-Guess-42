@@ -515,6 +515,177 @@ pub async fn log_mail(db: &Db, purpose: &str) -> Result<()> {
     Ok(())
 }
 
+// --------------------------------------------------------------- account
+
+/// One way an account signs in, as the account page lists it.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct Login {
+    pub provider: String,
+    pub subject: String,
+    pub email: Option<String>,
+}
+
+pub async fn account_logins(db: &Db, account_id: i64) -> Result<Vec<Login>> {
+    let rows = sqlx::query_as::<_, Login>(
+        "SELECT provider, subject, email FROM identities WHERE account_id = ?1
+         ORDER BY CASE provider WHEN '42' THEN 0 WHEN 'github' THEN 1 WHEN 'google' THEN 2 ELSE 3 END",
+    )
+    .bind(account_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
+/// When the username last changed, if it ever did.
+pub async fn username_changed_at(db: &Db, account_id: i64) -> Result<Option<String>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT username_changed_at FROM accounts WHERE id = ?1")
+            .bind(account_id)
+            .fetch_optional(db)
+            .await?;
+    Ok(row.and_then(|r| r.0))
+}
+
+/// Renames an account; false if the name was taken in the meantime.
+pub async fn rename_account(db: &Db, account_id: i64, username: &str) -> Result<bool> {
+    let mut tx = db.begin().await?;
+    let (taken,): (i64,) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM accounts WHERE username = ?1 AND id != ?2)
+              + (SELECT COUNT(*) FROM users u WHERE u.login = ?1 COLLATE NOCASE
+                 AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = ?2 AND a.intra_id = u.id))",
+    )
+    .bind(username)
+    .bind(account_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if taken > 0 {
+        return Ok(false);
+    }
+    sqlx::query("UPDATE accounts SET username = ?1, username_changed_at = ?2 WHERE id = ?3")
+        .bind(username)
+        .bind(ts(Utc::now()))
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(true)
+}
+
+/// What came of removing a login.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Unlinked {
+    Removed,
+    /// It is the only way left into the account.
+    LastOne,
+    /// The 42 login of an account that plays the 42 pool, which depends on it.
+    Plays42,
+    NotLinked,
+}
+
+pub async fn unlink_identity(db: &Db, account_id: i64, provider: &str) -> Result<Unlinked> {
+    let mut tx = db.begin().await?;
+    let (mine, total, plays_42): (i64, i64, bool) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM identities WHERE account_id = ?1 AND provider = ?2),
+                (SELECT COUNT(*) FROM identities WHERE account_id = ?1),
+                (SELECT intra_id IS NOT NULL FROM accounts WHERE id = ?1)",
+    )
+    .bind(account_id)
+    .bind(provider)
+    .fetch_one(&mut *tx)
+    .await?;
+    if mine == 0 {
+        return Ok(Unlinked::NotLinked);
+    }
+    if provider == "42" && plays_42 {
+        return Ok(Unlinked::Plays42);
+    }
+    if total <= mine {
+        return Ok(Unlinked::LastOne);
+    }
+    sqlx::query("DELETE FROM identities WHERE account_id = ?1 AND provider = ?2")
+        .bind(account_id)
+        .bind(provider)
+        .execute(&mut *tx)
+        .await?;
+    if provider == "email" {
+        sqlx::query("DELETE FROM passwords WHERE account_id = ?1")
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(Unlinked::Removed)
+}
+
+/// Gives an account that came in through a provider an email and password
+/// too. False if that email already signs in somewhere.
+pub async fn add_password_login(db: &Db, account_id: i64, email: &str, hash: &str) -> Result<bool> {
+    let mut tx = db.begin().await?;
+    let (taken,): (i64,) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM passwords WHERE email = ?1 OR account_id = ?2)
+              + (SELECT COUNT(*) FROM identities WHERE provider = 'email' AND subject = ?1)",
+    )
+    .bind(email)
+    .bind(account_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if taken > 0 {
+        return Ok(false);
+    }
+    let now = ts(Utc::now());
+    sqlx::query(
+        "INSERT INTO identities (provider, subject, account_id, email, created_at)
+         VALUES ('email', ?1, ?2, ?1, ?3)",
+    )
+    .bind(email)
+    .bind(account_id)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO passwords (account_id, email, hash, created_at, changed_at)
+         VALUES (?1, ?2, ?3, ?4, ?4)",
+    )
+    .bind(account_id)
+    .bind(email)
+    .bind(hash)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(true)
+}
+
+/// Deletes an account as far as it can be deleted. Every way of signing in
+/// to it goes, with its sessions and links, and its name becomes
+/// `deleted-<id>`. The row itself stays, with its guesses, so the rounds it
+/// played in still add up; they just no longer say who. A 42 student's
+/// `users` row and 42 pool history are not touched: they belong to the
+/// 42 pool, not to this account.
+pub async fn delete_account(db: &Db, account_id: i64) -> Result<()> {
+    let mut tx = db.begin().await?;
+    for sql in [
+        "DELETE FROM identities WHERE account_id = ?1",
+        "DELETE FROM passwords WHERE account_id = ?1",
+        "DELETE FROM account_sessions WHERE account_id = ?1",
+        "DELETE FROM email_tokens WHERE account_id = ?1",
+        "DELETE FROM oauth_states WHERE link_account_id = ?1",
+    ] {
+        sqlx::query(sql).bind(account_id).execute(&mut *tx).await?;
+    }
+    sqlx::query(
+        "UPDATE accounts SET username = 'deleted-' || id, intra_id = NULL, deleted_at = ?1,
+                             signup_ip_hash = NULL
+         WHERE id = ?2",
+    )
+    .bind(ts(Utc::now()))
+    .bind(account_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 // ------------------------------------------------------------- sessions
 
 pub async fn create_session(db: &Db, token: &str, account_id: i64, ttl_days: i64) -> Result<()> {

@@ -49,7 +49,7 @@
       {% match user %}
         {% when Some with (u) %}
           {# Your login is only your name; logging out is its own button. #}
-          <span class="who" title="{{ u.display_name }}">{{ u.login }}</span>
+          <a class="who" href="/account" title="your account: {{ u.display_name }}">{{ u.login }}</a>
           <form method="post" action="/logout" class="inline">
             <button class="linkish out" type="submit" aria-label="log out {{ u.login }}">log out</button>
           </form>

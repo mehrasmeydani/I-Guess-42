@@ -251,6 +251,13 @@ button:active,
 .authform input:focus { outline: none; border-color: var(--green); }
 .authform .hint { margin: 0; }
 .authform button { margin-top: 16px; justify-self: start; }
+button.danger { background: transparent; color: var(--red); border-color: var(--red); }
+button.danger:hover,
+button.danger:focus-visible { background: var(--red); border-color: var(--red); color: var(--bg); }
+.logins td { vertical-align: middle; }
+.logins form, .logins .btn { margin: 0; }
+.logins .btn, .logins button { padding: 4px 12px; }
+
 .ways { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .ways li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 
