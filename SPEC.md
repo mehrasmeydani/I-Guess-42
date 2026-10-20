@@ -78,7 +78,7 @@ the phase that needs it.
 
 | # | Question | Default | Needed by |
 |---|---|---|---|
-| O1 | What does `/` show to visitors who are not 42 students? | `/` stays the 42 pool (untouched). Global lives under `/g`. The header switcher and the login page point non-42 visitors to `/g`. | Phase 2 |
+| O1 | What does `/` show to visitors who are not 42 students? | **Decided:** the 42 round is invisible to them. Its pages redirect anyone not signed in as a 42 student to the global equivalent; the switch, the word "global" and any "(42)" tag are shown to 42 students only. | Phase 2 |
 | O2 | Global pool deadline | Same **12:42 Europe/Vienna** as the 42 pool; the page also shows it in the visitor's local time. | Phase 2 |
 | O3 | Can 42 students from **other campuses** use their 42 login for the global pool? | **Yes** for the global pool; the campus check keeps applying to the 42 pool only. | Phase 2 |
 | O4 | Minimum GitHub account age | **30 days** (configurable). | Phase 2 |

@@ -37,11 +37,13 @@
       <a {% block nav_results %}{% endblock %} href="{{ pool.base() }}/results">results</a>
       <a {% block nav_trends %}{% endblock %} href="{{ pool.base() }}/trends">trends</a>
     </nav>
-    {# Two games, one site: the switch keeps you on the same kind of page. #}
+    {# Two games, one site - but only 42 students ever learn there are two. #}
+    {% if crate::templates::sees_42(user) %}
     <nav class="pools" aria-label="pool">
       <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/">42 vienna</a>
       <a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/">global</a>
     </nav>
+    {% endif %}
     <div class="status">
       {# The spinner glyphs are decoration; only the one-off message is read out. #}
       <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>

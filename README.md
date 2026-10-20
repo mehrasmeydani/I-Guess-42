@@ -25,10 +25,12 @@ There are two games on one site, with the same rules and the same 12:42
 deadline, and separate numbers:
 
 - **42 Vienna** (`/`): for 42 Vienna students, signed in with 42. Pays
-  coalition points. Logins are only shown to other 42 students.
+  coalition points. **Invisible to everyone else**: anyone not signed in as
+  a 42 student who asks for one of its pages is sent to the same page of the
+  global round, and nothing on the site mentions it to them.
 - **global** (`/g`): for anyone with a verified account, signed in with
   42, GitHub, Google or an email and password. 42 students play both,
-  separately, with one click between them.
+  separately, with a switch in the header that only they see.
 
 One person has one account however many ways they sign in; the account page
 (`/account`) adds and removes them. See [SPEC.md](SPEC.md) for the whole plan,

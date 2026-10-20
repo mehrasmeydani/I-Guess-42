@@ -37,7 +37,7 @@
 {% endmatch %}
 
 <section class="sec" style="--b: 0" aria-labelledby="round-h">
-  <h2 class="rule" id="round-h"><span>{% if pool.is_global() %}global {% endif %}round {{ round_key }}</span><span class="tag live">open</span></h2>
+  <h2 class="rule" id="round-h"><span>{% if pool.is_global() && crate::templates::sees_42(user) %}global {% endif %}round {{ round_key }}</span><span class="tag live">open</span></h2>
   {# role=timer is not announced on every tick; the visible clock is enough. #}
   <p class="countdown" role="timer" aria-label="time left in this round" data-seconds="{{ seconds_left }}">{{ time_left }}</p>
   <p class="meter" aria-hidden="true"><span class="meter-bar">{{ progress_bar }}</span> <span class="meter-pct">{{ progress_pct }}%</span></p>
@@ -51,8 +51,7 @@
             {% when Some with (_g) %}<p class="you in"><b>you're in</b><span>your number is locked</span></p>
             {% when None %}<p class="you"><b>not yet</b><span>you haven't guessed today</span></p>
           {% endmatch %}
-        {% else if pool.is_global() %}<p class="you"><b>verify</b><span>confirm your email to play</span></p>
-        {% else %}<p class="you"><b>42 only</b><span>this round is for 42 students</span></p>
+        {% else %}<p class="you"><b>verify</b><span>confirm your email to play</span></p>
         {% endif %}
       {% when None %}<p class="you"><b>guest</b><span>log in to play</span></p>
     {% endmatch %}
@@ -68,19 +67,15 @@
 
   {% match user %}
     {% when Some with (u) %}
-      {# Signed in is not the same as playing here: an account that is not a
-         42 one sees the 42 round but gets no form, and an unverified one gets
-         none in the global round. /guess refuses both as well. #}
+      {# Signed in is not the same as playing: an unverified account sees the
+         round but gets no form, and /guess refuses it as well. (Nobody but a
+         42 student is ever shown the 42 round, so it needs no such case.) #}
       {% if !can_play %}
         <h2 class="rule"><span>play</span></h2>
-        {% if pool.is_global() %}
-          <p class="dim">verify your email address to play &mdash; open the link we sent you.</p>
-          <form method="post" action="/verify/resend" class="inline">
-            <button type="submit" class="ghost">send another link</button>
-          </form>
-        {% else %}
-          <p class="dim">this round is for 42 Vienna students &mdash; sign in with 42 to play it, or play the <a href="/g">global round</a>.</p>
-        {% endif %}
+        <p class="dim">verify your email address to play &mdash; open the link we sent you.</p>
+        <form method="post" action="/verify/resend" class="inline">
+          <button type="submit" class="ghost">send another link</button>
+        </form>
       {% else %}
       {% match my_guess_label %}
         {% when Some with (g) %}
@@ -104,7 +99,7 @@
       {% endif %}
     {% when None %}
       <h2 class="rule"><span>play</span></h2>
-      <a class="btn play" href="{% if pool.is_global() %}/login{% else %}/login/42{% endif %}">log in to play &rarr;</a>
+      <a class="btn play" href="/login">log in to play &rarr;</a>
   {% endmatch %}
 
   {% match last_round %}

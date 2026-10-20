@@ -1427,6 +1427,12 @@ enum, never from input. The handlers are written once too: `index_in(pool,
 pool, and every template has a `pool` field whose `base()` (`""` or `"/g"`)
 prefixes its links.
 
+The 42 round is only shown to 42 students. Every 42-round handler starts
+with `outside_42`, which sends anyone else (signed out, or signed in another
+way) to the same page of the global round; `templates::sees_42` hides the
+pool switch, and the word "global", from them; and `global_players` names
+everyone by username alone, so not even a "(42)" tag gives a student away.
+
 Who may play is `player_in(pool, viewer)`: in the 42 round, the viewer's
 intra id (no 42 player, no form, and `/guess` refuses); in the global round,
 their account id, if the account is **verified**. Who may see names is

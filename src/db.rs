@@ -2244,9 +2244,9 @@ mod tests {
             .unwrap();
         assert_eq!(r.winning_value, Some(2));
         assert_eq!(r.total, 3);
-        // Named by username, with the 42 tag in the long form.
+        // Named by username alone: nothing says this one is a 42 student.
         assert_eq!(r.winner_login.as_deref(), Some("megardes"));
-        assert_eq!(r.winner_name.as_deref(), Some("megardes (42)"));
+        assert_eq!(r.winner_name.as_deref(), Some("megardes"));
 
         let board = leaderboard(&t.db, Pool::Global, "2026-09-06", 10).await.unwrap();
         assert_eq!(board.len(), 1);

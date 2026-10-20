@@ -57,6 +57,9 @@ pub fn group_digits(n: i64) -> String {
 pub struct UserView {
     pub login: String,
     pub display_name: String,
+    /// Plays the 42 round (a 42 student, or a stand-in on a test instance),
+    /// and so may be shown that it exists.
+    pub plays_42: bool,
 }
 
 impl From<User> for UserView {
@@ -64,8 +67,15 @@ impl From<User> for UserView {
         Self {
             login: u.login,
             display_name: u.display_name,
+            plays_42: true,
         }
     }
+}
+
+/// Whether the page may mention the 42 round at all: the pool switch, the
+/// word "global". Only for someone who plays it.
+pub fn sees_42(user: &Option<UserView>) -> bool {
+    user.as_ref().is_some_and(|u| u.plays_42)
 }
 
 /// A 42 student goes by their login, as everywhere else on the site; anyone
@@ -77,6 +87,7 @@ impl From<Viewer> for UserView {
             None => Self {
                 login: v.account.username.clone(),
                 display_name: v.account.username,
+                plays_42: false,
             },
         }
     }

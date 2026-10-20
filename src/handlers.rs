@@ -59,8 +59,6 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
         "too_big" => Notice::error(
             "That is past the ceiling of 9 223 372 036 854 775 807. Aim lower — that is the point.",
         ),
-        "login_required" => Notice::error("Sign in with 42 before guessing."),
-        "not_42" => Notice::error("This round is for 42 Vienna students: sign in with 42 to play it."),
         "signin" => Notice::error("Sign in before guessing."),
         "verified" => Notice::ok("Email confirmed. You're in: pick a number."),
         "password_set" => Notice::ok("New password saved, and every other session signed out."),
@@ -100,6 +98,15 @@ fn player_in(pool: Pool, viewer: &Viewer) -> Option<i64> {
     }
 }
 
+/// The 42 round is only there for 42 students. Anyone else who asks for one
+/// of its pages - signed out, or signed in some other way - is sent to the
+/// same page of the global round, and is never told the 42 round exists.
+/// `None` when the visitor may stay.
+fn outside_42(pool: Pool, viewer: Option<&Viewer>, global_page: &str) -> Option<Response> {
+    let sees_42 = viewer.is_some_and(|v| v.intra.is_some());
+    (pool == Pool::Vienna && !sees_42).then(|| Redirect::to(global_page).into_response())
+}
+
 /// Where a pool's front page lives, for redirects back to it.
 fn home(pool: Pool) -> &'static str {
     match pool {
@@ -108,13 +115,7 @@ fn home(pool: Pool) -> &'static str {
     }
 }
 
-/// Why `viewer` cannot play `pool`, as a notice code for its front page.
-fn refusal(pool: Pool) -> &'static str {
-    match pool {
-        Pool::Vienna => "not_42",
-        Pool::Global => "unverified",
-    }
-}
+
 
 #[derive(Deserialize)]
 pub struct IndexQuery {
@@ -148,6 +149,9 @@ async fn index_in(
     let round_key = round.key();
 
     let viewer = current_viewer(&state, &jar).await?;
+    if let Some(away) = outside_42(pool, viewer.as_ref(), "/g/") {
+        return Ok(away);
+    }
     let player = viewer.as_ref().and_then(|v| player_in(pool, v));
     let my_guess_label = match player {
         Some(p) => db::my_guess(&state.db, pool, &round_key, p)
@@ -256,6 +260,10 @@ async fn results_in(
     jar: CookieJar,
     query: ResultsQuery,
 ) -> Result<Response, AppError> {
+    let viewer = current_viewer(&state, &jar).await?;
+    if let Some(away) = outside_42(pool, viewer.as_ref(), "/g/results") {
+        return Ok(away);
+    }
     if let Some(date) = query.date.as_deref().filter(|d| !d.is_empty()) {
         // Only a well-formed date is echoed into a URL.
         if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok() {
@@ -264,7 +272,6 @@ async fn results_in(
     }
 
     let round_key = Round::current(state.now()).key();
-    let viewer = current_viewer(&state, &jar).await?;
 
     let named = names_visible(pool, viewer.as_ref());
 
@@ -357,6 +364,11 @@ async fn day_in(
     // Only well-formed dates reach the database.
     let is_date = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
         .is_ok_and(|d| d.format("%Y-%m-%d").to_string() == date);
+    let viewer = current_viewer(&state, &jar).await?;
+    let global_day = if is_date { format!("/g/day/{date}") } else { "/g/".to_string() };
+    if let Some(away) = outside_42(pool, viewer.as_ref(), &global_day) {
+        return Ok(away);
+    }
     if !is_date {
         return Ok(no_such_day());
     }
@@ -371,7 +383,6 @@ async fn day_in(
     let tallies = db::round_tallies(&state.db, pool, &date).await?;
     let stats = stats::analyse(&tallies);
     let chart = stats::day_chart(&tallies, &stats);
-    let viewer = current_viewer(&state, &jar).await?;
     let named = names_visible(pool, viewer.as_ref());
 
     // The neighbouring rounds, so one day leads to the next without a detour
@@ -404,7 +415,7 @@ async fn day_in(
 
 #[derive(Deserialize)]
 pub struct TrendsQuery {
-    days: Option<String>,
+    pub days: Option<String>,
 }
 
 /// Several closed rounds taken together: the last 7 or 30 days, or all of them.
@@ -430,6 +441,10 @@ async fn trends_in(
     jar: CookieJar,
     query: TrendsQuery,
 ) -> Result<Response, AppError> {
+    let viewer = current_viewer(&state, &jar).await?;
+    if let Some(away) = outside_42(pool, viewer.as_ref(), "/g/trends") {
+        return Ok(away);
+    }
     let (range, days) = match query.days.as_deref() {
         Some("30") => ("30", Some(30)),
         Some("all") => ("all", None),
@@ -446,7 +461,6 @@ async fn trends_in(
         None => String::new(), // sorts before every date
     };
 
-    let viewer = current_viewer(&state, &jar).await?;
 
     // Timed from the query to the finished view model, and shown on the page:
     // an honest number for how heavy the analysis is.
@@ -527,16 +541,16 @@ async fn player_or_back(
     state: &AppState,
     jar: &CookieJar,
 ) -> Result<Result<(Viewer, i64), Response>, AppError> {
-    let Some(viewer) = current_viewer(state, jar).await? else {
-        let code = match pool {
-            Pool::Vienna => "login_required",
-            Pool::Global => "signin",
-        };
-        return Ok(Err(back(pool, code)));
+    let viewer = current_viewer(state, jar).await?;
+    if let Some(away) = outside_42(pool, viewer.as_ref(), "/g/") {
+        return Ok(Err(away));
+    }
+    let Some(viewer) = viewer else {
+        return Ok(Err(back(pool, "signin")));
     };
     match player_in(pool, &viewer) {
         Some(player) => Ok(Ok((viewer, player))),
-        None => Ok(Err(back(pool, refusal(pool)))),
+        None => Ok(Err(back(pool, "unverified"))),
     }
 }
 
@@ -1137,87 +1151,100 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn an_account_without_42_cannot_guess_in_the_42_pool() {
+        async fn guessing_in_the_42_round_needs_a_42_student() {
             let (t, state) = app(&[]).await;
             stranger(&t.db, "stranger", "tok").await;
 
-            let resp = handlers::submit_guess(State(state.clone()), jar("tok"), guess(&state, "7"))
-                .await
-                .unwrap();
-            assert_eq!(location(&resp), "/?msg=not_42");
-            let resp = handlers::confirm_guess(State(state.clone()), jar("tok"), guess(&state, "7"))
-                .await
-                .unwrap();
-            assert_eq!(location(&resp), "/?msg=not_42");
-            assert!(guesses(&t.db).await.is_empty(), "nothing may be written");
-
-            // Signed out is still told to sign in, as before.
-            let resp = handlers::confirm_guess(State(state.clone()), CookieJar::new(), guess(&state, "7"))
-                .await
-                .unwrap();
-            assert_eq!(location(&resp), "/?msg=login_required");
-        }
-
-        #[tokio::test]
-        async fn the_front_page_offers_the_form_only_to_42_students() {
-            let (t, state) = app(&[]).await;
-            student(&t.db, 1001, "megardes", "s").await;
-            stranger(&t.db, "stranger", "x").await;
-            let page = |token: Option<&'static str>| {
-                let state = state.clone();
-                async move {
-                    let jar = token.map(jar).unwrap_or_default();
-                    body(handlers::index(State(state), jar, Query(handlers::IndexQuery { msg: None }))
-                        .await
-                        .unwrap())
+            for jar in [jar("tok"), CookieJar::new()] {
+                let resp = handlers::submit_guess(State(state.clone()), jar.clone(), guess(&state, "7"))
                     .await
-                }
-            };
-
-            let html = page(Some("s")).await;
-            assert!(html.contains(r#"action="/guess""#), "a student gets the form");
-            assert!(html.contains(">megardes<"));
-
-            let html = page(Some("x")).await;
-            assert!(!html.contains(r#"action="/guess""#), "a stranger gets no form");
-            assert!(html.contains("this round is for 42 Vienna students"));
-            assert!(html.contains(">stranger<"), "but is shown as signed in");
-
-            let html = page(None).await;
-            assert!(!html.contains(r#"action="/guess""#));
-            assert!(html.contains("log in to play"));
+                    .unwrap();
+                assert_eq!(location(&resp), "/g/");
+                let resp = handlers::confirm_guess(State(state.clone()), jar, guess(&state, "7"))
+                    .await
+                    .unwrap();
+                assert_eq!(location(&resp), "/g/");
+            }
+            assert!(guesses(&t.db).await.is_empty(), "nothing may be written");
         }
 
         #[tokio::test]
-        async fn results_hide_42_names_from_an_account_without_42() {
+        async fn the_42_round_is_invisible_to_everyone_but_42_students() {
             let (t, state) = app(&[]).await;
             student(&t.db, 1001, "megardes", "s").await;
             stranger(&t.db, "stranger", "x").await;
-            // A closed round that megardes won.
             let yesterday = Round::current(state.now()).previous_date().format("%Y-%m-%d").to_string();
             db::insert_guess(&t.db, Pool::Vienna, &yesterday, 1001, 3, true).await.unwrap();
 
-            let page = |token: &'static str, q: &str| {
-                let state = state.clone();
-                let q = Some(q.to_string());
-                async move {
-                    body(handlers::results(
-                        State(state),
-                        jar(token),
-                        Query(ResultsQuery { q, show: None, date: None }),
-                    )
+            // A student gets the 42 round, names and all.
+            let front = handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None }))
+                .await
+                .unwrap();
+            let html = body(front).await;
+            assert!(html.contains(r#"action="/guess""#));
+            assert!(html.contains("megardes"));
+
+            // Anyone else, signed in or not, is sent to the same page of the
+            // global round and never sees a thing about the 42 one.
+            for jar in [jar("x"), CookieJar::new()] {
+                let front = handlers::index(State(state.clone()), jar.clone(), Query(handlers::IndexQuery { msg: None }))
                     .await
-                    .unwrap())
+                    .unwrap();
+                assert_eq!(location(&front), "/g/");
+                let results = handlers::results(
+                    State(state.clone()),
+                    jar.clone(),
+                    Query(ResultsQuery { q: Some("megardes".into()), show: None, date: None }),
+                )
+                .await
+                .unwrap();
+                assert_eq!(location(&results), "/g/results");
+                let picked = handlers::results(
+                    State(state.clone()),
+                    jar.clone(),
+                    Query(ResultsQuery { q: None, show: None, date: Some(yesterday.clone()) }),
+                )
+                .await
+                .unwrap();
+                assert_eq!(location(&picked), "/g/results", "not even a date jump");
+                let day = handlers::day(State(state.clone()), jar.clone(), axum::extract::Path(yesterday.clone()))
                     .await
-                }
-            };
-            assert!(page("s", "").await.contains("megardes"), "a student sees who won");
-            let html = page("x", "").await;
-            assert!(!html.contains("megardes"), "a stranger must not");
-            assert!(html.contains(crate::templates::MASK));
-            // Nor find out by searching for the login.
-            assert!(page("x", "megardes").await.contains("no round matches"));
-            assert!(!page("s", "megardes").await.contains("no round matches"));
+                    .unwrap();
+                assert_eq!(location(&day), format!("/g/day/{yesterday}"));
+                let day = handlers::day(State(state.clone()), jar.clone(), axum::extract::Path("nonsense".into()))
+                    .await
+                    .unwrap();
+                assert_eq!(location(&day), "/g/");
+                let trends = handlers::trends(State(state.clone()), jar, Query(handlers::TrendsQuery { days: None }))
+                    .await
+                    .unwrap();
+                assert_eq!(location(&trends), "/g/trends");
+            }
+        }
+
+        #[tokio::test]
+        async fn anyone_verified_plays_the_global_pool_under_their_account() {
+            let (t, state) = app(&[]).await;
+            let ann = verified(&t.db, "ann", "a").await;
+
+            let html = global_page(&state, Some("a")).await;
+            assert!(html.contains(r#"action="/g/guess""#), "the form posts to the global pool");
+
+            let resp = handlers::global_submit_guess(State(state.clone()), jar("a"), guess(&state, "7"))
+                .await
+                .unwrap();
+            assert!(body(resp).await.contains(r#"action="/g/guess/confirm""#));
+            let resp = handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), jar("a"), guess(&state, "7"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/g?msg=saved");
+            assert_eq!(global_guesses(&t.db).await, [(ann, 7)]);
+            assert!(guesses(&t.db).await.is_empty(), "the 42 pool is untouched");
+
+            let resp = handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), jar("a"), guess(&state, "3"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/g?msg=already");
         }
 
         /// A stranger whose account is verified, as a GitHub, Google or
@@ -1248,31 +1275,6 @@ mod tests {
                     .unwrap(),
             )
             .await
-        }
-
-        #[tokio::test]
-        async fn anyone_verified_plays_the_global_pool_under_their_account() {
-            let (t, state) = app(&[]).await;
-            let ann = verified(&t.db, "ann", "a").await;
-
-            let html = global_page(&state, Some("a")).await;
-            assert!(html.contains(r#"action="/g/guess""#), "the form posts to the global pool");
-
-            let resp = handlers::global_submit_guess(State(state.clone()), jar("a"), guess(&state, "7"))
-                .await
-                .unwrap();
-            assert!(body(resp).await.contains(r#"action="/g/guess/confirm""#));
-            let resp = handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), jar("a"), guess(&state, "7"))
-                .await
-                .unwrap();
-            assert_eq!(location(&resp), "/g?msg=saved");
-            assert_eq!(global_guesses(&t.db).await, [(ann, 7)]);
-            assert!(guesses(&t.db).await.is_empty(), "the 42 pool is untouched");
-
-            let resp = handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), jar("a"), guess(&state, "3"))
-                .await
-                .unwrap();
-            assert_eq!(location(&resp), "/g?msg=already");
         }
 
         #[tokio::test]
@@ -1372,13 +1374,28 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn the_pool_switch_marks_where_you_are() {
-            let (_t, state) = app(&[]).await;
-            let global = global_page(&state, None).await;
+        async fn only_42_students_are_shown_that_there_are_two_rounds() {
+            let (t, state) = app(&[]).await;
+            student(&t.db, 1001, "megardes", "s").await;
+            verified(&t.db, "ann", "a").await;
+
+            // The global round as anyone else sees it: no switch, no word
+            // of a 42 round, and not "global" either - it is just the round.
+            for token in [Some("a"), None] {
+                let html = global_page(&state, token).await;
+                // (The footer's "every day 12:42 vienna" is the deadline.)
+                assert!(!html.contains(">42 vienna<"), "{token:?}");
+                assert!(!html.contains(r#"href="/""#), "{token:?}: no link into the 42 round");
+                assert!(!html.contains(r#"class="pools""#), "{token:?}");
+                assert!(!html.contains("global round"), "{token:?}");
+                assert!(html.contains(r#"href="/g/results""#));
+            }
+
+            // A student sees the switch, on whichever side they are.
+            let global = global_page(&state, Some("s")).await;
             assert!(global.contains(r#"<a class="on" aria-current="true" href="/g/">global</a>"#));
-            assert!(global.contains(r#"href="/g/results""#));
             let vienna = body(
-                handlers::index(State(state.clone()), CookieJar::new(), Query(handlers::IndexQuery { msg: None }))
+                handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None }))
                     .await
                     .unwrap(),
             )
