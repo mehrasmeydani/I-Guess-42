@@ -143,7 +143,7 @@ pub async fn login_email(
     let typed = form.login.trim().to_string();
     // As stored: an email normalised, a username lowercased. A malformed
     // address cannot have an account; it gets what any failure gets.
-    let wanted = match typed.contains('@') {
+    let wanted = match credentials::looks_like_email(&typed) {
         true => normalize_email(&typed).unwrap_or_else(|_| typed.to_lowercase()),
         false => normalize_username(&typed),
     };

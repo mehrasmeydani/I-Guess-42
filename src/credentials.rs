@@ -8,6 +8,7 @@ use anyhow::{anyhow, Context, Result};
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
 use hmac::{Hmac, Mac};
+use regex::Regex;
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
@@ -25,20 +26,25 @@ const RESERVED: &[&str] = &[
 ];
 const RESERVED_PREFIXES: &[&str] = &["bot-", "deleted-", "test"];
 
+/// A whole valid username: a letter or digit, then 2 to 19 more of
+/// letters, digits, `_` and `-`. The checks below take it apart only to say
+/// which rule was broken.
+static USERNAME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9_-]{2,19}$").expect("valid regex"));
+static USERNAME_CHARS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9_-]+$").expect("valid regex"));
+
 /// Why a username was refused, as the message shown next to the field.
 pub fn username_problem(name: &str) -> Option<&'static str> {
-    let len = name.chars().count();
-    if !(USERNAME_MIN..=USERNAME_MAX).contains(&len) {
-        return Some("Usernames are 3 to 20 characters long.");
-    }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
-    {
-        return Some("Usernames use lowercase letters, digits, - and _ only.");
-    }
-    if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) {
-        return Some("Usernames start with a letter or a digit.");
+    if !USERNAME.is_match(name) {
+        let len = name.chars().count();
+        return Some(if !(USERNAME_MIN..=USERNAME_MAX).contains(&len) {
+            "Usernames are 3 to 20 characters long."
+        } else if !USERNAME_CHARS.is_match(name) {
+            "Usernames use lowercase letters, digits, - and _ only."
+        } else {
+            "Usernames start with a letter or a digit."
+        });
     }
     if RESERVED.contains(&name) || RESERVED_PREFIXES.iter().any(|p| name.starts_with(p)) {
         return Some("That username is reserved.");
@@ -84,23 +90,33 @@ static DISPOSABLE: LazyLock<std::collections::HashSet<&'static str>> = LazyLock:
         .collect()
 });
 
+/// An email address, lowercase: the WHATWG pattern browsers use for
+/// `<input type="email">`, except that the domain needs at least one dot,
+/// since mail to a bare hostname never reaches anyone. Domains outside ASCII
+/// have to be typed in their punycode form.
+static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+",
+        r"@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
+        r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+    ))
+    .expect("valid regex")
+});
+
+/// Whether `typed` has the shape of an email address, as opposed to a
+/// username. Case does not matter.
+pub fn looks_like_email(typed: &str) -> bool {
+    EMAIL.is_match(&typed.trim().to_lowercase())
+}
+
 /// The email as it is stored and compared: trimmed and lowercase, or why it
 /// was refused.
 pub fn normalize_email(raw: &str) -> Result<String, &'static str> {
     let email = raw.trim().to_lowercase();
-    let Some((local, domain)) = email.split_once('@') else {
-        return Err("That doesn't look like an email address.");
-    };
-    let plausible = !local.is_empty()
-        && email.len() <= 254
-        && !domain.contains('@')
-        && domain.contains('.')
-        && !domain.starts_with('.')
-        && !domain.ends_with('.')
-        && !email.chars().any(|c| c.is_whitespace() || c.is_control());
-    if !plausible {
+    if email.len() > 254 || !EMAIL.is_match(&email) {
         return Err("That doesn't look like an email address.");
     }
+    let (_, domain) = email.split_once('@').expect("the pattern has one @");
     if is_disposable(domain) {
         return Err("Throwaway email addresses can't be used here.");
     }
@@ -249,11 +265,25 @@ mod tests {
         assert!(username_problem("Mega").is_some(), "uppercase is normalised first");
         assert!(username_problem("me gardes").is_some());
         assert!(username_problem("mé").is_some());
-        assert!(username_problem("-lead").is_some());
+        assert_eq!(username_problem("-lead"), Some("Usernames start with a letter or a digit."));
+        assert_eq!(username_problem("_ab"), Some("Usernames start with a letter or a digit."));
+        assert_eq!(username_problem("ab!"), Some("Usernames use lowercase letters, digits, - and _ only."));
+        assert_eq!(username_problem(&"a".repeat(20)), None);
         for taken in ["admin", "mod", "bot-001", "testing", "deleted-4", "system"] {
             assert_eq!(username_problem(taken), Some("That username is reserved."), "{taken}");
         }
         assert_eq!(normalize_username("  MeGardes "), "megardes");
+    }
+
+    #[test]
+    fn the_sign_in_field_tells_emails_from_usernames() {
+        assert!(looks_like_email("Ann@Example.com"));
+        assert!(looks_like_email(" ann@example.com "));
+        assert!(!looks_like_email("ann"));
+        assert!(!looks_like_email("ann-42"));
+        // Not quite an email: looked up as a username, which cannot contain
+        // an @, so it simply finds nobody.
+        assert!(!looks_like_email("ann@example"));
     }
 
     #[test]
@@ -271,9 +301,17 @@ mod tests {
     #[test]
     fn emails_are_normalised_and_throwaways_refused() {
         assert_eq!(normalize_email("  Ann@Example.COM "), Ok("ann@example.com".to_string()));
-        for bad in ["", "ann", "ann@", "@example.com", "ann@example", "a@b@c.com", "ann@.com", "ann @x.com"] {
+        for bad in [
+            "", "ann", "ann@", "@example.com", "ann@example", "a@b@c.com", "ann@.com", "ann @x.com",
+            "ann@example.com.", "ann@-x.com", "ann@x-.com", "ann@ex ample.com", "ann@exa_mple.com",
+            "ann\n@x.com", "ann@x..com", "an(n)@x.com",
+        ] {
             assert!(normalize_email(bad).is_err(), "{bad:?}");
         }
+        for good in ["a@b.co", "first.last+tag@sub.example.co.uk", "o'neil@x.ie", "x_y@my-host.at"] {
+            assert!(normalize_email(good).is_ok(), "{good:?}");
+        }
+        assert!(normalize_email(&format!("{}@example.com", "a".repeat(250))).is_err(), "too long");
         assert_eq!(
             normalize_email("x@mailinator.com"),
             Err("Throwaway email addresses can't be used here.")

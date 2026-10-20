@@ -40,6 +40,9 @@ anyhow = "1"
 argon2 = { version = "0.5", features = ["std"] }
 sha2 = "0.10"
 hmac = "0.12"
+# The shape of emails and usernames. Its engine is already in the tree
+# through tracing-subscriber's env-filter.
+regex = "1"
 
 [dev-dependencies]
 # Already in the tree via reqwest; used to feed sample /v2/me bodies to tests.

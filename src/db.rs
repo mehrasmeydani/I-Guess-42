@@ -382,8 +382,8 @@ pub async fn password_login(db: &Db, email: &str) -> Result<Option<(i64, String)
     Ok(row)
 }
 
-/// As [`password_login`], found by email or by username, whichever `typed`
-/// looks like: anything with an `@` is an email. Also gives the email, so a
+/// As [`password_login`], found by email if `typed` contains an `@` (no
+/// username can) and by username otherwise. Also gives the email, so a
 /// caller can count attempts per account rather than per spelling.
 pub async fn password_login_any(db: &Db, typed: &str) -> Result<Option<(i64, String, String)>> {
     let by = if typed.contains('@') { "p.email" } else { "a.username" };

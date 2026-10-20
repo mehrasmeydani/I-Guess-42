@@ -1469,9 +1469,12 @@ token, over TLS, rather than by checking an ID token's signature.
 
 ### `signin.rs` and `credentials.rs` — email and password
 
-The rules (`credentials.rs`) are plain functions: usernames 3–20 of
-`[a-z0-9_-]`, reserved words and every 42 login excluded; emails normalised,
-disposable domains refused (a bundled CC0 list); passwords 10–128 characters,
+The rules (`credentials.rs`) are plain functions over two regexes: usernames
+match `^[a-z0-9][a-z0-9_-]{2,19}$`, with reserved words and every 42 login
+excluded; emails match the WHATWG pattern browsers use for `type="email"`,
+tightened to need a dot in the domain, and disposable domains are refused (a
+bundled CC0 list). The same email pattern decides whether the sign-in field
+holds an email or a username; passwords 10–128 characters,
 not one of the common ones (a bundled list), not the email or username. No
 "must contain a digit" rules, after NIST 800-63B.
 
