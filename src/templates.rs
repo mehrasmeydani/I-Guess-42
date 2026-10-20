@@ -567,8 +567,8 @@ pub struct LoginTemplate {
     pub test_mode: bool,
     pub impersonating: bool,
     pub notice: Option<Notice>,
-    /// Typed into the email field last time, so a wrong password does not
-    /// cost retyping it.
+    /// Typed into the email-or-username field last time, so a wrong password
+    /// does not cost retyping it.
     pub email: String,
     pub email_signup: bool,
     pub github: bool,

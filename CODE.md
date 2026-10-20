@@ -1489,6 +1489,10 @@ The pages are written so a visitor learns nothing they did not know:
   is stored. Opening one shows a button and spends nothing, because mail
   scanners open links to check them. The POST spends it, in one `UPDATE …
   RETURNING`.
+- **sign in** takes an email or a username (anything with an `@` is an
+  email) and answers "wrong username, email or password" for every failure,
+  including a username whose account has no password. Failures count per
+  account, so alternating the two spellings buys no extra tries.
 - **forgot** says the same thing for every address.
 - **reset** checks the new password before spending the link, ends every
   session of the account, and confirms the address (the link came through it).

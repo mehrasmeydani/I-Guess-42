@@ -125,7 +125,8 @@ pub async fn login_page_handler(
 
 #[derive(Deserialize)]
 pub struct EmailLoginForm {
-    pub email: String,
+    /// An email address or a username.
+    pub login: String,
     pub password: String,
 }
 
@@ -135,17 +136,25 @@ pub async fn login_email(
     jar: CookieJar,
     Form(form): Form<EmailLoginForm>,
 ) -> Result<Response, AppError> {
-    let refuse = |notice: Notice, email: String| {
-        let page = login_page(&state, None, Some(notice), email);
+    let refuse = |notice: Notice, typed: String| {
+        let page = login_page(&state, None, Some(notice), typed);
         Ok((StatusCode::UNAUTHORIZED, templates::render(&page)).into_response())
     };
-    let typed = form.email.trim().to_string();
-    // A malformed address cannot have an account; say what any failure says.
-    let email = normalize_email(&form.email).unwrap_or_else(|_| typed.to_lowercase());
+    let typed = form.login.trim().to_string();
+    // As stored: an email normalised, a username lowercased. A malformed
+    // address cannot have an account; it gets what any failure gets.
+    let wanted = match typed.contains('@') {
+        true => normalize_email(&typed).unwrap_or_else(|_| typed.to_lowercase()),
+        false => normalize_username(&typed),
+    };
+    let found = db::password_login_any(&state.db, &wanted).await?;
 
-    let by_email = format!("login:email:{email}");
+    // Counted per account (by its email) when there is one, so switching
+    // between email and username does not buy extra tries; otherwise per
+    // what was typed.
+    let by_account = format!("login:email:{}", found.as_ref().map_or(wanted.as_str(), |f| f.2.as_str()));
     let by_ip = format!("login:ip:{}", ip_key(&ip));
-    for (key, rule) in [(&by_email, limits::LOGIN_PER_EMAIL), (&by_ip, limits::LOGIN_PER_IP)] {
+    for (key, rule) in [(&by_account, limits::LOGIN_PER_EMAIL), (&by_ip, limits::LOGIN_PER_IP)] {
         if !state.limits.allows(key, rule) {
             let wait = minutes(state.limits.retry_after(key, rule));
             return refuse(
@@ -155,14 +164,13 @@ pub async fn login_email(
         }
     }
 
-    let found = db::password_login(&state.db, &email).await?;
     let ok = credentials::verify_password(&form.password, found.as_ref().map(|f| f.1.as_str())).await?;
     match found {
-        Some((account_id, _)) if ok => signed_in_to(&state, jar, account_id, AFTER_SIGN_IN).await,
+        Some((account_id, _, _)) if ok => signed_in_to(&state, jar, account_id, AFTER_SIGN_IN).await,
         _ => {
-            state.limits.record(&by_email);
+            state.limits.record(&by_account);
             state.limits.record(&by_ip);
-            refuse(Notice::error("Wrong email or password."), typed)
+            refuse(Notice::error("Wrong username, email or password."), typed)
         }
     }
 }
@@ -519,7 +527,7 @@ mod tests {
             State(state.clone()),
             no_ip(),
             CookieJar::new(),
-            Form(EmailLoginForm { email: email.into(), password: password.into() }),
+            Form(EmailLoginForm { login: email.into(), password: password.into() }),
         )
         .await
         .unwrap()
@@ -666,7 +674,7 @@ mod tests {
         for resp in [wrong, unknown] {
             assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
             assert_eq!(set_cookie(&resp, auth::SESSION_COOKIE), None);
-            assert!(body(resp).await.contains("Wrong email or password."));
+            assert!(body(resp).await.contains("Wrong username, email or password."));
         }
 
         let resp = log_in(&state, " ANN@example.com", PASSWORD).await;
@@ -706,6 +714,44 @@ mod tests {
         // The sign-up mail counted against the same address limit.
         assert_eq!(outcomes, ["/g?msg=resent", "/g?msg=resent", "/g?msg=resend_wait", "/g?msg=resend_wait"]);
         assert_eq!(sent.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_username_signs_in_as_well_as_an_email() {
+        let (t, state, sent) = test_app().await;
+        let ann = confirmed(&state, &sent, "ann@example.com", "ann").await;
+
+        for typed in ["ann", " ANN "] {
+            let resp = log_in(&state, typed, PASSWORD).await;
+            assert_eq!(location(&resp), "/g", "{typed:?}");
+            let session = set_cookie(&resp, auth::SESSION_COOKIE).unwrap();
+            assert_eq!(db::viewer_for_session(&t.db, &session).await.unwrap().unwrap().account.id, ann);
+        }
+        let resp = log_in(&state, "ann", "not the password").await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(body(resp).await.contains(r#"value="ann""#), "what was typed is kept");
+
+        // An account without a password, found by its username, gets the
+        // same answer as one that does not exist.
+        crate::testkit::student(&t.db, 1001, "megardes", "s").await;
+        let no_password = body(log_in(&state, "megardes", PASSWORD).await).await;
+        let nobody = body(log_in(&state, "nobody", PASSWORD).await).await;
+        assert!(no_password.contains("Wrong username, email or password."));
+        assert!(nobody.contains("Wrong username, email or password."));
+    }
+
+    #[tokio::test]
+    async fn switching_between_username_and_email_buys_no_extra_tries() {
+        let (_t, state, sent) = test_app().await;
+        confirmed(&state, &sent, "ann@example.com", "ann").await;
+        for n in 0..limits::LOGIN_PER_EMAIL.max {
+            let typed = if n % 2 == 0 { "ann" } else { "ann@example.com" };
+            log_in(&state, typed, "guess guess guess").await;
+        }
+        for typed in ["ann", "ann@example.com"] {
+            let resp = log_in(&state, typed, PASSWORD).await;
+            assert!(body(resp).await.contains("Too many attempts"), "{typed}");
+        }
     }
 
     #[tokio::test]

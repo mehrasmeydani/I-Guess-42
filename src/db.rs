@@ -382,6 +382,20 @@ pub async fn password_login(db: &Db, email: &str) -> Result<Option<(i64, String)
     Ok(row)
 }
 
+/// As [`password_login`], found by email or by username, whichever `typed`
+/// looks like: anything with an `@` is an email. Also gives the email, so a
+/// caller can count attempts per account rather than per spelling.
+pub async fn password_login_any(db: &Db, typed: &str) -> Result<Option<(i64, String, String)>> {
+    let by = if typed.contains('@') { "p.email" } else { "a.username" };
+    let sql = format!(
+        "SELECT p.account_id, p.hash, p.email FROM passwords p
+         JOIN accounts a ON a.id = p.account_id
+         WHERE {by} = ?1 AND a.banned_at IS NULL AND a.deleted_at IS NULL"
+    );
+    let row = sqlx::query_as(&sql).bind(typed).fetch_optional(db).await?;
+    Ok(row)
+}
+
 /// The email an account signs in with by password, and whether it is verified.
 pub async fn password_email(db: &Db, account_id: i64) -> Result<Option<(String, bool)>> {
     let row = sqlx::query_as(
