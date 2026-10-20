@@ -1533,10 +1533,46 @@ list groups accounts that signed up or guessed from one address hash, or
 signed up within ten minutes of each other. Hints for a human, never acted on
 by themselves.
 
+### The UI/UX spec (R1-R20)
+
+The round, results, day, trends and "me" pages follow the `ui-ux-improvements`
+spec (v1.1). The parts that are not just markup:
+
+- **Countdown (D1).** The page carries the deadline and the server's clock
+  (`data-closes-at`, `data-server-now`); app.js measures the gap once and again
+  on `visibilitychange` through `/api/round`, so the visitor's clock never moves
+  the deadline. Text ticks every second; the `aria-label` and the progress bar
+  once a minute; no `aria-live`. At zero it shows "revealing…", waits for
+  `/api/round` to report the next round, then opens the closed round's day page.
+- **Held guesses (D3).** A signed-out visitor's number goes into `held.rs`, a
+  server-side map keyed by a one-hour HttpOnly cookie, never the URL.
+  `signin::signed_in_to` - which every way of signing in ends in - locks it,
+  exactly once, or says why not (round closed, already guessed, unconfirmed).
+- **Locking (D4).** Sending the same guess twice is a success; a different one
+  keeps the first; a guess for a closed round is refused as "too late". The
+  primary key stays `(round, player)`, never the number.
+- **Stats (D5)** are worked out from guesses on every read (`stats::player_stats`).
+- **Anonymous labels (D6)** are an HMAC of the player id (`templates::anon_label`),
+  keyed by `ANON_LABEL_KEY` or a hash of the 42 client secret.
+- **Preview images (D7).** `og.rs` draws a round's picks into a 1200x630 PNG
+  with its own pixel font, for closed rounds only, cached in memory.
+- **Empty-then-populated (R9.10).** The cause was the stylesheet, not the data:
+  every section started hidden and appeared on a staggered delay, charts below
+  the fold held their bars until scrolled to, and trends played a fake
+  "analysing…" bar while the real work had already taken a few milliseconds on
+  the server. All three are gone; the timing is in a test-only details block.
+- **Wrong round date (R2.8).** Seen on a test instance whose admin clock had
+  been moved: the round shown was right for the game clock, but the header
+  showed the real time. The header clock now follows the game clock, and the
+  test banner says when it has been moved.
+
 ### Testing it
 
+`testkit.rs` builds an app### Testing it
+
 `testkit.rs` builds an app on a throwaway database with mail kept in memory,
-and gives session cookies and response helpers. `oauth.rs`'s tests start a
+and gives session cookies and response helpers. `ui_tests.rs` checks the
+UI/UX spec against rendered pages. `oauth.rs`'s tests start a
 fake server that plays 42, GitHub and Google at once (a code stands for a
 person), so every callback runs end to end, PKCE included.
 

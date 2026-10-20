@@ -1,29 +1,50 @@
 {% extends "base.html" %}
-{% block title %}Privacy &middot; i guess low{% endblock %}
-{% block h1 %}privacy{% endblock %}
+{% block title %}privacy &middot; i guess low{% endblock %}
+{% block path %}/privacy{% endblock %}
+{% block heading %}{% endblock %}
 
 {% block content %}
 <section class="sec prose" style="--b: 0">
-  <h2 class="rule"><span>what we keep, and why</span></h2>
-  <p>i guess low keeps only what it needs to run the game.</p>
-  <ul>
-    <li><b>your account</b>: a username, when you joined, and the ways you sign in (your 42, GitHub or Google id, and the email they report). if you sign in with an email, that address and a hash of your password &mdash; never the password itself.</li>
-    <li><b>if you sign in with 42</b>: your login, display name and campus, from intra, refreshed when you sign in.</li>
-    <li><b>your guesses</b>, one per round, and when you made them. they're secret until the round closes, then public.</li>
-    <li><b>where you came from</b>, only as a keyed hash that changes every month, so moderators can see that several accounts share a network, and nothing about where it is. not your address itself.</li>
-    <li><b>one cookie</b>, to keep you signed in. no tracking, no ads, no analytics.</li>
-  </ul>
+  <h1 class="page-title">privacy</h1>
+  <p>i guess low keeps only what it needs to run the game. this page says what that is, why, for how long, and who else sees any of it. who runs the site is in the <a href="/imprint">impressum</a>.</p>
 
-  <h2 class="rule"><span>who else sees it</span></h2>
-  <ul>
-    <li><b>other players</b> see usernames next to rounds and wins.</li>
-    <li><b>sign-in providers</b> (42, GitHub, Google) learn that you signed in here, when you use them.</li>
-    <li><b>Resend</b> delivers the few emails we send: confirming your address and resetting a password.</li>
-    <li><b>Cloudflare Turnstile</b>, if it is switched on, checks the sign-up form for bots.</li>
-  </ul>
+  <h2>what we keep, why, and for how long</h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="what we keep">
+  <table class="grid">
+    <thead><tr><th scope="col">what</th><th scope="col">why, and on what basis</th><th scope="col">kept for</th></tr></thead>
+    <tbody>
+      <tr><td>your account: username, when you joined, the ways you sign in</td><td>to run the account you asked for (Art. 6(1)(b) GDPR)</td><td>until you delete it</td></tr>
+      <tr><td>if you sign in with an email: the address and a hash of your password, never the password</td><td>to let you sign in and reset it (Art. 6(1)(b))</td><td>until you delete it or remove that login</td></tr>
+      <tr><td>if you sign in with 42: your login, display name and campus</td><td>to decide which rounds you can play (Art. 6(1)(b))</td><td>refreshed at each sign-in; until you delete your account</td></tr>
+      <tr><td>your guesses, one per round, and when you made them</td><td>to play the game; they are secret until the round closes, then part of its results (Art. 6(1)(b))</td><td>for good, so past results stay true; a deleted account's rounds stay under <b>deleted-</b> and a number</td></tr>
+      <tr><td>a keyed hash of the network you signed up and guessed from, never the address</td><td>to spot one person playing many accounts (Art. 6(1)(f), our interest in a fair game). the key changes every month, so a hash cannot be matched after its month</td><td>with the account or guess it belongs to</td></tr>
+      <tr><td>sign-in sessions</td><td>to keep you signed in (Art. 6(1)(b))</td><td>30 days, or until you sign out</td></tr>
+      <tr><td>emailed links (confirm, reset)</td><td>to prove the address is yours (Art. 6(1)(b))</td><td>24 hours (confirm) or 1 hour (reset), then deleted</td></tr>
+      <tr><td>a count of mails sent</td><td>to stay within the mail service's limits (Art. 6(1)(f))</td><td>2 days</td></tr>
+      <tr><td>server logs: errors, sign-ins and bans by account number</td><td>to keep the site running and safe (Art. 6(1)(f))</td><td>overwritten as they fill: at most 30 MB, usually a few days</td></tr>
+    </tbody>
+  </table>
+  </div>
 
-  <h2 class="rule"><span>how long, and how to leave</span></h2>
-  <p>your account stays until you delete it, from <a href="/account">your account page</a>. that removes your username, logins, email and password straight away. the rounds you played stay, under <b>deleted-</b> and a number, so their results still add up. sign-in sessions end after 30 days; emailed links after a day.</p>
-  <p>to see what we hold about you, or for anything else, see the <a href="/imprint">imprint</a>.</p>
+  <h2>who else sees it</h2>
+  <ul>
+    <li><b>other players</b> see your username next to rounds and wins, once you are signed in. signed-out visitors see a label like "player #3fa2" instead.</li>
+    <li><b>42</b> (42 intra, EU), <b>GitHub</b> (GitHub Inc., USA) and <b>Google</b> (Google LLC, USA) learn that you signed in here, when you choose them. GitHub and Google transfer data to the USA under the EU-US Data Privacy Framework.</li>
+    <li><b>Resend</b> (Resend Inc., USA) delivers the mails we send: the link to confirm your address, and password resets. it sees your address and the mail.</li>
+    <li><b>Cloudflare</b> (Cloudflare Inc., USA), when Turnstile is switched on, checks the sign-up form for bots and sees your network address while it does.</li>
+  </ul>
+  <p>we don't sell or share anything else, and there are no ads, analytics or trackers.</p>
+
+  <h2>cookies and storage</h2>
+  <ul>
+    <li><b>ig42_session</b>: keeps you signed in. set when you sign in; strictly necessary.</li>
+    <li><b>ig42_held</b>: holds a number you picked before signing in, for up to an hour, so it can be locked once you do. strictly necessary; only set if you pick a number while signed out.</li>
+    <li>your browser's local storage remembers that you dismissed the result of a round, so it doesn't pop up again.</li>
+  </ul>
+  <p>nothing is set before you sign in or pick a number, so there is no cookie banner. the sign-in providers set their own cookies on their own sites, not on this one.</p>
+
+  <h2>your rights</h2>
+  <p>you can see, correct, take with you or delete what we hold about you, and object to what we do on the basis of our interests. most of it is on <a href="/account">your account page</a>: rename, remove a login, or delete the account, which removes your username, logins, email and password straight away. for anything else, write to the contact in the <a href="/imprint">impressum</a>.</p>
+  <p>you can also complain to the Austrian data protection authority: Datenschutzbehörde, Barichgasse 40&ndash;42, 1030 Wien, <a href="https://www.dsb.gv.at">dsb.gv.at</a>.</p>
 </section>
 {% endblock %}

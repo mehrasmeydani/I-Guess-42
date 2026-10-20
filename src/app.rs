@@ -7,6 +7,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 
 use crate::config::Config;
 use crate::db::Db;
+use crate::held::HeldGuesses;
 use crate::limits::Limits;
 use crate::mail::Mailer;
 use crate::templates::{self, ErrorTemplate};
@@ -19,6 +20,10 @@ pub struct AppState {
     pub mailer: Mailer,
     /// Counts sign-in failures and sign-ups, per address and per email.
     pub limits: Arc<Limits>,
+    /// Numbers signed-out visitors typed, waiting for them to sign in.
+    pub held: Arc<HeldGuesses>,
+    /// Rendered link-preview images of closed rounds.
+    pub og: Arc<crate::og::Cache>,
     /// Seconds added to the wall clock, so a test instance can be pushed past
     /// a 12:42 deadline without waiting for one. Always zero unless an admin
     /// moved it, and it only affects which round is open - never session
@@ -31,6 +36,8 @@ impl AppState {
         Self {
             mailer: Mailer::from_config(&cfg),
             limits: Arc::new(Limits::default()),
+            held: Arc::new(HeldGuesses::default()),
+            og: Arc::new(crate::og::Cache::default()),
             db,
             cfg,
             http,

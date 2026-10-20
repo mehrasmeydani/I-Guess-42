@@ -1,69 +1,81 @@
 {% extends "base.html" %}
-{% block title %}{{ round.date_key }} &middot; i guess low{% endblock %}
+{% block title %}round {{ round.date_key }} &middot; i guess low{% endblock %}
 {% block h1 %}round {{ round.date_key }}{% endblock %}
 {% block nav_results %}class="on" aria-current="page"{% endblock %}
+{% block path %}{{ pool.base() }}/day/{{ round.date_key }}{% endblock %}
+{% block og_title %}i guess low · round {{ round.date_key }}{% endblock %}
+{% block twitter_title %}i guess low · round {{ round.date_key }}{% endblock %}
+{% block og_description %}{{ takeaway }}{% endblock %}
+{% block twitter_description %}{{ takeaway }}{% endblock %}
+{% block og_image %}{{ pool.base() }}/day/{{ round.date_key }}/og.png{% endblock %}
+{% block twitter_image %}{{ pool.base() }}/day/{{ round.date_key }}/og.png{% endblock %}
 
 {% block content %}
+{# Walking the calendar: the day before, this day, the day after. #}
+<nav class="daynav" aria-label="rounds">
+  <span class="daynav-prev">{% match previous %}{% when Some with (d) %}<a href="{{ pool.base() }}/day/{{ d }}" rel="prev">&larr; {{ d }}</a>{% when None %}{% endmatch %}</span>
+  <span class="daynav-here">round {{ round.date_key }} <span class="chip">[closed]</span></span>
+  <span class="daynav-next">{% match newer %}{% when Some with (d) %}<a href="{{ pool.base() }}/day/{{ d }}" rel="next">{{ d }} &rarr;</a>{% when None %}{% endmatch %}</span>
+</nav>
+
 <section class="sec" style="--b: 0">
-  <h2 class="rule"><span>round {{ round.date_key }}</span><span class="tag">closed</span></h2>
-  <div class="figures">
+  <p class="scope"><span class="chip">[{{ data_source }}]</span> this round</p>
+  <p class="takeaway">
     {% match round.winner %}
-      {% when Some with (w) %}<p><b class="win">{{ w.value_label }}</b><span>won &larr; {{ w.login }}</span></p>
-      {% when None %}<p><b class="lose">&times;</b><span>no winner. every number collided</span></p>
+      {% when Some with (w) %}<b class="win">{{ w.value_label }}</b>
+      {% when None %}<b class="lose">&times;</b>
     {% endmatch %}
-    <p><b>{{ lowest_unpicked_label }}</b><span>lowest number nobody picked</span></p>
-    <p><b>{{ round.total }}</b><span>players, {{ distinct }} different {% if distinct == 1 %}number{% else %}numbers{% endif %}</span></p>
-  </div>
+    <span>{{ crate::templates::after_number(takeaway) }}</span>
+  </p>
+  {% match round.winner %}
+    {% when Some with (w) %}<p class="dim">won by {{ w.login }}.{% match my_pick %}{% when Some with (p) %} your pick: <b class="mine-text">{{ p }}</b>.{% when None %}{% endmatch %}</p>
+    {% when None %}{% match my_pick %}{% when Some with (p) %}<p class="dim">your pick: <b class="mine-text">{{ p }}</b>.</p>{% when None %}{% endmatch %}
+  {% endmatch %}
+  {% if !names_visible %}<p class="dim mask-note">names are shown to signed-in players. you see a stable label for each player instead.</p>{% endif %}
 </section>
 
 <section class="sec" style="--b: 1">
-  <h2 class="rule"><span>spread</span><a class="tag" href="{{ pool.base() }}/trends">trends &rarr;</a></h2>
+  <h2 class="section-title">every pick</h2>
   <p class="legend">
     <span><i class="win">█</i> winner</span>
     <span><i class="once">█</i> picked by one player</span>
-    <span><i class="many">█</i> shared</span>
+    <span><i class="many">█</i> taken by more than one <s>struck</s></span>
+    {% if my_pick.is_some() %}<span><i class="mine">▲</i> your pick</span>{% endif %}
   </p>
   {% include "chart.html" %}
-</section>
-
-<section class="sec" style="--b: 2">
-  <h2 class="rule"><span>most picked</span></h2>
-  <ol class="ranked">
-    {% for t in most %}
-      <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
-    {% endfor %}
-  </ol>
-</section>
-
-<section class="sec" style="--b: 3">
-  <details>
-    <summary>every number picked ({{ distinct }})</summary>
+  <p class="chart-summary">{{ summary }}</p>
+  <details class="expand">
+    <summary><span class="when-closed">view as a table ({{ distinct }} numbers)</span><span class="when-open">hide the table</span></summary>
     <table class="grid narrow">
-      <thead><tr><th class="num">number</th><th class="num">players</th></tr></thead>
+      <caption class="sr">every number picked in round {{ round.date_key }}</caption>
+      <thead><tr><th scope="col" class="num">number</th><th scope="col" class="num">players</th><th scope="col">result</th></tr></thead>
       <tbody>
-        {% for t in all %}
-          <tr><td class="num">{{ t.value_label }}</td><td class="num">{{ t.count }}</td></tr>
+        {% for r in rows %}
+          <tr class="{{ r.fate }}"><td class="num">{% if r.fate == "taken" %}<s>{{ r.value_label }}</s>{% else %}{{ r.value_label }}{% endif %}</td><td class="num">{{ r.count }}</td><td>{% if r.fate == "won" %}won{% else if r.fate == "taken" %}taken{% else %}unique, not lowest{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </details>
+
+  <p class="day-actions">
+    {% match share_text %}
+      {% when Some with (text) %}<button type="button" class="ghost share" data-share="{{ text }}">share result</button><span class="share-done dim" role="status"></span>
+      {% when None %}
+    {% endmatch %}
+    <a href="{{ pool.base() }}/">play today's round &rarr;</a>
+  </p>
 </section>
 
 {# The rounds before this one, so reading yesterday and the day before that is
-   a walk down the page rather than a trip back to /results. The newer round is
-   the way back up: without it the list would only ever go one way. #}
-<section class="sec" style="--b: 4">
-  <h2 class="rule"><span>earlier rounds</span>
-    {% match newer %}
-      {% when Some with (d) %}<a class="tag" href="{{ pool.base() }}/day/{{ d }}">{{ d }} &rarr;</a>
-      {% when None %}<span class="tag">newest</span>
-    {% endmatch %}
-  </h2>
+   a walk down the page rather than a trip back to /results. #}
+<section class="sec" style="--b: 2">
+  <h2 class="section-title">earlier rounds</h2>
   {% if earlier.is_empty() %}
     <p class="dim">nothing before this one. it is the first round played.</p>
   {% else %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="earlier rounds">
     <table class="grid">
-      <thead><tr><th>date</th><th>winner</th><th class="num">number</th><th class="num">played</th></tr></thead>
+      <thead><tr><th scope="col">date</th><th scope="col">winner</th><th scope="col" class="num">number</th><th scope="col" class="num">played</th></tr></thead>
       <tbody>
         {% for r in earlier %}
           <tr>
@@ -81,6 +93,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     <p class="dim listed">
       the {{ earlier.len() }} {% if earlier.len() == 1 %}round{% else %}rounds{% endif %} before this one, of {{ total_rounds }} closed in all.
       <a href="{{ pool.base() }}/results">every round &rarr;</a>

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} &middot; i guess low{% endblock %}
-{% block h1 %}{{ title }}{% endblock %}
+{% block heading %}{% endblock %}
 
 {% block content %}
 <section class="sec auth" style="--b: 0">
   <div class="auth-card">
-    <h2 class="auth-title">{{ title }}</h2>
+    <h1 class="auth-title">{{ title }}</h1>
     {% for line in lines %}<p class="auth-sub">{{ line }}</p>{% endfor %}
     {% match link %}
       {% when Some with ((href, label)) %}<a class="btn primary wide" href="{{ href }}">{{ label }}</a>

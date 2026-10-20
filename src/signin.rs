@@ -23,8 +23,8 @@ use crate::handlers::current_viewer;
 use crate::limits;
 use crate::mail;
 use crate::templates::{
-    self, ForgotTemplate, LoginTemplate, MessageTemplate, Notice, ResetTemplate, SignupTemplate,
-    UserView, VerifyTemplate,
+    self, ForgotTemplate, FormErrors, LoginTemplate, MessageTemplate, Notice, ResetTemplate,
+    SignupTemplate, UserView, VerifyTemplate,
 };
 use crate::auth;
 
@@ -57,11 +57,40 @@ fn minutes(d: std::time::Duration) -> u64 {
     d.as_secs().div_ceil(60).max(1)
 }
 
+/// Signs `account_id` in and sends them on to `to` - unless they typed a
+/// number into the global round before signing in, in which case it is
+/// locked for them now and they land on the round instead. Every way of
+/// signing in ends here, so a held number is handled the same for all.
 pub(crate) async fn signed_in_to(state: &AppState, jar: CookieJar, account_id: i64, to: &str) -> Result<Response, AppError> {
     let token = auth::random_token();
     db::create_session(&state.db, &token, account_id, auth::SESSION_TTL_DAYS).await?;
-    let jar = jar.add(auth::session_cookie(token, state.cfg.secure_cookies));
-    Ok((jar, Redirect::to(to)).into_response())
+    let mut jar = jar.add(auth::session_cookie(token, state.cfg.secure_cookies));
+    let mut to = to.to_string();
+    if let Some(held_token) = crate::held::token(&jar) {
+        // Always cleared, whatever becomes of it.
+        jar = jar.remove(crate::held::clearing_cookie());
+        if let Some(held) = state.held.take(&held_token) {
+            to = lock_held(state, account_id, held).await?.to_string();
+        }
+    }
+    Ok((jar, Redirect::to(&to)).into_response())
+}
+
+/// Locks a held number for a freshly signed-in account, exactly once, and
+/// says where to go to hear how that went.
+async fn lock_held(state: &AppState, account_id: i64, held: crate::held::Held) -> Result<&'static str, AppError> {
+    let round = crate::round::Round::current(state.now()).key();
+    if held.round != round {
+        return Ok("/g?msg=held_late");
+    }
+    if !db::account_verified(&state.db, account_id).await? {
+        return Ok("/g?msg=held_unverified");
+    }
+    if db::insert_guess(&state.db, Pool::Global, &round, account_id, held.value, true).await? {
+        Ok("/g?msg=saved")
+    } else {
+        Ok("/g?msg=held_existing")
+    }
 }
 
 /// Sends a mail, and logs rather than fails if it does not go out: the
@@ -99,14 +128,24 @@ fn login_page(state: &AppState, viewer: Option<Viewer>, notice: Option<Notice>, 
     LoginTemplate {
         pool: Pool::Global,
         user: user_view(viewer),
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         notice,
+        errors: FormErrors::default(),
         email,
         email_signup: state.cfg.email_signup(),
         github: state.cfg.github().is_some(),
         google: state.cfg.google().is_some(),
     }
+}
+
+/// "create an account to lock in your 7", for a visitor with a held number.
+fn held_notice(state: &AppState, jar: &CookieJar) -> Option<Notice> {
+    let held = state.held.peek(&crate::held::token(jar)?)?;
+    Some(Notice::ok(format!(
+        "create an account to lock in your {}.",
+        crate::templates::group_digits(held.value)
+    )))
 }
 
 pub async fn login_page_handler(
@@ -118,7 +157,7 @@ pub async fn login_page_handler(
     let notice = match query.msg.as_deref() {
         Some("signed_out") => Some(Notice::ok("Signed out.")),
         Some("password_set") => Some(Notice::ok("Password changed. Sign in with the new one.")),
-        _ => None,
+        _ => held_notice(&state, &jar),
     };
     Ok(templates::render(&login_page(&state, viewer, notice, String::new())))
 }
@@ -136,8 +175,9 @@ pub async fn login_email(
     jar: CookieJar,
     Form(form): Form<EmailLoginForm>,
 ) -> Result<Response, AppError> {
-    let refuse = |notice: Notice, typed: String| {
-        let page = login_page(&state, None, Some(notice), typed);
+    let refuse = |message: String, typed: String| {
+        let mut page = login_page(&state, None, None, typed);
+        page.errors = FormErrors::on("login", message);
         Ok((StatusCode::UNAUTHORIZED, templates::render(&page)).into_response())
     };
     let typed = form.login.trim().to_string();
@@ -157,10 +197,7 @@ pub async fn login_email(
     for (key, rule) in [(&by_account, limits::LOGIN_PER_EMAIL), (&by_ip, limits::LOGIN_PER_IP)] {
         if !state.limits.allows(key, rule) {
             let wait = minutes(state.limits.retry_after(key, rule));
-            return refuse(
-                Notice::error(format!("Too many attempts. Try again in {wait} minutes.")),
-                typed,
-            );
+            return refuse(format!("Too many attempts. Try again in {wait} minutes."), typed);
         }
     }
 
@@ -170,7 +207,7 @@ pub async fn login_email(
         _ => {
             state.limits.record(&by_account);
             state.limits.record(&by_ip);
-            refuse(Notice::error("Wrong username, email or password."), typed)
+            refuse("Wrong username, email or password.".to_string(), typed)
         }
     }
 }
@@ -181,9 +218,10 @@ fn signup_page(state: &AppState, notice: Option<Notice>, email: String, username
     SignupTemplate {
         pool: Pool::Global,
         user: None,
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         notice,
+        errors: FormErrors::default(),
         enabled: state.cfg.email_signup(),
         email,
         username,
@@ -191,8 +229,9 @@ fn signup_page(state: &AppState, notice: Option<Notice>, email: String, username
     }
 }
 
-pub async fn signup_page_handler(State(state): State<AppState>) -> Response {
-    templates::render(&signup_page(&state, None, String::new(), String::new()))
+pub async fn signup_page_handler(State(state): State<AppState>, jar: CookieJar) -> Response {
+    let notice = held_notice(&state, &jar);
+    templates::render(&signup_page(&state, notice, String::new(), String::new()))
 }
 
 #[derive(Deserialize)]
@@ -209,7 +248,7 @@ fn check_inbox(state: &AppState) -> Response {
     templates::render(&MessageTemplate {
         pool: Pool::Global,
         user: None,
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         title: "check your inbox",
         lines: vec![
@@ -227,8 +266,9 @@ pub async fn signup(
 ) -> Result<Response, AppError> {
     let username = normalize_username(&form.username);
     let typed_email = form.email.trim().to_string();
-    let refuse = |text: &str| {
-        let page = signup_page(&state, Some(Notice::error(text)), typed_email.clone(), username.clone());
+    let refuse = |field: &str, text: &str| {
+        let mut page = signup_page(&state, None, typed_email.clone(), username.clone());
+        page.errors = FormErrors::on(field, text);
         Ok((StatusCode::UNPROCESSABLE_ENTITY, templates::render(&page)).into_response())
     };
     if !state.cfg.email_signup() {
@@ -237,23 +277,23 @@ pub async fn signup(
 
     let email = match normalize_email(&form.email) {
         Ok(e) => e,
-        Err(why) => return refuse(why),
+        Err(why) => return refuse("email", why),
     };
     if let Some(why) = username_problem(&username) {
-        return refuse(why);
+        return refuse("username", why);
     }
     if let Some(why) = password_problem(&form.password, &email, &username) {
-        return refuse(why);
+        return refuse("password", why);
     }
     if !turnstile_passed(&state, &form.turnstile, &ip).await {
-        return refuse("The are-you-human check didn't pass. Try again.");
+        return refuse("", "The are-you-human check didn't pass. Try again.");
     }
     if !db::username_available(&state.db, &username).await? {
-        return refuse("That username is taken.");
+        return refuse("username", "That username is taken.");
     }
     // Counted only for a sign-up that got this far, so typos are free.
     if !state.limits.take(&format!("signup:{}", ip_key(&ip)), limits::SIGNUP_PER_IP) {
-        return refuse("Too many new accounts from here. Try again in an hour.");
+        return refuse("", "Too many new accounts from here. Try again in an hour.");
     }
 
     let hash = credentials::hash_password(&form.password).await?;
@@ -270,7 +310,7 @@ pub async fn signup(
                 send(&state, mail::exists(&email, &state.cfg.public_url)).await;
             }
         }
-        NewAccount::UsernameTaken => return refuse("That username is taken."),
+        NewAccount::UsernameTaken => return refuse("username", "That username is taken."),
     }
     Ok(check_inbox(&state))
 }
@@ -318,7 +358,7 @@ fn dead_link(state: &AppState) -> Response {
     let mut resp = templates::render(&MessageTemplate {
         pool: Pool::Global,
         user: None,
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         title: "that link doesn't work",
         lines: vec![
@@ -344,7 +384,7 @@ pub async fn verify_page(
     Ok(templates::render(&VerifyTemplate {
         pool: Pool::Global,
         user: None,
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         token: q.token,
     }))
@@ -396,7 +436,7 @@ pub async fn forgot_page(State(state): State<AppState>) -> Response {
     templates::render(&ForgotTemplate {
         pool: Pool::Global,
         user: None,
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         notice: None,
     })
@@ -424,7 +464,7 @@ pub async fn forgot(
     Ok(templates::render(&MessageTemplate {
         pool: Pool::Global,
         user: None,
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         title: "check your inbox",
         lines: vec![
@@ -440,7 +480,7 @@ fn reset_page(state: &AppState, token: String, notice: Option<Notice>) -> ResetT
     ResetTemplate {
         pool: Pool::Global,
         user: None,
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         notice,
         token,
@@ -701,7 +741,7 @@ mod tests {
                 .unwrap(),
         )
         .await;
-        assert!(page.contains("verify your email"));
+        assert!(page.contains("confirm your email"));
         assert!(page.contains(r#"action="/verify/resend""#));
 
         // Another link on request, but not endlessly.
@@ -875,7 +915,7 @@ mod tests {
         cfg.turnstile_verify_url = format!("http://{addr}/siteverify");
         let (t, state, _) = app_with(cfg).await;
 
-        let page = body(signup_page_handler(State(state.clone())).await).await;
+        let page = body(signup_page_handler(State(state.clone()), CookieJar::new()).await).await;
         assert!(page.contains(r#"data-sitekey="site""#));
 
         for answer in ["", "bad"] {

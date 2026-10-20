@@ -6,10 +6,14 @@ mod credentials;
 mod db;
 mod demo;
 mod handlers;
+mod held;
+mod ics;
 mod limits;
 mod mail;
 mod moderation;
 mod oauth;
+mod og;
+mod platform;
 mod points;
 mod round;
 mod signin;
@@ -17,6 +21,8 @@ mod stats;
 mod templates;
 #[cfg(test)]
 mod testkit;
+#[cfg(test)]
+mod ui_tests;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -68,6 +74,10 @@ async fn main() -> Result<()> {
         .build()
         .context("building the HTTP client")?;
 
+    templates::init_site(templates::Site {
+        public_url: cfg.public_url.clone(),
+        anon_key: cfg.anon_key.clone(),
+    });
     let cfg = Arc::new(cfg);
     if cfg.test_mode() {
         tracing::warn!(admins = ?cfg.admin_logins, "TEST MODE: /admin is reachable");
@@ -100,7 +110,11 @@ async fn main() -> Result<()> {
         .route("/g/", get(handlers::global_index))
         .route("/g/results", get(handlers::global_results))
         .route("/g/day/{date}", get(handlers::global_day))
+        .route("/g/day/{date}/og.png", get(handlers::global_day_image))
+        .route("/day/{date}/og.png", get(handlers::day_image))
         .route("/g/trends", get(handlers::global_trends))
+        .route("/g/me", get(handlers::global_me))
+        .route("/me", get(handlers::me))
         .route("/g/guess", post(handlers::global_submit_guess))
         .route("/g/guess/confirm", post(handlers::global_confirm_guess))
         .route("/login", get(signin::login_page_handler))
@@ -129,6 +143,13 @@ async fn main() -> Result<()> {
         .route("/privacy", get(moderation::privacy))
         .route("/imprint", get(moderation::imprint))
         .route("/healthz", get(handlers::healthz))
+        .route("/api/round", get(handlers::round_now))
+        .route("/manifest.webmanifest", get(platform::manifest))
+        .route("/robots.txt", get(platform::robots))
+        .route("/sitemap.xml", get(platform::sitemap))
+        .route_service("/favicon.ico", tower_http::services::ServeFile::new("static/favicon.ico"))
+        .route("/round/{file}", get(handlers::calendar))
+        .route("/g/round/{file}", get(handlers::global_calendar))
         // 404 unless ADMIN_LOGINS names the signed-in user.
         .route("/admin", get(handlers::admin))
         .route("/admin/clock", post(handlers::admin_clock))
@@ -151,6 +172,7 @@ async fn main() -> Result<()> {
             ),
         )
         .fallback(handlers::not_found)
+        .layer(axum::middleware::from_fn(platform::page_caching))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

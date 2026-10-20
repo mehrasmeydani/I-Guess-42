@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Create an account &middot; i guess low{% endblock %}
-{% block h1 %}create an account{% endblock %}
+{% block heading %}{% endblock %}
 
 {# Already where that button leads. #}
 {% block signin_link %}{% endblock %}
@@ -8,21 +8,28 @@
 {% block content %}
 <section class="sec auth" style="--b: 0">
   <div class="auth-card">
-    <h2 class="auth-title">create an account</h2>
+    <h1 class="auth-title">create an account</h1>
     <p class="auth-sub">or <a href="/login">sign in with 42, GitHub or Google</a> &mdash; no password needed.</p>
     {% include "_notice.html" %}
+    {% include "_errors.html" %}
     {% if enabled %}
     <form class="authform" method="post" action="/signup">
       <label for="email">email</label>
-      <input id="email" name="email" type="email" autocomplete="email" required value="{{ email }}">
+      <input id="email" name="email" type="email" autocomplete="email" required value="{{ email }}"
+             {% match errors.email %}{% when Some with (_e) %}aria-invalid="true" aria-describedby="email-error"{% when None %}{% endmatch %}>
+      {% match errors.email %}{% when Some with (e) %}<p class="field-error" id="email-error">{{ e }}</p>{% when None %}{% endmatch %}
       <label for="username">username</label>
       <input id="username" name="username" type="text" autocomplete="username" required
              minlength="3" maxlength="20" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" value="{{ username }}"
-             aria-describedby="username-hint" spellcheck="false" autocapitalize="none">
+             aria-describedby="username-hint{% match errors.username %}{% when Some with (_e) %} username-error{% when None %}{% endmatch %}" spellcheck="false" autocapitalize="none"
+             {% match errors.username %}{% when Some with (_e) %}aria-invalid="true"{% when None %}{% endmatch %}>
+      {% match errors.username %}{% when Some with (e) %}<p class="field-error" id="username-error">{{ e }}</p>{% when None %}{% endmatch %}
       <p class="hint" id="username-hint">3&ndash;20 letters, digits, - or _. shown next to your wins.</p>
       <label for="password">password</label>
       <input id="password" name="password" type="password" autocomplete="new-password" required
-             minlength="10" maxlength="128" aria-describedby="password-hint">
+             minlength="10" maxlength="128" aria-describedby="password-hint{% match errors.password %}{% when Some with (_e) %} password-error{% when None %}{% endmatch %}"
+             {% match errors.password %}{% when Some with (_e) %}aria-invalid="true"{% when None %}{% endmatch %}>
+      {% match errors.password %}{% when Some with (e) %}<p class="field-error" id="password-error">{{ e }}</p>{% when None %}{% endmatch %}
       <p class="hint" id="password-hint">at least 10 characters. a few words strung together work well.</p>
       {% match turnstile_site_key %}
         {% when Some with (key) %}

@@ -40,7 +40,7 @@ async fn page(state: &AppState, viewer: Viewer, notice: Option<Notice>, status: 
     let mut resp = templates::render(&ModTemplate {
         pool: Pool::Global,
         user: Some(UserView::from(viewer)),
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         notice,
         clusters: db::clusters(&state.db, CLUSTER_MIN).await?,
@@ -127,7 +127,7 @@ pub async fn privacy(State(state): State<AppState>, jar: CookieJar) -> Result<Re
     Ok(templates::render(&PrivacyTemplate {
         pool: Pool::Global,
         user: viewer.map(UserView::from),
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
     }))
 }
@@ -137,11 +137,13 @@ pub async fn imprint(State(state): State<AppState>, jar: CookieJar) -> Result<Re
     Ok(templates::render(&ImprintTemplate {
         pool: Pool::Global,
         user: viewer.map(UserView::from),
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
-        name: state.cfg.imprint_name.clone(),
-        address: state.cfg.imprint_address.clone(),
-        email: state.cfg.imprint_email.clone(),
+        operator: crate::templates::operator_sentence(
+            state.cfg.imprint_name.as_deref(),
+            state.cfg.imprint_address.as_deref(),
+            state.cfg.imprint_email.as_deref(),
+        ),
     }))
 }
 
@@ -253,17 +255,52 @@ mod tests {
         assert_eq!(found.len(), 3, "two from one address is not a group: {found:?}");
     }
 
+    async fn page_of(cfg: crate::config::Config, imprint_page: bool) -> String {
+        let (_t, state, _) = app_with(cfg).await;
+        let jar = axum_extra::extract::cookie::CookieJar::new();
+        let resp = if imprint_page {
+            imprint(State(state), jar).await.unwrap()
+        } else {
+            privacy(State(state), jar).await.unwrap()
+        };
+        body(resp).await
+    }
+
     #[tokio::test]
-    async fn the_legal_pages_render() {
+    async fn the_imprint_names_the_operator_in_production_only() {
         let mut cfg = config(&[]);
+        cfg.environment = Some("production".into());
         cfg.imprint_name = Some("Jane Doe".into());
         cfg.imprint_email = Some("hi@example.com".into());
-        let (_t, state, _) = app_with(cfg).await;
-        let html = body(privacy(State(state.clone()), axum_extra::extract::cookie::CookieJar::new()).await.unwrap()).await;
-        assert!(html.contains("one cookie"));
-        let html = body(imprint(State(state.clone()), axum_extra::extract::cookie::CookieJar::new()).await.unwrap()).await;
-        assert!(html.contains("Jane Doe"));
-        assert!(html.contains("mailto:hi@example.com"));
-        assert!(html.contains("not given"), "the address was not set");
+        let html = page_of(cfg.clone(), true).await;
+        assert!(html.contains("i guess low is run by Jane Doe. contact: hi@example.com"));
+        assert!(html.contains(">Impressum</h1>"));
+        assert_eq!(html.matches("<h1").count(), 1, "exactly one h1");
+        assert!(!html.contains("not given"));
+
+        // A test instance says so instead of showing anyone's details.
+        cfg.environment = Some("test".into());
+        let html = page_of(cfg, true).await;
+        assert!(html.contains("operator details are not shown on this test instance"));
+        assert!(!html.contains("Jane Doe"));
+        assert_eq!(html.matches("<h1").count(), 1);
+    }
+
+    #[test]
+    fn the_operator_sentence_leaves_out_what_is_missing() {
+        use crate::templates::operator_sentence;
+        assert_eq!(
+            operator_sentence(Some("Jane"), Some("Wien"), Some("a@b.at")),
+            "i guess low is run by Jane, Wien. contact: a@b.at"
+        );
+        assert_eq!(operator_sentence(None, None, Some("a@b.at")), "i guess low is run by students, for students. contact: a@b.at");
+        for s in [operator_sentence(None, None, None), operator_sentence(Some("J"), None, None)] {
+            assert!(!s.contains("not given") && !s.contains("None"), "{s}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_privacy_page_renders() {
+        assert!(page_of(config(&[]), false).await.contains("cookie"));
     }
 }

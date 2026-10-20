@@ -1,108 +1,67 @@
 {% extends "base.html" %}
-{% block title %}Results &middot; i guess low{% endblock %}
+{% block title %}results &middot; i guess low{% endblock %}
 {% block h1 %}results{% endblock %}
 {% block nav_results %}class="on" aria-current="page"{% endblock %}
+{% block path %}{{ pool.base() }}/results{% endblock %}
 
 {% block content %}
 <section class="sec" style="--b: 0">
-  <h2 class="rule"><span>most days won</span></h2>
-  {% if leaders.is_empty() %}
-    <p class="dim">nobody has won a round yet.</p>
-  {% else %}
-    <ol class="podium">
-      {% for l in leaders %}
-        <li class="p{{ loop.index }}" title="{{ l.display_name }}">
-          <span class="rank">{{ "{:02}"|format(loop.index) }}</span>
-          <b class="wins">{{ l.wins }}</b>
-          <span class="wins-unit">{% if l.wins == 1 %}day{% else %}days{% endif %} won</span>
-          <span class="who">{{ l.login }}</span>
-        </li>
-      {% endfor %}
-    </ol>
-    {% if !rest.is_empty() %}
-      <details>
-        <summary>show everyone ({{ rest.len() }} more)</summary>
-        <table class="grid">
-          <thead><tr><th class="num">#</th><th>login</th><th class="num">days won</th></tr></thead>
-          <tbody>
-            {% for l in rest %}
-              <tr title="{{ l.display_name }}">
-                <td class="num dim">{{ "{:02}"|format(loop.index + 3) }}</td>
-                <td>{{ l.login }}</td>
-                <td class="num b">{{ l.wins }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </details>
-    {% endif %}
-  {% endif %}
+  <p class="scope"><span class="chip">[{{ data_source }}]</span> closed rounds &middot; all-time</p>
+  {% match latest %}
+    {% when Some with (r) %}
+      <p class="takeaway">
+        {% match r.winner %}
+          {% when Some with (w) %}<b class="win">{{ w.value_label }}</b>
+          {% when None %}<b class="lose">&times;</b>
+        {% endmatch %}
+        <span>{{ crate::templates::after_number(takeaway.as_deref().unwrap_or("")) }}</span>
+      </p>
+      <p class="dim">the last round, {{ r.date_key }}{% match r.winner %}{% when Some with (w) %}, won by {{ w.login }}{% when None %}{% endmatch %}. <a href="{{ pool.base() }}/day/{{ r.date_key }}">see every pick &rarr;</a></p>
+      {% if !names_visible %}<p class="dim mask-note">names are shown to signed-in players. you see a stable label for each player instead.</p>{% endif %}
+    {% when None %}
+      <p class="takeaway"><span>no round has closed yet.</span></p>
+      <p class="dim">the first results land when this round closes, {{ first_close }}. <a href="{{ pool.base() }}/">pick a number &rarr;</a></p>
+  {% endmatch %}
 </section>
 
-{# The day that just closed, with the day page's own chart. Always here: not
-   behind the range switches, and not replaced by a search. #}
-{% match latest %}
-  {% when Some with (r) %}
-    <section class="sec" style="--b: 1">
-      <h2 class="rule"><span>last round</span><span class="tag">{{ r.date_key }}</span></h2>
-      {% match r.winner %}
-        {% when Some with (w) %}
-          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }} &middot; {{ r.total }} played</span></p>
-        {% when None %}
-          <p class="verdict"><b class="lose">&times;</b> <span>no winner &middot; {{ r.total }} played</span></p>
-      {% endmatch %}
-      {% match chart %}
-        {% when Some with (chart) %}
-          {# The same legend the day page prints over the same chart. #}
-          <p class="legend">
-            <span><i class="win">&#9608;</i> winner</span>
-            <span><i class="once">&#9608;</i> picked by one player</span>
-            <span><i class="many">&#9608;</i> shared</span>
-          </p>
-          {% include "chart.html" %}
-        {% when None %}
-      {% endmatch %}
-      <p class="morelink"><a href="{{ pool.base() }}/day/{{ r.date_key }}">details &rarr;</a></p>
-    </section>
-  {% when None %}
-{% endmatch %}
-
-<section class="sec" style="--b: 2">
-  <h2 class="rule"><span>rounds</span>
-    <span class="ranges">
-      <a class="{% if q.is_empty() && show == "7" %}on{% endif %}" href="{{ pool.base() }}/results">7</a>
-      <a class="{% if q.is_empty() && show == "30" %}on{% endif %}" href="{{ pool.base() }}/results?show=30">30</a>
-      <a class="{% if q.is_empty() && show == "all" %}on{% endif %}" href="{{ pool.base() }}/results?show=all">all</a>
+<section class="sec" style="--b: 1" aria-labelledby="rounds-h">
+  <h2 class="section-title" id="rounds-h">recent rounds
+    <span class="ranges" aria-label="how many rounds">
+      <a class="{% if q.is_empty() && show == "7" %}on{% endif %}" {% if q.is_empty() && show == "7" %}aria-current="true"{% endif %} href="{{ pool.base() }}/results">7</a>
+      <a class="{% if q.is_empty() && show == "30" %}on{% endif %}" {% if q.is_empty() && show == "30" %}aria-current="true"{% endif %} href="{{ pool.base() }}/results?show=30">30</a>
+      <a class="{% if q.is_empty() && show == "all" %}on{% endif %}" {% if q.is_empty() && show == "all" %}aria-current="true"{% endif %} href="{{ pool.base() }}/results?show=all">all</a>
     </span>
   </h2>
 
+  {# Nothing to search or jump to until a round has closed (R9.7). #}
   <div class="finders">
     <form method="get" action="{{ pool.base() }}/results" class="finder" role="search">
       <label for="q">search rounds</label>
       <div class="finder-row">
-        <input id="q" name="q" type="search" value="{{ q }}" placeholder="{% if names_visible %}login, number or month{% else %}number or month{% endif %}"
-               autocomplete="off" spellcheck="false" enterkeyhint="search">
-        <button type="submit">search</button>
+        <input id="q" name="q" type="search" value="{{ q }}" placeholder="{% if names_visible %}name, number or month{% else %}number or month{% endif %}"
+               autocomplete="off" spellcheck="false" enterkeyhint="search"{% if total_rounds == 0 %} disabled{% endif %}>
+        <button type="submit"{% if total_rounds == 0 %} disabled{% endif %}>search</button>
       </div>
     </form>
     <form method="get" action="{{ pool.base() }}/results" class="finder">
       <label for="date">go to a day</label>
       <div class="finder-row">
-        <input id="date" name="date" type="date" required>
-        <button type="submit">open</button>
+        <input id="date" name="date" type="date" required{% if total_rounds == 0 %} disabled{% endif %}>
+        <button type="submit"{% if total_rounds == 0 %} disabled{% endif %}>open</button>
       </div>
     </form>
   </div>
 
   {% if rounds.is_empty() %}
     {% if q.is_empty() %}
-      <p class="dim">no round has closed yet. the first one closes at 12:42.</p>
+      <p class="dim">once rounds close, each one is listed here with its winner and headcount.</p>
     {% else %}
       <p class="dim">no round matches "{{ q }}". <a href="{{ pool.base() }}/results">clear</a></p>
     {% endif %}
   {% else %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="recent rounds">
     <table class="grid">
-      <thead><tr><th>date</th><th>winner</th><th class="num">number</th><th class="num">played</th></tr></thead>
+      <thead><tr><th scope="col">date</th><th scope="col">winner</th><th scope="col" class="num">number</th><th scope="col" class="num">players</th></tr></thead>
       <tbody>
         {% for r in rounds %}
           <tr>
@@ -120,16 +79,54 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     <p class="dim listed" role="status">
       {% if q.is_empty() %}
         {{ rounds.len() }} of {{ total_rounds }} rounds.
         {% if rounds.len() < total_rounds %}
-          {% if show == "7" %}<a href="{{ pool.base() }}/results?show=30">show 30</a> &middot; {% endif %}<a href="{{ pool.base() }}/results?show=all">show all</a>
+          {% if show == "7" %}<a href="{{ pool.base() }}/results?show=30">show 30</a> &middot; {% endif %}<a href="{{ pool.base() }}/results?show=all">show all {{ total_rounds }}</a>
         {% endif %}
       {% else %}
         {{ rounds.len() }} {% if rounds.len() == 1 %}round matches{% else %}rounds match{% endif %} "{{ q }}". <a href="{{ pool.base() }}/results">clear</a>
       {% endif %}
     </p>
+  {% endif %}
+</section>
+
+<section class="sec" style="--b: 2" aria-labelledby="leaders-h">
+  <h2 class="section-title" id="leaders-h">most days won <span class="dim scope-inline">all-time</span></h2>
+  {% if leaders.is_empty() %}
+    <p class="dim">nobody has won a round yet.</p>
+  {% else %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="most days won">
+    <table class="grid leaders-table">
+      <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="num">days won</th></tr></thead>
+      <tbody>
+        {% for l in leaders %}
+          <tr title="{{ l.display_name }}"><td class="num dim">{{ "{:02}"|format(loop.index) }}</td><td>{{ l.login }}</td><td class="num b">{{ l.wins }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if !rest.is_empty() %}
+      <details class="expand">
+        <summary><span class="when-closed">show all {{ leaders.len() + rest.len() }} winners</span><span class="when-open">show the top 10 only</span></summary>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="every winner">
+        <table class="grid">
+          <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="num">days won</th></tr></thead>
+          <tbody>
+            {% for l in rest %}
+              <tr title="{{ l.display_name }}">
+                <td class="num dim">{{ "{:02}"|format(loop.index + 10) }}</td>
+                <td>{{ l.login }}</td>
+                <td class="num b">{{ l.wins }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </details>
+    {% endif %}
   {% endif %}
 </section>
 {% endblock %}

@@ -19,7 +19,7 @@ pub struct Round {
 }
 
 /// The 12:42 Europe/Vienna instant on `date`, as UTC.
-fn cutoff_on(date: NaiveDate) -> DateTime<Utc> {
+pub fn cutoff_on(date: NaiveDate) -> DateTime<Utc> {
     let naive = date
         .and_hms_opt(CUTOFF_HOUR, CUTOFF_MIN, 0)
         .expect("12:42:00 is always a valid wall-clock time");
@@ -85,14 +85,30 @@ impl Round {
     }
 }
 
-/// `12:04`, or `3:12:04` once there is more than an hour to go.
+/// How long is left, the way people say it: `18h 32m`, then `4m 05s` in
+/// the last hour, then `9s`. app.js counts down in the same format.
 pub fn format_duration(seconds: i64) -> String {
     let seconds = seconds.max(0);
     let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
     if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
+        format!("{h}h {m:02}m")
+    } else if m > 0 {
+        format!("{m}m {s:02}s")
     } else {
-        format!("{m}:{s:02}")
+        format!("{s}s")
+    }
+}
+
+/// The same, spelled out for a screen reader: "18 hours 32 minutes".
+pub fn spoken_duration(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    let (h, m) = (seconds / 3600, (seconds % 3600) / 60);
+    let unit = |n: i64, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
+    match (h, m) {
+        (0, 0) => "less than a minute".to_string(),
+        (0, m) => unit(m, "minute"),
+        (h, 0) => unit(h, "hour"),
+        (h, m) => format!("{} {}", unit(h, "hour"), unit(m, "minute")),
     }
 }
 
@@ -144,11 +160,16 @@ mod tests {
 
     #[test]
     fn formats_the_remaining_time() {
-        assert_eq!(format_duration(0), "0:00");
-        assert_eq!(format_duration(-5), "0:00");
-        assert_eq!(format_duration(59), "0:59");
-        assert_eq!(format_duration(724), "12:04");
-        assert_eq!(format_duration(11_524), "3:12:04");
+        assert_eq!(format_duration(0), "0s");
+        assert_eq!(format_duration(-5), "0s");
+        assert_eq!(format_duration(59), "59s");
+        assert_eq!(format_duration(724), "12m 04s");
+        assert_eq!(format_duration(11_524), "3h 12m");
+        assert_eq!(format_duration(66_720), "18h 32m");
+        assert_eq!(spoken_duration(66_720), "18 hours 32 minutes");
+        assert_eq!(spoken_duration(3_600), "1 hour");
+        assert_eq!(spoken_duration(61), "1 minute");
+        assert_eq!(spoken_duration(30), "less than a minute");
     }
 
     #[test]

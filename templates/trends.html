@@ -1,36 +1,40 @@
 {% extends "base.html" %}
-{% block title %}Trends &middot; i guess low{% endblock %}
+{% block title %}trends &middot; i guess low{% endblock %}
+{% block path %}{{ pool.base() }}/trends{% endblock %}
 {% block h1 %}trends{% endblock %}
 {% block nav_trends %}class="on" aria-current="page"{% endblock %}
 
 {% block content %}
-<section class="sec" style="--b: 0">
-  <h2 class="rule"><span>trends</span>
-    <span class="ranges">
-      <a class="{% if range == "7" %}on{% endif %}" href="{{ pool.base() }}/trends?days=7">7d</a>
-      <a class="{% if range == "30" %}on{% endif %}" href="{{ pool.base() }}/trends?days=30">30d</a>
-      <a class="{% if range == "all" %}on{% endif %}" href="{{ pool.base() }}/trends?days=all">all</a>
+<section class="sec" style="--b: 0" aria-labelledby="trends-h">
+  <h2 class="section-title" id="trends-h">trends
+    <span class="ranges" aria-label="range">
+      <a class="{% if range == "7" %}on{% endif %}" {% if range == "7" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=7">7d</a>
+      <a class="{% if range == "30" %}on{% endif %}" {% if range == "30" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=30">30d</a>
+      <a class="{% if range == "all" %}on{% endif %}" {% if range == "all" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=all">all</a>
     </span>
   </h2>
-  <p class="analyse">
-    analysing {{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}, {{ picks }} picks
-    <span class="analyse-bar" aria-hidden="true">[##############################]</span>
-    <span class="analyse-done">done in {{ took }}</span>
-  </p>
+  <p class="scope"><span class="chip">[{{ data_source }}]</span> {{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}, {{ picks }} picks</p>
+  {% if rounds > 0 %}<p class="takeaway"><span>{{ answer }}</span></p>{% endif %}
+  {% if test_mode %}
+    <details class="testdetails">
+      <summary>test details</summary>
+      <p class="dim">read and analysed on the server in {{ took }}.</p>
+    </details>
+  {% endif %}
 </section>
 
 {% if rounds == 0 %}
-  <section class="sec" style="--b: 4">
-    <p class="dim">no closed rounds in this range yet.</p>
+  <section class="sec" style="--b: 1">
+    <p class="dim">no round has closed in this range yet. once rounds close, this page shows where the winning numbers land, which numbers the crowd piles onto, and how that moves from week to week. the next round closes {{ first_close }}.</p>
   </section>
 {% else %}
 
-<section class="sec" style="--b: 4">
-  <h2 class="rule"><span>what changed</span></h2>
+<section class="sec" style="--b: 1">
+  <h2 class="section-title">what changed</h2>
   {% if changes.is_empty() %}
     <p class="dim">one round is not a trend. pick a longer range.</p>
   {% else %}
-    <p class="explain">daily averages, <b>before</b> {{ older_range }} vs <b>after</b> {{ newer_range }}</p>
+    <p class="explain">the range split into two halves of equal length: the older half, {{ older_range }}, against the newer half, {{ newer_range }}. each row is a daily average.</p>
     <table class="grid diff">
       <tbody>
         {% for c in changes %}
@@ -71,7 +75,7 @@
 
 {# The crowd's favourites over the whole range. #}
 <section class="sec" style="--b: 5">
-  <h2 class="rule"><span>most picked</span><span class="tag">{{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}</span></h2>
+  <h2 class="section-title">most picked <span class="dim scope-inline">{{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}</span></h2>
   <ol class="ranked">
     {% for t in most %}
       <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
@@ -80,14 +84,14 @@
 </section>
 
 <section class="sec" style="--b: 6">
-  <h2 class="rule"><span>all picks, added up</span></h2>
+  <h2 class="section-title">all picks, added up</h2>
   <p class="legend">
     <span><i class="win">█</i> won a day</span>
     <span><i class="picked">█</i> never won</span>
   </p>
   {% include "chart.html" %}
-  <details>
-    <summary>every number picked ({{ totals.len() }})</summary>
+  <details class="expand">
+    <summary><span class="when-closed">view as a table ({{ totals.len() }} numbers)</span><span class="when-open">hide the table</span></summary>
     <table class="grid narrow">
       <thead><tr><th class="num">number</th><th class="num">picks</th></tr></thead>
       <tbody>
@@ -100,7 +104,8 @@
 </section>
 
 <section class="sec" style="--b: 7">
-  <h2 class="rule"><span>day by day</span><span class="tag">newest first</span></h2>
+  <h2 class="section-title">day by day <span class="dim scope-inline">newest first</span></h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="day by day">
   <table class="grid">
     <thead><tr><th>date</th><th>players</th><th>winning number</th></tr></thead>
     <tbody>
@@ -116,6 +121,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </section>
 {% endif %}
 {% endblock %}

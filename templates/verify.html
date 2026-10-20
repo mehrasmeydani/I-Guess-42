@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Confirm your email &middot; i guess low{% endblock %}
-{% block h1 %}confirm your email{% endblock %}
+{% block heading %}{% endblock %}
 
 {# Already where that button leads. #}
 {% block signin_link %}{% endblock %}
@@ -10,7 +10,7 @@
    check them, and would use the link up before its owner got to it. #}
 <section class="sec auth" style="--b: 0">
   <div class="auth-card">
-    <h2 class="auth-title">confirm your email</h2>
+    <h1 class="auth-title">confirm your email</h1>
     <p class="auth-sub">one click and you're in.</p>
     <form class="authform" method="post" action="/verify">
       <input type="hidden" name="token" value="{{ token }}">

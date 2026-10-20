@@ -90,12 +90,17 @@ pub struct RoundSummary {
     pub round_date: String,
     pub total: i64,
     pub winning_value: Option<i64>,
+    /// The winner's id in this pool (intra id or account id), for an
+    /// anonymous label when their name may not be shown.
+    pub winner_id: Option<i64>,
     pub winner_login: Option<String>,
     pub winner_name: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct LeaderboardRow {
+    /// The player's id in this pool, as in `RoundSummary::winner_id`.
+    pub id: i64,
     pub login: String,
     pub display_name: String,
     pub wins: i64,
@@ -502,6 +507,14 @@ pub async fn set_password(db: &Db, account_id: i64, hash: &str) -> Result<()> {
         .await?;
     tx.commit().await?;
     Ok(())
+}
+
+pub async fn account_verified(db: &Db, account_id: i64) -> Result<bool> {
+    let row: Option<(bool,)> = sqlx::query_as("SELECT verified_at IS NOT NULL FROM accounts WHERE id = ?1")
+        .bind(account_id)
+        .fetch_optional(db)
+        .await?;
+    Ok(row.is_some_and(|r| r.0))
 }
 
 pub async fn account_username(db: &Db, account_id: i64) -> Result<Option<String>> {
@@ -1438,6 +1451,7 @@ fn summaries(pool: Pool) -> String {
         "{}
          SELECT r.round_date, r.total,
                 w.value    AS winning_value,
+                p.id       AS winner_id,
                 p.login    AS winner_login,
                 p.display_name AS winner_name
          FROM rounds r
@@ -1593,7 +1607,7 @@ pub async fn leaderboard(
 ) -> Result<Vec<LeaderboardRow>> {
     let sql = format!(
         "{}
-         SELECT p.login, p.display_name, COUNT(*) AS wins
+         SELECT p.id, p.login, p.display_name, COUNT(*) AS wins
          FROM winners w
          JOIN {} g ON g.round_date = w.round_date AND g.value = w.value
                    AND g.participates = 1
@@ -1611,6 +1625,55 @@ pub async fn leaderboard(
         .fetch_all(db)
         .await?;
     Ok(rows)
+}
+
+/// One closed round a player took part in: what they picked, and what won.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct PlayedRound {
+    pub round_date: String,
+    pub value: i64,
+    pub winning_value: Option<i64>,
+}
+
+impl PlayedRound {
+    /// The winning number is picked by exactly one player, so whoever picked
+    /// it is the winner.
+    pub fn won(&self) -> bool {
+        self.winning_value == Some(self.value)
+    }
+}
+
+/// Every closed round `player` guessed in, newest first. Ghost guesses are
+/// left out, as everywhere. Read from guesses as they are: no new table.
+pub async fn played_rounds(db: &Db, pool: Pool, open_round: &str, player: i64) -> Result<Vec<PlayedRound>> {
+    let sql = format!(
+        "{}
+         SELECT g.round_date, g.value, w.value AS winning_value
+         FROM {} g LEFT JOIN winners w ON w.round_date = g.round_date
+         WHERE g.user_id = ?2 AND g.round_date < ?1 AND g.participates = 1
+         ORDER BY g.round_date DESC",
+        winner_cte(pool),
+        pool.guesses()
+    );
+    let rows = sqlx::query_as::<_, PlayedRound>(&sql)
+        .bind(open_round)
+        .bind(player)
+        .fetch_all(db)
+        .await?;
+    Ok(rows)
+}
+
+/// Whether any generated demo bot played in `pool`: their rounds are seeded
+/// data, not people.
+pub async fn has_demo_data(db: &Db, pool: Pool) -> Result<bool> {
+    let sql = match pool {
+        Pool::Vienna => "SELECT EXISTS(SELECT 1 FROM guesses g JOIN users u ON u.id = g.user_id
+                          WHERE u.id < 0 AND u.login LIKE 'bot-%')",
+        Pool::Global => "SELECT EXISTS(SELECT 1 FROM global_guesses g JOIN accounts a ON a.id = g.user_id
+                          JOIN users u ON u.id = a.intra_id WHERE u.id < 0 AND u.login LIKE 'bot-%')",
+    };
+    let (yes,): (bool,) = sqlx::query_as(sql).fetch_one(db).await?;
+    Ok(yes)
 }
 
 // -------------------------------------------------------------- payouts

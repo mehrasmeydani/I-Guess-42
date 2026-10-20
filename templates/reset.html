@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}New password &middot; i guess low{% endblock %}
-{% block h1 %}pick a new password{% endblock %}
+{% block heading %}{% endblock %}
 
 {# Already where that button leads. #}
 {% block signin_link %}{% endblock %}
@@ -8,7 +8,7 @@
 {% block content %}
 <section class="sec auth" style="--b: 0">
   <div class="auth-card">
-    <h2 class="auth-title">pick a new password</h2>
+    <h1 class="auth-title">pick a new password</h1>
     <p class="auth-sub">this signs you out everywhere else.</p>
     {% include "_notice.html" %}
     <form class="authform" method="post" action="/reset">

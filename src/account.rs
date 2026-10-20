@@ -98,7 +98,7 @@ async fn page(state: &AppState, viewer: Viewer, notice: Option<Notice>, status: 
     let username = viewer.account.username.clone();
     let page = AccountTemplate {
         pool: Pool::Global,
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: false,
         notice,
         account_id: id,

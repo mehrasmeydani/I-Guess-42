@@ -1,13 +1,16 @@
 /* i guess low
  *
- * A terminal's materials - Cascadia Mono and Windows Terminal's "Campbell"
- * colours - set in a brutalist layout: thick rules, huge numbers, hard
- * edges, nothing rounded, nothing glowing, nothing faded.
+ * A terminal's materials - one monospace family and Windows Terminal's
+ * "Campbell" colours - with the rules of a design system laid over them:
  *
- * Three colours, taken from the bash prompt in that terminal: green (the
- * user@host part), blue (the path) and white (the text), with grey as a
- * dimmer white. Red is the one extra, and only ever means "went down" or
- * "something is wrong". */
+ * - All text is monospace. Long text reads well through line height (1.6),
+ *   measure (72ch) and spacing, not through a second font.
+ * - Sizes come from one scale: 13 / 16 / 20 / 28 / 48 px (--fs-1 ... --fs-5).
+ * - Spacing is a multiple of 8 px (half steps of 4 for the tightest gaps).
+ * - Green is the accent: primary actions and the winning number, nothing
+ *   else. Status is grey. Red means taken, down or wrong. Amber means "this
+ *   is a test instance".
+ * - One divider: 1 px #2a2a2a. A section header carries at most one rule. */
 
 :root {
   --bg: #0c0c0c;
@@ -24,10 +27,27 @@
   --panel: #121212;
   --edge: #262626;
   --edge-strong: #3a3a3a;
-  --font: "Cascadia Mono", "Cascadia Code", Consolas, "Ubuntu Mono", "DejaVu Sans Mono",
-    Menlo, monospace;
-  --rule: 2px solid var(--line);
-  /* Sections print one after another, this far apart. */
+  /* The one divider colour (R16.6), and amber for "this is a test" (D10):
+     Campbell's yellow, 7:1 on the background. */
+  --rule-color: #2a2a2a;
+  --env: #c19c00;
+  /* The platform's own monospace first: SF Mono on Apple devices, Cascadia
+     on Windows, then the rest. */
+  --font: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, "Ubuntu Mono",
+    "DejaVu Sans Mono", monospace;
+  --rule: 1px solid var(--rule-color);
+  --fs-1: 0.8125rem;   /* 13 */
+  --fs-2: 1rem;        /* 16 */
+  --fs-3: 1.25rem;     /* 20 */
+  --fs-4: 1.75rem;     /* 28 */
+  --fs-5: 3rem;        /* 48 */
+  --space: 8px;
+  --measure: 72ch;
+  --lh-prose: 1.6;
+  --lh-tight: 1.2;
+  /* Charts: numbers taken by more than one player, and numbers that never won. */
+  --taken: var(--red);
+  --quiet: #5a5a5a;
   --beat: 80ms;
 }
 
@@ -46,7 +66,7 @@ body {
   flex-direction: column;
   background: var(--bg);
   color: var(--fg);
-  font: 15px/1.5 var(--font);
+  font: 400 var(--fs-2)/var(--lh-prose) var(--font);
   font-variant-ligatures: none;
   -webkit-font-smoothing: antialiased;
 }
@@ -74,56 +94,53 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 28px;
-  padding-block: 14px;
+  gap: 8px 32px;
+  padding-block: 16px;
   border-bottom: var(--rule);
 }
 
-.brand { color: var(--hi); font-weight: 700; font-size: 1.1rem; text-decoration: none; }
-.brand b { padding: 0 6px; margin-left: 2px; background: var(--green); color: var(--bg); }
+.brand { color: var(--hi); font-weight: 700; font-size: var(--fs-3); text-decoration: none; }
+.brand b { padding: 0 8px; margin-left: 2px; background: var(--green); color: var(--bg); }
 .brand:hover { background: none; color: var(--hi); }
 
-.top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; }
+.top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
 .top nav a { color: var(--fg); text-decoration: none; }
-.top nav a.on { background: var(--hi); color: var(--bg); padding: 0 6px; margin: 0 -6px; }
+.top nav a.on { background: var(--hi); color: var(--bg); padding: 0 8px; margin: 0 -8px; }
 .top nav a:hover { background: var(--hi); color: var(--bg); }
 /* The pool switch: one box, two halves, the open one filled in green. */
 .top nav.pools { gap: 0; border: 1px solid var(--dim); }
 .top nav.pools a { padding: 0 8px; }
-.top nav.pools a.on { margin: 0; background: var(--green); color: var(--bg); }
+.top nav.pools a.on { margin: 0; background: var(--hi); color: var(--bg); }
 
-.status { display: flex; align-items: center; gap: 14px; margin-left: auto; color: var(--dim); white-space: nowrap; }
+.status { display: flex; align-items: center; gap: 16px; margin-left: auto; color: var(--dim); white-space: nowrap; }
 .status form { margin: 0; }
-.busy { color: var(--green); }
+.busy { color: var(--dim); }
 .spin:empty { display: none; }
 .busy-text:empty { display: none; }
-.busy-text { margin-left: 6px; }
-/* Log in / log out: a boxed button in the corner, regular weight. */
-.status .out,
-.status .signin {
+.busy-text { margin-left: 8px; }
+/* Log out: a boxed button in the corner, regular weight. */
+.status .out {
   display: inline-block;
-  padding: 2px 10px;
+  padding: 2px 8px;
   border: 1px solid var(--dim);
   color: var(--fg);
   font-weight: 400;
   text-decoration: none;
 }
-.status .out:hover,
-.status .signin:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+.status .out:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
 /* Your login, next to the log out button: readable, not a control. */
 .status .who { color: var(--fg); }
-/* Logging in is the one blue thing in the header - it is the way in. Blue on
-   the background is 5:1, so it carries body-size text. */
-.status .signin { border-color: var(--blue); color: var(--blue); }
-.status .signin:hover { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+/* Signing in from the header is a plain link: the round page's own button
+   is the one primary action. */
+.status .signin { color: var(--hi); }
 
 main { flex: 1; padding-block: 8px 64px; }
 
 footer {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 28px;
-  padding-block: 14px 22px;
+  gap: 4px 32px;
+  padding-block: 16px 24px;
   border-top: var(--rule);
   color: var(--dim);
 }
@@ -133,17 +150,17 @@ footer .ver { margin-left: auto; }
 
 /* ------------------------------------------------------------- sections */
 
-.sec { margin-top: 44px; }
+.sec { margin-top: 48px; }
 
 /* A section header is its name, then a thick rule running to the edge,
    then an optional tag on the right. */
 .rule {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 18px;
+  gap: 16px;
+  margin-bottom: 16px;
   color: var(--hi);
-  font-size: 1rem;
+  font-size: var(--fs-2);
   font-weight: 700;
 }
 .rule::after { content: ""; order: 1; flex: 1; border-top: var(--rule); }
@@ -151,37 +168,58 @@ footer .ver { margin-left: auto; }
 .rule .ranges { order: 2; }
 .tag { color: var(--dim); font-weight: 400; text-decoration: none; }
 a.tag { color: var(--fg); text-decoration: underline; }
-.tag.live { background: var(--green); color: var(--bg); padding: 0 6px; font-weight: 700; }
-.tag.warn { background: var(--blue); color: var(--bg); padding: 0 6px; font-weight: 700; }
-.tag.bad { background: var(--red); color: var(--bg); padding: 0 6px; font-weight: 700; }
+.tag.live { color: var(--fg); font-weight: 700; }
+.tag.warn { color: var(--env); font-weight: 700; }
+.tag.bad { background: var(--red); color: var(--bg); padding: 0 8px; font-weight: 700; }
 
 /* ---------------------------------------------------------------- round */
 
+/* The premise, then the status block: state, close time, the countdown and
+   a progress bar, grouped as one thing. */
+.premise { margin: 0 0 24px; color: var(--hi); font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); font-weight: 700; line-height: 1.25; max-width: 32ch; text-wrap: balance; }
+.roundstatus { padding: 24px; background: var(--panel); border: 1px solid var(--edge); }
+.state-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0; color: var(--dim); }
+.pill { padding: 2px 8px; border: 1px solid var(--edge-strong); color: var(--fg); }
+.closes-in { margin: 24px 0 0; color: var(--dim); font-size: var(--fs-1); letter-spacing: 0.08em; text-transform: uppercase; }
+/* Sized by the viewport so "18h 32m" fits a 320px screen without spilling. */
 .countdown {
+  margin: 4px 0 0;
   color: var(--hi);
-  font-size: clamp(3rem, 11vw, 6rem);
+  font-size: clamp(var(--fs-4), 10vw, var(--fs-5));
   font-weight: 700;
-  line-height: 0.95;
-  letter-spacing: -0.04em;
+  line-height: 1;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.progress { height: 8px; margin-top: 20px; background: var(--edge); overflow: hidden; }
+.progress-fill { display: block; height: 100%; background: var(--fg); transition: width 600ms ease; }
+.facts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; margin: 16px 0 0; color: var(--dim); }
+.facts b { color: var(--hi); }
 
-.meter { margin-top: 18px; white-space: nowrap; overflow: hidden; }
-.meter-bar { color: var(--green); }
-.meter-pct { color: var(--hi); font-weight: 700; }
+.section-title { margin: 0 0 16px; color: var(--hi); font-size: var(--fs-3); font-weight: 700; }
+.section-title label { cursor: pointer; }
+.play .hint { max-width: 60ch; margin-top: 12px; }
+.locked-line { margin: 0 0 16px; color: var(--fg); font-size: var(--fs-3); font-weight: 400; }
+.locked-line b { color: var(--hi); }
+.locked-panel { margin: 0 0 32px; padding: 20px 24px; border: 1px solid var(--edge-strong); border-left: 4px solid var(--green); background: var(--panel); }
+.locked-panel p { margin: 0; }
+.locked-panel p + p { margin-top: 8px; }
+.locked-title { color: var(--green); font-weight: 700; font-size: var(--fs-3); }
+.locked-actions { margin-top: 16px !important; }
+.secondary .verdict b { font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); }
 
 /* Big figures in a row, each over its caption, split by thick rules. */
 .figures {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  margin-top: 26px;
+  margin-top: 24px;
   border-top: var(--rule);
   border-bottom: var(--rule);
 }
-.figures p { display: flex; flex-direction: column; padding: 14px 18px 14px 0; }
-.figures p + p { padding-left: 18px; border-left: var(--rule); }
-.figures b { font-size: 2.4rem; line-height: 1.1; letter-spacing: -0.02em; word-break: break-all; }
+.figures p { display: flex; flex-direction: column; padding: 16px 16px 16px 0; }
+.figures p + p { padding-left: 16px; border-left: var(--rule); }
+.figures b { font-size: var(--fs-4); line-height: 1.1; letter-spacing: -0.02em; word-break: break-all; }
 .figures b.win { color: var(--green); }
 .figures b.lose { color: var(--red); }
 .figures span { color: var(--dim); }
@@ -195,15 +233,17 @@ input[type="text"] {
   min-width: 0;
   padding: 12px 16px;
   background: var(--bg);
-  border: 2px solid var(--blue);
+  border: 1px solid var(--edge-strong);
   border-radius: 0;
   color: var(--hi);
-  font: 700 2rem/1 var(--font);
+  font: 700 var(--fs-4)/1 var(--font);
   caret-color: var(--green);
+  transition: border-color 120ms;
 }
 input::placeholder { color: #6f6f6f; }
-/* Blue at rest, green while you type in it. */
-input[type="text"]:focus { outline: none; border-color: var(--green); }
+input[type="text"]:hover { border-color: var(--dim); }
+/* Every field takes the one focus ring (R17.4). */
+input[type="text"]:focus-visible { border-color: var(--hi); }
 
 button,
 .btn {
@@ -213,36 +253,31 @@ button,
   border: 2px solid var(--hi);
   border-radius: 0;
   color: var(--bg);
-  font: 700 1rem/1.5 var(--font);
+  font: 700 var(--fs-2)/1.5 var(--font);
   text-decoration: none;
   cursor: pointer;
   white-space: nowrap;
 }
 button:hover,
-.btn:hover,
-button:focus-visible,
-.btn:focus-visible { background: var(--green); border-color: var(--green); color: var(--bg); }
+.btn:hover { background: var(--fg); border-color: var(--fg); color: var(--bg); }
 button:active,
 .btn:active { translate: 0 1px; }
-
-/* The way in, in blue. The text on it is --bg, not --hi: white on this blue
-   is 3.5:1 and fails AA at this size, dark on it is 5:1. */
-.btn.play { background: var(--blue); border-color: var(--blue); color: var(--bg); }
-.btn.play:hover,
-.btn.play:focus-visible { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+button:disabled,
+button[disabled] { opacity: 0.5; cursor: not-allowed; translate: none; }
+.btn.play { background: var(--green); border-color: var(--green); color: var(--bg); }
 
 /* The way to yesterday's numbers, under the guess box: present, but never
    louder than locking a number in. */
-.lastlink { margin: 22px 0 0; }
+.lastlink { margin: 24px 0 0; }
 /* A plain way on, under a chart. The top margin clears the number labels,
    which hang outside the chart's box. */
-.morelink { margin: 34px 0 0; }
-.guessform button { font-size: 1.1rem; }
+.morelink { margin: 32px 0 0; }
+.guessform button { font-size: var(--fs-3); }
 
 /* Sign-in and account forms: one field per row, labels above. Smaller type
    than the guess box, which is the only input that gets to shout. */
-.authform { display: grid; gap: 6px; max-width: 440px; margin-top: 14px; }
-.authform label { color: var(--fg); font-size: 0.9rem; margin-top: 12px; }
+.authform { display: grid; gap: 8px; max-width: 440px; margin-top: 16px; }
+.authform label { color: var(--fg); font-size: var(--fs-2); margin-top: 12px; }
 .authform input {
   min-width: 0;
   height: 44px;
@@ -251,18 +286,19 @@ button:active,
   border: 1px solid var(--edge-strong);
   border-radius: 0;
   color: var(--hi);
-  font: 400 16px/1 var(--font);
+  font: 400 var(--fs-2)/1 var(--font);
   caret-color: var(--green);
   transition: border-color 120ms, box-shadow 120ms;
 }
 .authform input:hover { border-color: var(--dim); }
-.authform input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.authform input:focus-visible { border-color: var(--hi); }
+.authform input[aria-invalid="true"] { border-color: var(--red); }
 .authform input:disabled { color: var(--dim); border-color: var(--edge); }
-.authform .hint { margin: 2px 0 0; font-size: 0.85rem; }
-.authform button { margin-top: 18px; justify-self: start; }
+.authform .hint { margin: 2px 0 0; font-size: var(--fs-1); }
+.authform button { margin-top: 16px; justify-self: start; }
 .label-row { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; }
 .label-row label { margin-top: 0; }
-.label-row a { color: var(--dim); font-size: 0.85rem; }
+.label-row a { color: var(--dim); font-size: var(--fs-1); }
 
 /* The one thing to press on a form, in the colour that means "you're in". */
 button.primary,
@@ -283,17 +319,17 @@ button.primary:focus-visible,
   background: var(--panel);
   border: 1px solid var(--edge);
 }
-.auth-title { margin: 0; color: var(--hi); font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+.auth-title { margin: 0; color: var(--hi); font-size: var(--fs-3); font-weight: 700; line-height: 1.2; }
 .auth-sub { margin: 8px 0 24px; color: var(--dim); }
 .auth-sub + .auth-sub { margin-top: -16px; }
 .auth .notice { margin: 0 0 20px; }
 .auth .authform { max-width: none; margin: 0; }
 .auth .authform button { justify-self: stretch; }
 .auth .authform label:first-of-type { margin-top: 0; }
-.auth-fine { margin: 16px 0 0; color: var(--dim); font-size: 0.85rem; }
+.auth-fine { margin: 16px 0 0; color: var(--dim); font-size: var(--fs-1); }
 .auth-foot { margin: 20px 0 0; color: var(--dim); text-align: center; }
 
-.providers { display: grid; gap: 10px; }
+.providers { display: grid; gap: 8px; }
 .provider {
   display: flex;
   align-items: center;
@@ -316,10 +352,10 @@ button.primary:focus-visible,
   width: 24px;
   background: var(--hi);
   color: var(--bg);
-  font-size: 11px;
+  font-size: var(--fs-1);
   line-height: 1;
 }
-.divider { display: flex; align-items: center; gap: 12px; margin: 24px 0 20px; color: var(--dim); font-size: 0.85rem; }
+.divider { display: flex; align-items: center; gap: 12px; margin: 24px 0 20px; color: var(--dim); font-size: var(--fs-1); }
 .divider::before,
 .divider::after { content: ""; flex: 1; border-top: 1px solid var(--edge); }
 
@@ -340,15 +376,16 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 
 .sec > .dim,
 .sec > .notice { margin-top: 12px; }
-.sec > .notice:first-child { margin: 0 0 22px; }
+.sec > .notice:first-child { margin: 0 0 24px; }
 
 .sealed {
   position: relative;
   display: inline-block;
-  padding: 18px 26px;
-  border: 2px solid var(--green);
+  padding: 16px 24px;
+  border: 1px solid var(--edge-strong);
+  background: var(--panel);
 }
-.sealed-value { color: var(--hi); font-size: clamp(2.6rem, 10vw, 5rem); font-weight: 700; line-height: 1; word-break: break-all; }
+.sealed-value { color: var(--hi); font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); font-weight: 700; line-height: 1; word-break: break-all; }
 .stamp {
   position: absolute;
   top: -14px;
@@ -362,133 +399,102 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 
 /* ------------------------------------------------------------- messages */
 
-.notice { padding: 10px 14px; border-left: 6px solid; background: #161616; }
+.notice { padding: 12px 16px; border-left: 4px solid; background: var(--panel); }
 .notice b { margin-right: 8px; }
 .notice.ok { border-color: var(--green); }
 .notice.ok b { color: var(--green); }
 .notice.error { border-color: var(--red); }
 .notice.error b { color: var(--red); }
-.notice.warn { border-color: var(--blue); }
-.notice.warn b { color: var(--blue); }
+.notice.warn { border-color: var(--env); }
+.notice.warn b { color: var(--env); }
 
 /* ---------------------------------------------------------------- rules */
 
-.rules { list-style: none; padding: 0; display: grid; gap: 10px; max-width: 720px; }
+.rules { list-style: none; padding: 0; display: grid; gap: 8px; max-width: 720px; }
 /* An aside under a section: there to be found, not to be announced. */
-.footnote { margin-top: 18px; max-width: 720px; font-size: 0.95rem; }
+.footnote { margin-top: 16px; max-width: 720px; font-size: var(--fs-2); }
 .rules li { display: grid; grid-template-columns: 3ch 1fr; gap: 12px; }
-.rules b { color: var(--green); }
+.rules b { color: var(--dim); }
 
-.verdict { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
-.verdict b { font-size: clamp(3rem, 12vw, 6rem); line-height: 1; letter-spacing: -0.03em; }
+.verdict { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+.verdict b { font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); line-height: 1; letter-spacing: -0.03em; }
 
 /* --------------------------------------------------------------- confirm */
 
-.question { color: var(--hi); font-size: 1.4rem; font-weight: 700; }
+.question { color: var(--hi); font-size: var(--fs-3); font-weight: 700; }
 .bignumber {
   color: var(--hi);
-  font-size: clamp(3.4rem, 15vw, 8rem);
+  font-size: clamp(var(--fs-4), 10vw, var(--fs-5));
   font-weight: 700;
   line-height: 1;
   letter-spacing: -0.03em;
   word-break: break-all;
-  margin: 6px 0 22px;
+  margin: 8px 0 24px;
 }
 .bignumber.bad { color: var(--red); }
-.confirmform { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
-.message { color: var(--hi); font-size: 1.1rem; margin-bottom: 22px; max-width: 60ch; }
+.confirmform { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.message { color: var(--hi); font-size: var(--fs-3); margin-bottom: 24px; max-width: 60ch; }
 
 /* ---------------------------------------------------------------- lists */
 
-/* The top three, side by side: rank, days won big, then who. */
-.podium {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  /* Always three across, so the top three read as one line, even on a phone. */
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: var(--rule);
-  border-bottom: var(--rule);
-  margin-bottom: 12px;
-}
-.podium li { display: flex; flex-direction: column; padding: 12px 18px 12px 0; min-width: 0; }
-.podium li + li { padding-left: 18px; border-left: var(--rule); }
-.podium .rank { color: var(--dim); }
-.podium .wins { font-size: 2.6rem; line-height: 1.1; }
-.podium .wins-unit { color: var(--dim); font-size: 0.85rem; }
-.podium .who { color: var(--hi); font-weight: 700; overflow-wrap: anywhere; }
-.podium .p1 .rank, .podium .p1 .wins { color: var(--green); }
-
 /* Search and jump-to-day, side by side. */
-.finders { display: flex; flex-wrap: wrap; gap: 14px 28px; margin-bottom: 18px; }
-.finder { display: flex; flex-direction: column; gap: 6px; flex: 1 1 260px; max-width: 420px; }
+.finders { display: flex; flex-wrap: wrap; gap: 16px 32px; margin-bottom: 16px; }
+.finder { display: flex; flex-direction: column; gap: 8px; flex: 1 1 260px; max-width: 420px; }
 .finder label { color: var(--dim); }
 .finder-row { display: flex; }
 .finder input[type="search"],
 .finder input[type="date"] {
   flex: 1 1 200px;
-  padding: 6px 10px;
+  padding: 8px 8px;
   background: var(--bg);
-  border: 2px solid var(--dim);
+  border: 1px solid var(--edge-strong);
   border-radius: 0;
   color: var(--hi);
   font: inherit;
   color-scheme: dark;
 }
 /* 16px, or iPhones zoom into the field when it is tapped. */
-.finder input { font-size: 16px; }
-.finder input:focus { border-color: var(--green); }
+.finder input { font-size: var(--fs-2); }
+.finder input:focus-visible { border-color: var(--hi); }
 .finder button { padding: 8px 16px; }
-.listed { margin-top: 10px; }
-
-.leaders { list-style: none; padding: 0; border-top: var(--rule); }
-.leaders li {
-  display: grid;
-  grid-template-columns: 4ch 1fr auto;
-  align-items: baseline;
-  gap: 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid #2a2a2a;
-}
-.leaders .rank { color: var(--dim); }
-.leaders .wins { font-size: 1.5rem; }
-.leaders li.first .rank { color: var(--green); }
-.leaders li.first .who { color: var(--hi); font-size: 1.3rem; }
-.leaders li.first .wins { color: var(--green); font-size: 2.4rem; }
+.listed { margin-top: 8px; }
 
 .ranked { list-style: none; padding: 0; }
-.ranked li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 6px 0; border-bottom: 1px solid #2a2a2a; }
-.ranked b { font-size: 1.5rem; }
+.ranked li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
+.ranked b { font-size: var(--fs-3); }
 .ranked span { color: var(--dim); }
 .ranked .up b { color: var(--green); }
 .ranked .down b { color: var(--red); }
 
 .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 40px; }
-.split .sub { margin: 22px 0 6px; color: var(--hi); font-weight: 700; }
+.split .sub { margin: 24px 0 8px; color: var(--hi); font-weight: 700; }
 
 /* --------------------------------------------------------------- tables */
 
 .grid { border-collapse: collapse; width: 100%; }
 .grid.narrow { width: auto; min-width: 260px; }
 .grid th {
-  padding: 0 18px 6px 0;
+  padding: 0 16px 8px 0;
   border-bottom: var(--rule);
   color: var(--dim);
   font-weight: 400;
   text-align: left;
 }
-.grid td { padding: 7px 18px 7px 0; border-bottom: 1px solid #2a2a2a; vertical-align: baseline; }
+.grid td { padding: 7px 16px 7px 0; border-bottom: 1px solid #2a2a2a; vertical-align: baseline; }
 .grid .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Dates and numbers never break across lines; a table too wide scrolls in
+   its own box instead. */
+.grid td:first-child, .grid .num { white-space: nowrap; }
 .grid th:last-child, .grid td:last-child { padding-right: 0; }
 .grid td.win { color: var(--green); font-weight: 700; }
 
 .diff { width: auto; margin-bottom: 8px; }
-.diff td { font-size: 1.05rem; }
+.diff td { font-size: var(--fs-2); }
 
 /* A value with a bar beside it: the bar is the value against the largest in
    the table, so the column reads as a chart without losing the number. */
 .barcell { width: 32%; white-space: nowrap; }
-.barcell b { margin-left: 10px; }
+.barcell b { margin-left: 8px; }
 .minibar {
   display: inline-block;
   vertical-align: middle;
@@ -504,30 +510,30 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 details summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--hi); font-weight: 700; list-style: none; }
 details summary::-webkit-details-marker { display: none; }
 /* The disclosure state, drawn explicitly since the native marker is gone. */
-details summary::before { content: "+"; width: 2ch; color: var(--green); }
+details summary::before { content: "+"; width: 2ch; color: var(--dim); }
 details[open] summary::before { content: "-"; }
-details summary:hover { color: var(--green); }
+details summary:hover { color: var(--fg); }
 details[open] summary { margin-bottom: 12px; }
 
 /* ---------------------------------------------------------------- chart */
 
-.legend { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 12px; color: var(--dim); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 24px; margin-bottom: 12px; color: var(--dim); }
 .legend i { font-style: normal; }
 .legend .win { color: var(--green); }
 .legend .once { color: var(--hi); }
-.legend .picked { color: var(--blue); }
-.legend .many { color: var(--blue); }
+.legend .picked { color: var(--quiet); }
+.legend .many { color: var(--taken); }
 
 /* One column per number, all sharing the width: the more numbers, the
    thinner each column, down to a pixel. They stand on a thick baseline. */
 /* The padding is the gap under the scale label: it sits on the chart's top
    edge, and the tallest bar reaches the line right below it, so without the
    room the two touch. */
-.chart { position: relative; padding-top: 34px; }
-.chart-max { position: absolute; top: 0; left: 0; color: var(--dim); font-size: 0.8rem; }
+.chart { position: relative; padding-top: 32px; }
+.chart-max { position: absolute; top: 0; left: 0; color: var(--dim); font-size: var(--fs-1); }
 /* Every pick above the chart, one chip per number. */
-.tail-head { margin: 6px 0 8px; color: var(--hi); font-weight: 700; }
-.tail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.tail-head { margin: 8px 0 8px; color: var(--hi); font-weight: 700; }
+.tail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .tail li { padding: 3px 8px; border: 1px solid #3a3a3a; white-space: nowrap; }
 .tail .won-tag { color: var(--green); font-weight: 700; }
 .tail li b { color: var(--hi); font-weight: 700; }
@@ -554,28 +560,18 @@ details[open] summary { margin-bottom: 12px; }
   margin-inline: 12%;
   background: var(--hi);
   transform-origin: bottom;
-  animation: grow 420ms steps(6) both;
-  animation-delay: calc(var(--b, 0) * var(--beat) + min(var(--i, 0) * 12ms, 600ms));
+  /* Bars grow as the page arrives, quickly, and are never held back: a
+     chart that waited to be scrolled to looked empty until then (R9.10). */
+  animation: grow 300ms steps(5) both;
+  animation-delay: min(var(--i, 0) * 6ms, 240ms);
 }
-/* A chart that starts below the fold waits for the scroll instead of growing
-   where nobody is looking. app.js adds .hold, then .seen when it comes into
-   view; with no script, or no IntersectionObserver, neither class is ever set
-   and the bars animate on load as before. Held bars drop the section beat from
-   their delay -- the ordering of sections stopped mattering by the time the
-   visitor scrolled down -- and keep the per-column stagger that sweeps the
-   chart left to right. */
-.chart.hold .col-bar {
-  animation-play-state: paused;
-  animation-delay: min(var(--i, 0) * 12ms, 600ms);
-}
-.chart.hold.seen .col-bar { animation-play-state: running; }
 /* Labels hang below the baseline and may be wider than their column. */
 .col-n { position: absolute; top: 100%; left: 50%; padding-top: 4px; }
 .col-n span {
   display: block;
   translate: -50% 0;
   color: var(--dim);
-  font-size: 0.75rem;
+  font-size: var(--fs-1);
   white-space: nowrap;
 }
 .chart { margin-bottom: 1.6em; }
@@ -588,15 +584,16 @@ details[open] summary { margin-bottom: 12px; }
   padding: 0 3px;
   background: var(--bg);
   color: var(--hi);
-  font-size: 0.75rem;
+  font-size: var(--fs-1);
   font-weight: 700;
   white-space: nowrap;
 }
 .win .col-bar { background: var(--green); }
 .once .col-bar { background: var(--hi); }
-/* Trends: numbers that never won a day are blue, winners green. */
-.picked .col-bar { background: var(--blue); }
-.many .col-bar { background: var(--blue); }
+/* Taken by more than one player: red, as on the preview image. On the
+   trends page, numbers that never won a day are a quiet grey. */
+.picked .col-bar { background: var(--quiet); }
+.many .col-bar { background: var(--taken); }
 .col:hover .col-c { visibility: visible; }
 /* Every column carries its number under the axis; only round numbers show
    it, the rest appear while hovered, drawn over their neighbours. */
@@ -609,7 +606,7 @@ details[open] summary { margin-bottom: 12px; }
   left: 50%;
   translate: -50% 0;
   color: var(--green);
-  font-size: 0.75rem;
+  font-size: var(--fs-1);
   line-height: 1.2;
 }
 .col:hover .col-mark { visibility: hidden; }
@@ -617,7 +614,7 @@ details[open] summary { margin-bottom: 12px; }
 
 /* --------------------------------------------------------------- trends */
 
-.ranges { display: flex; gap: 10px; font-weight: 400; }
+.ranges { display: flex; gap: 8px; font-weight: 400; }
 .ranges a {
   display: inline-flex;
   align-items: center;
@@ -631,35 +628,25 @@ details[open] summary { margin-bottom: 12px; }
 }
 .ranges a.on { background: var(--hi); border-color: var(--hi); color: var(--bg); font-weight: 700; }
 
-.analyse { color: var(--dim); }
-.analyse-bar {
-  display: inline-block;
-  vertical-align: bottom;
-  overflow: hidden;
-  white-space: pre;
-  color: var(--green);
-  width: 32ch;
-  animation: fill 520ms steps(30) 120ms both;
-}
-.analyse-done { color: var(--hi); font-weight: 700; animation: show 1ms 680ms both; }
-
 /* ---------------------------------------------------------- test banner */
 
+/* Not the live game: an amber chip on the page's own black, one quiet line. */
 .testbanner {
   margin: 0;
-  padding: 6px 20px;
-  background: var(--blue);
-  color: var(--bg);
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--rule-color);
+  color: var(--dim);
+  font-size: var(--fs-1);
 }
-.testbanner b { color: var(--bg); }
-.testbanner a, .testbanner .linkish { color: var(--bg); text-decoration: underline; }
-div.testbanner form.inline { display: inline; margin: 0; }
+.env-chip { margin-right: 8px; color: var(--env); font-weight: 700; }
+.testbanner a, .testbanner .linkish { color: var(--fg); text-decoration: underline; }
+.testbanner form.inline { display: inline; margin: 0; }
 
 /* ----------------------------------------------------------- admin page */
 /* /admin keeps its own markup; these give its classes the same look. */
 
-.card { margin-top: 44px; }
-.eyebrow { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; color: var(--hi); font-weight: 700; }
+.card { margin-top: 48px; }
+.eyebrow { display: flex; align-items: center; gap: 16px; margin: 0 0 16px; color: var(--hi); font-weight: 700; }
 .eyebrow::after { content: ""; flex: 1; border-top: var(--rule); }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 24px; margin: 0 0 16px; }
 .kv dt { color: var(--dim); }
@@ -667,20 +654,20 @@ div.testbanner form.inline { display: inline; margin: 0; }
 form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .top form.inline { margin: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; }
-.row input[type="text"] { font-size: 1rem; flex: 1 1 160px; padding: 10px 12px; }
+.row input[type="text"] { font-size: var(--fs-2); flex: 1 1 160px; padding: 8px 12px; }
 .admin-form { display: block; }
-.check { display: flex; gap: 10px; align-items: baseline; margin-top: 10px; }
+.check { display: flex; gap: 8px; align-items: baseline; margin-top: 8px; }
 .check input { accent-color: var(--green); }
-.hint, .empty, .tally, .nowinner { color: var(--dim); margin-top: 10px; }
+.hint, .empty, .tally, .nowinner { color: var(--dim); margin-top: 8px; }
 .hint strong { color: var(--hi); }
 .login { color: var(--dim); }
-.value { color: var(--green); font-weight: 700; font-size: 1.5rem; }
+.value { color: var(--green); font-weight: 700; font-size: var(--fs-3); }
 .ghosttag { color: var(--dim); }
 .demolist { list-style: none; padding: 0; margin: 0 0 12px; }
-.demolist li { display: flex; gap: 20px; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #2a2a2a; }
+.demolist li { display: flex; gap: 20px; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
 .history { border-collapse: collapse; width: 100%; margin-top: 8px; }
-.history th { padding: 0 18px 6px 0; color: var(--dim); font-weight: 400; text-align: left; border-bottom: var(--rule); }
-.history td { padding: 7px 18px 7px 0; border-bottom: 1px solid #2a2a2a; }
+.history th { padding: 0 16px 8px 0; color: var(--dim); font-weight: 400; text-align: left; border-bottom: var(--rule); }
+.history td { padding: 7px 16px 7px 0; border-bottom: 1px solid #2a2a2a; }
 .history .num { text-align: right; }
 
 /* --------------------------------------------------------------- motion */
@@ -701,8 +688,6 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 /* A number locked in just now gets the stamp slammed on, in three frames. */
 .notice.ok ~ .sealed .stamp { animation: stamp 300ms steps(3) 350ms both; }
 
-.sec, .card { animation: show 1ms both; animation-delay: calc(var(--b, 0) * var(--beat)); }
-.meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; clip-path: inset(0); animation: fill 420ms steps(30) 80ms both; }
 
 button.is-busy { pointer-events: none; }
 
@@ -721,7 +706,7 @@ button.is-busy { pointer-events: none; }
   bottom: 18px;
   z-index: 20;
   width: min(400px, calc(100vw - 28px));
-  padding: 14px 16px;
+  padding: 16px 16px;
   background: var(--bg);
   border: var(--rule);
   /* A ring of background under the drop shadow, so the panel reads as lifted
@@ -732,11 +717,11 @@ button.is-busy { pointer-events: none; }
 }
 
 .announce-when { margin: 0; color: var(--dim); }
-.announce-num { margin: 4px 0 2px; font-size: 2.6rem; line-height: 1.1; }
+.announce-num { margin: 4px 0 2px; font-size: var(--fs-4); line-height: 1.1; }
 /* The number is what everyone came for, so it lands after the panel does. */
 .announce-num b { display: inline-block; animation: land 360ms steps(4) 700ms both; }
 .announce-who { margin: 0; color: var(--hi); }
-.announce-links { display: flex; justify-content: space-between; gap: 12px; margin: 10px 0 0; }
+.announce-links { display: flex; justify-content: space-between; gap: 12px; margin: 8px 0 0; }
 .announce-close { color: var(--dim); cursor: pointer; text-decoration: underline; }
 .announce-close:hover { color: var(--hi); }
 /* The checkbox is off-screen, so the ring has to show on what stands in for
@@ -763,7 +748,7 @@ a, button, summary, input, label { touch-action: manipulation; }
   left: 12px;
   top: -60px;
   z-index: 100;
-  padding: 10px 14px;
+  padding: 8px 16px;
   background: var(--green);
   color: var(--bg);
   font-weight: 700;
@@ -783,7 +768,7 @@ a, button, summary, input, label { touch-action: manipulation; }
 .tail-more .tail { margin-top: 8px; }
 
 /* Plain-language notes next to the numbers on the trends page. */
-.explain { margin-bottom: 14px; color: var(--dim); max-width: 80ch; }
+.explain { margin-bottom: 16px; color: var(--dim); max-width: 80ch; }
 .explain b { color: var(--fg); }
 /* "what changed": label on the left, "before -> after  change" on the right. */
 .diff { width: 100%; max-width: 640px; }
@@ -814,50 +799,157 @@ p, li { text-wrap: pretty; }
 /* Table rows light up under the pointer, to keep your place along a row. */
 .grid tbody tr:hover td, .history tbody tr:hover td { background: #161616; }
 
+/* --------------------------------------------------- components (R9-R20) */
+
+/* Bracketed status chips, terminal-style: [closed], [historical]. Grey:
+   status is never green. */
+.chip { color: var(--dim); font-weight: 400; white-space: nowrap; }
+/* What a page's numbers cover and where they come from (R9.1, R9.2). */
+.scope { margin: 0 0 8px; color: var(--dim); font-size: var(--fs-1); }
+.scope-inline { margin-left: 8px; font-size: var(--fs-1); font-weight: 400; }
+/* The one-line answer at the top of results, day and trends pages. */
+.takeaway { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin: 0 0 8px; color: var(--hi); font-size: var(--fs-3); line-height: var(--lh-tight); max-width: var(--measure); }
+.takeaway b { font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); line-height: 1; }
+.mask-note { font-size: var(--fs-1); }
+.page-title { margin: 0 0 24px; color: var(--hi); font-size: var(--fs-4); line-height: var(--lh-tight); }
+
+/* Prose pages (privacy, imprint): the reading layout. */
+.prose { max-width: var(--measure); line-height: var(--lh-prose); }
+.prose h2 { margin: 40px 0 8px; color: var(--hi); font-size: var(--fs-3); line-height: var(--lh-tight); }
+.prose p, .prose ul { margin: 0 0 16px; }
+.prose ul { padding-left: 2ch; }
+.prose li { margin: 0 0 8px; }
+.prose table { margin: 0 0 16px; }
+
+/* A day's own navigation: the day before, the day, the day after. */
+.daynav { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; margin: 32px 0 0; padding-bottom: 16px; border-bottom: var(--rule); }
+.daynav-here { color: var(--hi); font-weight: 700; text-align: center; }
+.daynav-next { text-align: right; }
+.daynav a { display: inline-flex; align-items: center; min-height: 44px; }
+
+.chart-summary { max-width: var(--measure); margin: 8px 0 0; color: var(--dim); }
+.day-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; margin-top: 24px; }
+.share-done:empty { display: none; }
+/* Struck: a number more than one player picked. */
+s { text-decoration-thickness: 2px; text-decoration-color: var(--taken); }
+.many .col-n s { text-decoration-color: var(--taken); }
+/* Your own pick: a triangle under its column, and an outline in the list. */
+.col-you { display: block; color: var(--hi); font-size: var(--fs-1); line-height: 1; text-align: center; translate: -50% 0; }
+.col.mine .col-bar { outline: 2px solid var(--hi); outline-offset: 1px; }
+.tail li.mine { border-color: var(--hi); border-width: 2px; }
+.legend .mine { color: var(--hi); }
+.mine-text { color: var(--hi); }
+.grid tr.taken td:first-child { color: var(--dim); }
+.grid tr.won td { color: var(--green); font-weight: 700; }
+
+/* Expand controls say what they open, and what closing does (R11.5). */
+details.expand summary .when-open,
+details.expand[open] summary .when-closed { display: none; }
+details.expand[open] summary .when-open { display: inline; }
+.testdetails { margin-top: 16px; color: var(--dim); font-size: var(--fs-1); }
+.testdetails summary { color: var(--dim); font-weight: 400; }
+
+/* Wide tables scroll inside their own box, never the page (R18.5). */
+.table-wrap { max-width: 100%; overflow-x: auto; }
+
+/* A player's record: four figures, then their rounds. */
+.statgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 0 0 16px; }
+.statgrid div { padding: 16px; background: var(--panel); border: 1px solid var(--edge); }
+.statgrid dt { color: var(--dim); font-size: var(--fs-1); }
+.statgrid dd { margin: 4px 0 0; color: var(--hi); font-size: var(--fs-4); font-weight: 700; line-height: var(--lh-tight); }
+.mystats { margin: 16px 0 0; font-size: var(--fs-1); }
+.mystats a { color: var(--fg); }
+
+/* The round's progress, drawn as a row of terminal blocks (████░░░░). */
+.progress {
+  height: 12px;
+  background: repeating-linear-gradient(90deg, var(--edge-strong) 0 8px, transparent 8px 10px);
+}
+.progress-fill { background: repeating-linear-gradient(90deg, var(--fg) 0 8px, transparent 8px 10px); }
+
+/* Form errors: a summary that takes focus, and a line under each field. */
+.error-summary { margin: 0 0 16px; padding: 12px 16px; border-left: 4px solid var(--red); background: var(--panel); color: var(--hi); }
+.error-summary:focus { outline: 3px solid var(--red); outline-offset: 2px; }
+.field-error { margin: 4px 0 0; color: var(--red); font-size: var(--fs-1); }
+.provider-note { margin: 0 0 0 4px; color: var(--dim); font-size: var(--fs-1); }
+
 /* Coarse pointers (phones) get the full 44px on every small control. */
 @media (pointer: coarse) {
   .top nav a, .status .out, .status .signin { display: inline-flex; align-items: center; min-height: 44px; }
-  .top nav a.on { padding: 0 6px; }
+  .top nav a.on { padding: 0 8px; }
   .ranges a { min-height: 44px; }
-  .tail li { padding: 8px 10px; }
+  .tail li { padding: 8px 8px; }
   .finder button, .finder input { min-height: 44px; }
+  footer a { display: inline-flex; align-items: center; min-height: 44px; }
   .announce-close { display: inline-flex; align-items: center; min-height: 44px; }
 }
 
+/* Tablets: the desktop layout, a little tighter (R18.1). */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .top, main, footer { padding-inline: 24px; }
+  .statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .finders { gap: 16px; }
+}
+
 @media (max-width: 640px) {
-  /* A phone still gets a gutter. Text running into the bezel reads as a page
-     that does not fit, and the chart is happier for the breathing room too. */
-  .top, main, footer { padding-inline: 20px; }
+  /* A phone keeps a 16px gutter: text running into the bezel reads as a page
+     that does not fit. */
+  .top, main, footer { padding-inline: 16px; }
   .status .clock { display: none; }
-  /* Two rows on a phone: brand and account, then the navigation. */
-  .top { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
-  .top nav { grid-column: 1 / -1; grid-row: 2; margin: 0 -10px; }
-  .top nav.pools { grid-row: 3; justify-self: start; margin: 0; }
-  .auth { margin-top: 28px; }
+  /* One row on top: the logo and the account. The page's own navigation is
+     a bar of tabs along the bottom edge, where a thumb is, and it never
+     wraps (R20.3). */
+  .top { display: flex; flex-wrap: nowrap; gap: 8px; }
+  .top nav.mainnav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 0;
+    margin: 0;
+    padding: 0 0 env(safe-area-inset-bottom);
+    background: var(--bg);
+    border-top: var(--rule);
+  }
+  .top nav.mainnav a { display: flex; align-items: center; justify-content: center; min-height: 48px; margin: 0; padding: 0; }
+  .top nav.mainnav a.on { margin: 0; padding: 0; }
+  body { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
+  .announce-card { bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .top nav.pools { margin-left: auto; font-size: var(--fs-1); }
+  .status { gap: 8px; }
+  .statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .daynav { grid-template-columns: 1fr 1fr; }
+  .daynav-here { grid-column: 1 / -1; grid-row: 1; }
+  /* The status block shrinks so the number box is in view without
+     scrolling on a 375x812 phone (R4.2). */
+  .premise { margin-bottom: 16px; font-size: var(--fs-3); }
+  .roundstatus { padding: 16px; }
+  .closes-in { margin-top: 8px; }
+  .progress { margin-top: 8px; }
+  .facts { margin-top: 8px; }
+  .sec { margin-top: 32px; }
+  .auth { margin-top: 32px; }
   .auth-card { padding: 24px 20px; }
-  .status { margin-left: 0; gap: 10px; }
-  .podium li { padding: 10px 8px 10px 0; }
-  .podium li + li { padding-left: 10px; }
-  .podium .wins { font-size: 2rem; }
-  .podium .dim { display: none; }
   .figures { grid-template-columns: 1fr 1fr; }
   .figures p + p { padding-left: 0; border-left: 0; }
-  .figures p:nth-child(2) { padding-left: 14px; border-left: 1px solid #2a2a2a; }
+  .figures p:nth-child(2) { padding-left: 16px; border-left: 1px solid #2a2a2a; }
   .figures p:nth-child(3) { grid-column: 1 / -1; border-top: 1px solid #2a2a2a; }
-  .figures b { font-size: 2rem; }
+  .figures b { font-size: var(--fs-4); }
   /* "what changed": the label on its own line, the numbers under it. */
   .diff tr { display: block; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
   .diff td { display: block; padding: 0; border: 0; }
   .diff td.num { text-align: left; margin-top: 2px; }
   .diff .change { min-width: 0; margin-left: 8px; }
-  /* The "analysing" bar gets a line of its own instead of breaking mid-way. */
-  .analyse-bar { display: block; }
   /* Short lists (most / least picked) stay side by side. */
   .split.duo { grid-template-columns: 1fr 1fr; gap: 0 20px; }
-  .duo .ranked b { font-size: 1.25rem; }
+  .duo .ranked b { font-size: var(--fs-3); }
   .sealed { display: block; }
   .kv { grid-template-columns: 1fr; gap: 0; }
-  .kv dd { margin-bottom: 6px; }
+  .kv dd { margin-bottom: 8px; }
   .guessform button { flex: 1 1 100%; }
 }
 
@@ -866,9 +958,5 @@ p, li { text-wrap: pretty; }
     animation-duration: 0.01ms !important;
     animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
-    /* app.js does not hold anything when reduced motion is asked for, but if
-       a class ever survives a cached page, a paused bar would sit invisible
-       at scaleY(0) forever. */
-    animation-play-state: running !important;
   }
 }

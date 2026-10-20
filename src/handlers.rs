@@ -21,7 +21,7 @@ use crate::templates::{
 const HISTORY_LIMIT: i64 = i64::MAX;
 const LEADERBOARD_LIMIT: i64 = i64::MAX;
 /// Shown up front on the results page; the rest of the leaderboard folds away.
-const PODIUM: usize = 3;
+const PODIUM: usize = 10;
 /// How many earlier rounds a day page lists under itself. A fortnight is
 /// enough to find your way around without turning the page into /results.
 const DAY_HISTORY: i64 = 14;
@@ -49,10 +49,6 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
         "already" => {
             Notice::error("You have already guessed this round, and a guess cannot be changed.")
         }
-        "rolled" => Notice::error(
-            "The round closed while you were confirming, so nothing was submitted. \
-             The next round is open now.",
-        ),
         "empty" => Notice::error("Type a number first."),
         "invalid" => Notice::error("Whole numbers only — no signs, decimals or letters."),
         "too_small" => Notice::error("The smallest allowed guess is 1."),
@@ -66,6 +62,10 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
         "resend_wait" => Notice::error("We sent a few links already. Give it an hour."),
         "mail_failed" => Notice::error("The mail didn't go out. Try again later."),
         "welcome" => Notice::ok("Welcome. Pick a number: lowest one nobody else picks wins."),
+        "held_existing" => Notice::error("You had already guessed this round, so that number stands."),
+        "held_unverified" => Notice::error(
+            "Confirm your email first; then pick your number again. Nothing was entered.",
+        ),
         "deleted" => Notice::ok("Your account is deleted."),
         "unverified" => Notice::error(
             "Verify your email address to play: open the link we sent you.",
@@ -184,25 +184,51 @@ async fn index_in(
         pool == Pool::Vienna && player.is_some() && state.cfg.points_announced();
 
     let seconds_left = round.seconds_left(now);
-    let (progress_pct, progress_bar) = stats::progress_bar(seconds_left);
     let guess_count = db::guess_count(&state.db, pool, &round_key).await?;
+    let stats = match player {
+        Some(p) => Some(player_record(&state, pool, p, &round_key).await?.0),
+        None => None,
+    };
+    // "saved" is said by the confirmation panel itself, not by a notice.
+    let just_locked = query.msg.as_deref() == Some("saved") && my_guess_label.is_some();
+    let notice = match query.msg.as_deref() {
+        // Both name the round that is open now, which a fixed text cannot.
+        Some("rolled") => Some(Notice::error(format!(
+            "too late, round closed. nothing was entered; this round closes {}.",
+            round.deadline_human()
+        ))),
+        Some("held_late") => Some(Notice::error(format!(
+            "the round closed while you were signing in, so your number was not entered. \
+             this round closes {}.",
+            round.deadline_human()
+        ))),
+        code => notice_for(code).filter(|_| !just_locked),
+    };
     Ok(templates::render(&IndexTemplate {
         pool,
         can_play: player.is_some(),
+        signed_in: viewer.is_some(),
         user: viewer.map(UserView::from),
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: auth::admin_return_token(&jar).is_some(),
+        calendar_href: format!("{}/round/{round_key}.ics", pool.base()),
+        stats,
         round_key,
-        seconds_left,
         time_left: crate::round::format_duration(seconds_left),
-        progress_pct,
-        progress_bar,
+        time_left_spoken: crate::round::spoken_duration(seconds_left),
+        closes_at: round.deadline.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        // The game's clock (an admin may have moved it), to the millisecond:
+        // the countdown runs on the server's idea of now, not the visitor's.
+        server_now: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        close_time: round.deadline.with_timezone(&crate::round::TZ).format("%H:%M").to_string(),
+        progress_pct: stats::round_progress(seconds_left),
         my_guess_label,
+        just_locked,
         guess_count,
         last_round,
         announce_left,
         points_announced,
-        notice: notice_for(query.msg.as_deref()),
+        notice,
     }))
 }
 
@@ -278,17 +304,14 @@ async fn results_in(
     let all = db::closed_rounds(&state.db, pool, &round_key, HISTORY_LIMIT).await?;
     let total_rounds = all.len();
 
-    // The round that closed most recently, with the same chart the day page
-    // draws. It is what most people open /results for, so it sits above the
-    // leaderboard and stays there whatever the range switch or a search does
-    // to the table below. One extra day's tallies; the page is already doing
-    // more work than this.
-    let (latest, chart) = match all.first().cloned() {
+    // The round that closed most recently, said in one line: it is what
+    // most people open /results for. Its chart is on its day page.
+    let (latest, takeaway) = match all.first().cloned() {
         Some(newest) => {
             let tallies = db::round_tallies(&state.db, pool, &newest.round_date).await?;
-            let day = stats::analyse(&tallies);
-            let chart = stats::day_chart(&tallies, &day);
-            (Some(RoundView::new(newest, named)), Some(chart))
+            let collided = stats::collided_below(&tallies, newest.winning_value, 6);
+            let line = takeaway_line(newest.winning_value, newest.total, &collided);
+            (Some(RoundView::new(newest, named)), Some(line))
         }
         None => (None, None),
     };
@@ -321,10 +344,12 @@ async fn results_in(
     Ok(templates::render(&ResultsTemplate {
         pool,
         user: viewer.map(UserView::from),
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         latest,
-        chart,
+        takeaway,
+        data_source: data_source(&state, pool).await?,
+        first_close: Round::current(state.now()).deadline_human(),
         rounds,
         total_rounds,
         q,
@@ -382,8 +407,49 @@ async fn day_in(
 
     let tallies = db::round_tallies(&state.db, pool, &date).await?;
     let stats = stats::analyse(&tallies);
-    let chart = stats::day_chart(&tallies, &stats);
+    let mut chart = stats::day_chart(&tallies, &stats);
     let named = names_visible(pool, viewer.as_ref());
+
+    // The visitor's own pick that day, marked on the chart, and the text to
+    // share it with - which says how it went, never what it was.
+    let player = viewer.as_ref().and_then(|v| player_in(pool, v));
+    let mine = match player {
+        Some(p) => db::my_guess(&state.db, pool, &date, p).await?,
+        None => None,
+    };
+    let share_text = match (mine, player) {
+        (Some(value), Some(p)) => {
+            chart.mark_mine(value);
+            let count = tallies.iter().find(|t| t.value == value).map_or(1, |t| t.count);
+            let record = player_record(&state, pool, p, &open_round).await?;
+            Some(templates::share_text(
+                &date,
+                &templates::outcome_symbol(value, count, stats.winner),
+                stats.winner,
+                summary.total,
+                record.0.streak,
+                &format!("{}{}/day/{date}", state.cfg.public_url, pool.base()),
+            ))
+        }
+        _ => None,
+    };
+    let collided = stats::collided_below(&tallies, stats.winner, 6);
+    let takeaway = takeaway_line(stats.winner, summary.total, &collided);
+    let summary_text = chart_summary(&tallies, stats.winner, summary.total);
+    let rows = tallies
+        .iter()
+        .map(|t| templates::PickRow {
+            value_label: group_digits(t.value),
+            count: t.count,
+            fate: if Some(t.value) == stats.winner {
+                "won"
+            } else if t.count > 1 {
+                "taken"
+            } else {
+                "unique"
+            },
+        })
+        .collect();
 
     // The neighbouring rounds, so one day leads to the next without a detour
     // through /results. Backwards by the listful, forwards one step, which is
@@ -395,22 +461,154 @@ async fn day_in(
         .collect();
     let newer = db::round_after(&state.db, pool, &open_round, &date).await?;
     let total_rounds = db::closed_round_count(&state.db, pool, &open_round).await?;
+    let previous = earlier.first().map(|r| r.date_key.clone());
+    let data_source = data_source(&state, pool).await?;
 
     Ok(templates::render(&DayTemplate {
         pool,
+        previous,
+        takeaway,
+        summary: summary_text,
+        data_source,
+        names_visible: named,
+        my_pick: mine.map(group_digits),
+        share_text,
+        rows,
         user: viewer.map(UserView::from),
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         round: RoundView::new(summary, named),
         distinct: stats.distinct,
-        lowest_unpicked_label: group_digits(stats.lowest_unpicked),
-        most: stats.most.iter().map(Into::into).collect(),
-        all: tallies.iter().map(Into::into).collect(),
         chart,
         earlier,
         newer,
         total_rounds,
     }))
+}
+
+/// `/me` and `/g/me`: the signed-in player's record and rounds (R14.2).
+pub async fn me(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
+    me_in(Pool::Vienna, state, jar).await
+}
+
+pub async fn global_me(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
+    me_in(Pool::Global, state, jar).await
+}
+
+async fn me_in(pool: Pool, state: AppState, jar: CookieJar) -> Result<Response, AppError> {
+    let viewer = current_viewer(&state, &jar).await?;
+    if let Some(away) = outside_42(pool, viewer.as_ref(), "/g/me") {
+        return Ok(away);
+    }
+    let Some(viewer) = viewer else {
+        return Ok(Redirect::to("/login").into_response());
+    };
+    let open_round = Round::current(state.now()).key();
+    let player = player_in(pool, &viewer);
+    let (stats, history) = match player {
+        Some(p) => player_record(&state, pool, p, &open_round).await?,
+        None => Default::default(),
+    };
+    let mut rounds: Vec<templates::MyRoundView> = history
+        .iter()
+        .map(|r| templates::MyRoundView {
+            date: r.round_date.clone(),
+            pick: group_digits(r.value),
+            winner: r.winning_value.map(group_digits),
+            won: r.won(),
+        })
+        .collect();
+    let older = rounds.split_off(rounds.len().min(30));
+    Ok(templates::render(&templates::MeTemplate {
+        pool,
+        test_mode: state.cfg.test_env(),
+        impersonating: auth::admin_return_token(&jar).is_some(),
+        best_label: stats.best.map(group_digits),
+        stats,
+        rounds,
+        older,
+        cannot_play: player.is_none(),
+        user: Some(UserView::from(viewer)),
+    }))
+}
+
+/// "5 won · 41 players · 1, 2, 3 and 4 were all taken" (R11.1).
+fn takeaway_line(winner: Option<i64>, players: i64, collided: &[i64]) -> String {
+    let who = match winner {
+        Some(w) => format!("{} won", group_digits(w)),
+        None => "nobody won".to_string(),
+    };
+    let players = format!("{players} {}", if players == 1 { "player" } else { "players" });
+    let taken = match collided {
+        [] => None,
+        [one] => Some(format!("{} was taken", group_digits(*one))),
+        many => {
+            let (last, rest) = many.split_last().expect("not empty");
+            let rest: Vec<String> = rest.iter().map(|v| group_digits(*v)).collect();
+            Some(format!("{} and {} were all taken", rest.join(", "), group_digits(*last)))
+        }
+    };
+    match (winner, taken) {
+        (_, Some(t)) => format!("{who} · {players} · {t}"),
+        (None, None) => format!("{who} · {players}"),
+        (Some(_), None) => format!("{who} · {players} · nothing lower was picked"),
+    }
+}
+
+/// The day's chart in words (R11.3).
+fn chart_summary(tallies: &[stats::Tally], winner: Option<i64>, players: i64) -> String {
+    let distinct = tallies.len();
+    let taken = tallies.iter().filter(|t| t.count > 1).count();
+    let most = tallies.iter().max_by_key(|t| (t.count, -t.value));
+    let mut s = format!(
+        "{players} {} picked {distinct} different {}; {taken} of them by more than one player.",
+        if players == 1 { "player" } else { "players" },
+        if distinct == 1 { "number" } else { "numbers" },
+    );
+    if let Some(m) = most.filter(|m| m.count > 1) {
+        s.push_str(&format!(" the most picked was {} ({}×).", group_digits(m.value), m.count));
+    }
+    match winner {
+        Some(w) => s.push_str(&format!(" {} was the lowest number picked by exactly one player.", group_digits(w))),
+        None => s.push_str(" no number was picked by exactly one player, so nobody won."),
+    }
+    s
+}
+
+/// Where the numbers on a page come from (R9.1). A test instance says test,
+/// or seeded once demo bots have played; a live site's closed rounds are
+/// historical.
+async fn data_source(state: &AppState, pool: Pool) -> Result<&'static str, AppError> {
+    Ok(if !state.cfg.test_env() {
+        "historical"
+    } else if db::has_demo_data(&state.db, pool).await? {
+        "seeded"
+    } else {
+        "test"
+    })
+}
+
+/// A player's record in `pool` and the rounds behind it (R14, D5).
+async fn player_record(
+    state: &AppState,
+    pool: Pool,
+    player: i64,
+    open_round: &str,
+) -> Result<(stats::PlayerStats, Vec<db::PlayedRound>), AppError> {
+    let history = db::played_rounds(&state.db, pool, open_round, player).await?;
+    let guessed_open = db::my_guess(&state.db, pool, open_round, player).await?.is_some();
+    let dated: Vec<(chrono::NaiveDate, i64, bool)> = history
+        .iter()
+        .filter_map(|r| {
+            let day = chrono::NaiveDate::parse_from_str(&r.round_date, "%Y-%m-%d").ok()?;
+            Some((day, r.value, r.won()))
+        })
+        .collect();
+    let last_closed = chrono::NaiveDate::parse_from_str(open_round, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.pred_opt())
+        .unwrap_or_default();
+    Ok((stats::player_stats(&dated, guessed_open, last_closed), history))
 }
 
 #[derive(Deserialize)]
@@ -470,12 +668,14 @@ async fn trends_in(
     let mut page = TrendsTemplate::build(
         pool,
         viewer.map(UserView::from),
-        state.cfg.test_mode(),
+        state.cfg.test_env(),
         auth::admin_return_token(&jar).is_some(),
         range,
         &trend,
     );
     page.took = format!("{:.1} ms", started.elapsed().as_secs_f64() * 1000.0);
+    page.data_source = data_source(&state, pool).await?;
+    page.first_close = round.deadline_human();
     Ok(templates::render(&page))
 }
 
@@ -560,6 +760,26 @@ async fn submit_guess_in(
     jar: CookieJar,
     form: GuessForm,
 ) -> Result<Response, AppError> {
+    let round = Round::current(state.now());
+    let round_key = round.key();
+    // Typed on a page whose round has since closed: say so, rather than
+    // carry the number over to a round its owner never looked at.
+    if !form.round.is_empty() && form.round != round_key {
+        return Ok(back(pool, "rolled"));
+    }
+
+    // Signed out in the global round: hold the number, and ask them to sign
+    // in to lock it. Anywhere else, signing in comes first.
+    if pool == Pool::Global && current_viewer(&state, &jar).await?.is_none() {
+        let value = match parse_guess(&form.guess) {
+            Ok(v) => v,
+            Err(code) => return Ok(back(pool, code)),
+        };
+        let token = state.held.hold(round_key, value);
+        let jar = jar.add(crate::held::cookie(token, state.cfg.secure_cookies));
+        return Ok((jar, Redirect::to("/login")).into_response());
+    }
+
     let (viewer, player) = match player_or_back(pool, &state, &jar).await? {
         Ok(found) => found,
         Err(away) => return Ok(away),
@@ -569,9 +789,6 @@ async fn submit_guess_in(
         Ok(v) => v,
         Err(code) => return Ok(back(pool, code)),
     };
-
-    let round = Round::current(state.now());
-    let round_key = round.key();
 
     if db::my_guess(&state.db, pool, &round_key, player)
         .await?
@@ -583,7 +800,7 @@ async fn submit_guess_in(
     Ok(templates::render(&ConfirmTemplate {
         pool,
         user: Some(UserView::from(viewer)),
-        test_mode: state.cfg.test_mode(),
+        test_mode: state.cfg.test_env(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         value_label: group_digits(value),
         // Canonical form, so what gets stored is exactly what was shown:
@@ -644,8 +861,12 @@ async fn confirm_guess_in(
             db::set_guess_ip_hash(&state.db, &round_key, player, &hash).await?;
         }
         "saved"
+    } else if db::my_guess(&state.db, pool, &round_key, player).await? == Some(value) {
+        // The same guess again - a double click, a retried request: it is
+        // already in, which is what was asked for.
+        "saved"
     } else {
-        // Lost a race with another tab; the first guess stands.
+        // A different number from another tab got there first; it stands.
         "already"
     };
     Ok(back(pool, msg))
@@ -992,6 +1213,111 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Res
     Ok((jar, Redirect::to("/")).into_response())
 }
 
+/// `/g/day/{date}/og.png`: the round's link-preview image (R12.2). Only for
+/// closed rounds - the open one's numbers are secret - and rendered once.
+pub async fn global_day_image(
+    State(state): State<AppState>,
+    Path(date): Path<String>,
+) -> Result<Response, AppError> {
+    day_image_in(Pool::Global, &state, &date).await
+}
+
+/// The 42 round's image, for 42 students only; anyone else, including the
+/// bots that fetch link previews, gets the site's own picture.
+pub async fn day_image(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(date): Path<String>,
+) -> Result<Response, AppError> {
+    let viewer = current_viewer(&state, &jar).await?;
+    if let Some(away) = outside_42(Pool::Vienna, viewer.as_ref(), "/static/og.png") {
+        return Ok(away);
+    }
+    day_image_in(Pool::Vienna, &state, &date).await
+}
+
+async fn day_image_in(pool: Pool, state: &AppState, date: &str) -> Result<Response, AppError> {
+    let open_round = Round::current(state.now()).key();
+    let Some(summary) = db::round_summary(&state.db, pool, &open_round, date).await? else {
+        return Ok(not_found_page());
+    };
+    let tallies = db::round_tallies(&state.db, pool, date).await?;
+    let key = format!("{}:{date}", pool.base());
+    let png = state.og.get_or_render(&key, || {
+        crate::og::round_image(date, &tallies, summary.winning_value, summary.total)
+    });
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "image/png"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        png.as_ref().clone(),
+    )
+        .into_response())
+}
+
+/// `/round/{date}.ics` and `/g/round/{date}.ics`: the reveal of that round,
+/// as a calendar event linking to its results.
+pub async fn calendar(State(state): State<AppState>, Path(file): Path<String>) -> Response {
+    calendar_in(Pool::Vienna, &state, &file)
+}
+
+pub async fn global_calendar(State(state): State<AppState>, Path(file): Path<String>) -> Response {
+    calendar_in(Pool::Global, &state, &file)
+}
+
+fn calendar_in(pool: Pool, state: &AppState, file: &str) -> Response {
+    let date = file.strip_suffix(".ics").unwrap_or("");
+    let Ok(day) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") else {
+        return not_found_page();
+    };
+    let base = &state.cfg.public_url;
+    let results = format!("{base}{}/day/{date}", pool.base());
+    let host = reqwest::Url::parse(base)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+        .unwrap_or_else(|| "iguesslow.com".to_string());
+    let key = if pool.is_global() { "global" } else { "vienna" };
+    let body = crate::ics::reveal_event(date, key, crate::round::cutoff_on(day), &results, &host, Utc::now());
+    let disposition = format!("attachment; filename=\"i-guess-low-{date}.ics\"");
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/calendar; charset=utf-8".to_string()),
+            (axum::http::header::CONTENT_DISPOSITION, disposition),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+fn not_found_page() -> Response {
+    error_page(StatusCode::NOT_FOUND, "No such page.")
+}
+
+/// The open round's deadline and the server's clock, for the countdown to
+/// re-sync after a tab was hidden and to notice the round turning over.
+pub async fn round_now(State(state): State<AppState>) -> Response {
+    let now = state.now();
+    let round = Round::current(now);
+    // How far an admin moved the game clock, so a test instance can say so
+    // instead of showing a round date that looks wrong. Always 0 when live.
+    let body = format!(
+        r#"{{"round":"{}","closes_at":"{}","server_now":"{}","clock_offset":{}}}"#,
+        round.key(),
+        round.deadline.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        state.clock_offset(),
+    );
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "application/json"),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 /// Liveness probe for load balancers and `docker compose` healthchecks.
 /// Touches the database so a wedged pool reports unhealthy rather than OK.
 pub async fn healthz(State(state): State<AppState>) -> Response {
@@ -1019,6 +1345,7 @@ mod tests {
             round_date: date.to_string(),
             total: 10,
             winning_value: winner.map(|w| w.1),
+            winner_id: winner.map(|_| 7),
             winner_login: winner.map(|w| w.0.to_string()),
             winner_name: winner.map(|w| w.0.to_string()),
         }
@@ -1089,20 +1416,22 @@ mod tests {
         assert_eq!(shown.value_label, "1\u{202f}337");
 
         let hidden = RoundView::new(r, false).winner.unwrap();
-        assert_eq!(hidden.login, MASK);
-        assert_eq!(hidden.display_name, MASK);
+        assert!(hidden.login.starts_with(MASK), "{}", hidden.login);
+        assert_eq!(hidden.login, crate::templates::anon_label(7), "a stable label, not a blank");
+        assert_eq!(hidden.display_name, hidden.login);
         // The number is the game, not personal data: it stays.
         assert_eq!(hidden.value_label, "1\u{202f}337");
 
         let row = LeaderboardRow {
+            id: 7,
             login: "megardes".to_string(),
             display_name: "Meg Ardes".to_string(),
             wins: 12,
         };
         assert_eq!(LeaderView::new(row.clone(), true).login, "megardes");
         let hidden = LeaderView::new(row, false);
-        assert_eq!(hidden.login, MASK);
-        assert_eq!(hidden.display_name, MASK);
+        assert_eq!(hidden.login, crate::templates::anon_label(7));
+        assert_eq!(hidden.display_name, hidden.login);
         assert_eq!(hidden.wins, 12);
     }
 
@@ -1298,7 +1627,7 @@ mod tests {
 
             let html = global_page(&state, Some("n")).await;
             assert!(!html.contains(r#"action="/g/guess""#));
-            assert!(html.contains("verify your email"));
+            assert!(html.contains("confirm your email"));
             for resp in [
                 handlers::global_submit_guess(State(state.clone()), jar("n"), guess(&state, "7")).await.unwrap(),
                 handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), jar("n"), guess(&state, "7")).await.unwrap(),
@@ -1507,5 +1836,348 @@ mod tests {
         assert_eq!(parse_guess("0"), Err("too_small"));
         assert_eq!(parse_guess("0000"), Err("too_small"));
         assert_eq!(parse_guess("9223372036854775808"), Err("too_big"));
+    }
+}
+
+#[cfg(test)]
+mod round_page_tests {
+    //! The round page's structure (R2-R4, R6), first guesses before sign-in
+    //! (R7), the confirmation and calendar (R8), and the round close (R10).
+
+    use axum::extract::{Form, Path, Query, State};
+    use axum_extra::extract::cookie::CookieJar;
+
+    use crate::app::{AppState, ClientIp};
+    use crate::db::{self, Pool};
+    use crate::handlers::{self, GuessForm, IndexQuery};
+    use crate::round::Round;
+    use crate::testkit::{app, body, jar, location, set_cookie, stranger, student};
+
+    async fn page(state: &AppState, jar: CookieJar, msg: Option<&str>) -> String {
+        let q = Query(IndexQuery { msg: msg.map(str::to_string) });
+        body(handlers::global_index(State(state.clone()), jar, q).await.unwrap()).await
+    }
+
+    fn form(state: &AppState, value: &str) -> Form<GuessForm> {
+        Form(GuessForm { guess: value.into(), round: Round::current(state.now()).key() })
+    }
+
+    /// A verified account with a password, as a confirmed sign-up has.
+    async fn member(state: &AppState, email: &str, username: &str) -> i64 {
+        let hash = crate::credentials::hash_password("correct horse battery").await.unwrap();
+        let db::NewAccount::Created(a) =
+            db::create_password_account(&state.db, email, username, &hash, None).await.unwrap()
+        else {
+            panic!("not created")
+        };
+        db::mark_email_verified(&state.db, a.id).await.unwrap();
+        a.id
+    }
+
+    async fn sign_in(state: &AppState, jar: CookieJar, login: &str) -> axum::response::Response {
+        crate::signin::login_email(
+            State(state.clone()),
+            ClientIp(None),
+            jar,
+            Form(crate::signin::EmailLoginForm { login: login.into(), password: "correct horse battery".into() }),
+        )
+        .await
+        .unwrap()
+    }
+
+    /// Types `value` into the round while signed out; returns the cookie jar
+    /// the browser would now have.
+    async fn hold(state: &AppState, value: &str) -> CookieJar {
+        let resp = handlers::global_submit_guess(State(state.clone()), CookieJar::new(), form(state, value))
+            .await
+            .unwrap();
+        assert_eq!(location(&resp), "/login");
+        let token = set_cookie(&resp, crate::held::COOKIE).expect("a held-guess cookie");
+        crate::testkit::sent(&[(crate::held::COOKIE, &token)])
+    }
+
+    async fn guesses(db: &db::Db) -> Vec<(i64, i64)> {
+        sqlx::query_as("SELECT user_id, value FROM global_guesses ORDER BY user_id, value")
+            .fetch_all(db)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_round_page_reads_in_the_order_a_newcomer_needs() {
+        let (_t, state) = app(&[]).await;
+        let html = page(&state, CookieJar::new(), None).await;
+        let at = |needle: &str| html.find(needle).unwrap_or_else(|| panic!("missing {needle:?}"));
+        // premise, status, input + action, hint, rules, then the rest.
+        let order = [
+            at("pick the lowest number nobody else picks. one guess a day."),
+            at(r#"class="roundstatus""#),
+            at(r#"id="guess""#),
+            at("the low ones get crowded"),
+            at("<b>03b</b>"),
+        ];
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+
+        assert!(html.contains("closes in"));
+        assert!(html.contains("closes 12:42 vienna"));
+        assert!(html.contains("not playing yet &middot; pick a number below"));
+        assert!(!html.contains(">guest<"));
+        // Server time for the countdown, and no live region on it.
+        assert!(html.contains("data-closes-at=\""));
+        assert!(html.contains("data-server-now=\""));
+        assert!(!html.contains("aria-live"));
+        assert!(!html.contains(r#"role="timer""#));
+        assert!(html.contains(r#"aria-label="closes in "#));
+        // A real progress bar.
+        assert!(html.contains(r#"role="progressbar""#));
+        for attr in ["aria-valuemin=\"0\"", "aria-valuemax=\"100\"", "aria-valuenow=\""] {
+            assert!(html.contains(attr), "{attr}");
+        }
+        // One primary action, and the header's sign-in is a plain link.
+        assert_eq!(html.matches("class=\"primary\"").count(), 1);
+        assert!(html.contains(r#"<a class="signin" href="/login">sign in</a>"#));
+        assert!(html.contains("you'll sign in next to lock it in"));
+    }
+
+    #[tokio::test]
+    async fn the_page_says_what_a_link_preview_needs() {
+        let (_t, state) = app(&[]).await;
+        let html = page(&state, CookieJar::new(), None).await;
+        for tag in [
+            r#"<meta property="og:title" content="i guess low">"#,
+            r#"<meta property="og:type" content="website">"#,
+            r#"<meta property="og:image" content="http://localhost:3000/static/og.png">"#,
+            r#"<meta property="og:url" content="http://localhost:3000/g/">"#,
+            r#"<meta name="twitter:card" content="summary_large_image">"#,
+            r#"<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">"#,
+        ] {
+            assert!(html.contains(tag), "{tag}");
+        }
+        assert!(html.contains(r#"property="og:description""#));
+    }
+
+    #[tokio::test]
+    async fn a_number_typed_before_signing_in_is_locked_on_sign_in() {
+        let (t, state) = app(&[]).await;
+        let ann = member(&state, "ann@example.com", "ann").await;
+        let held = hold(&state, "7").await;
+
+        // The sign-in page says what is waiting.
+        let login = crate::signin::login_page_handler(
+            State(state.clone()),
+            held.clone(),
+            Query(crate::signin::LoginQuery::default()),
+        )
+        .await
+        .unwrap();
+        assert!(body(login).await.contains("create an account to lock in your 7."));
+        assert!(guesses(&t.db).await.is_empty(), "nothing locked before signing in");
+
+        let resp = sign_in(&state, held.clone(), "ann").await;
+        assert_eq!(location(&resp), "/g?msg=saved");
+        assert_eq!(guesses(&t.db).await, [(ann, 7)]);
+        // The cookie goes, and the number cannot be locked a second time.
+        let cleared: Vec<String> = resp.headers().get_all("set-cookie").iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .filter(|v| v.starts_with("ig42_held="))
+            .collect();
+        assert!(cleared.iter().any(|v| v.contains("Max-Age=0")), "{cleared:?}");
+        sqlx::query("DELETE FROM global_guesses").execute(&t.db).await.unwrap();
+        sign_in(&state, held, "ann").await;
+        assert!(guesses(&t.db).await.is_empty(), "held numbers are used once");
+    }
+
+    #[tokio::test]
+    async fn a_held_number_is_dropped_if_the_round_closes_meanwhile() {
+        let (t, state) = app(&[]).await;
+        member(&state, "ann@example.com", "ann").await;
+        let held = hold(&state, "7").await;
+        let now = state.now();
+        state.shift_clock(Round::current(now).seconds_left(now) + 1);
+
+        let resp = sign_in(&state, held, "ann").await;
+        assert_eq!(location(&resp), "/g?msg=held_late");
+        assert!(guesses(&t.db).await.is_empty());
+        let html = page(&state, CookieJar::new(), Some("held_late")).await;
+        assert!(html.contains("your number was not entered"));
+        assert!(html.contains("this round closes"), "names the next close");
+    }
+
+    #[tokio::test]
+    async fn a_held_number_never_replaces_a_guess_already_made() {
+        let (t, state) = app(&[]).await;
+        let ann = member(&state, "ann@example.com", "ann").await;
+        let round = Round::current(state.now()).key();
+        db::insert_guess(&t.db, Pool::Global, &round, ann, 3, true).await.unwrap();
+        let resp = sign_in(&state, hold(&state, "7").await, "ann").await;
+        assert_eq!(location(&resp), "/g?msg=held_existing");
+        assert_eq!(guesses(&t.db).await, [(ann, 3)]);
+    }
+
+    #[tokio::test]
+    async fn an_unconfirmed_account_does_not_get_its_held_number_locked() {
+        let (t, state) = app(&[]).await;
+        let hash = crate::credentials::hash_password("correct horse battery").await.unwrap();
+        db::create_password_account(&t.db, "new@example.com", "newbie", &hash, None).await.unwrap();
+        let resp = sign_in(&state, hold(&state, "7").await, "newbie").await;
+        assert_eq!(location(&resp), "/g?msg=held_unverified");
+        assert!(guesses(&t.db).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_bad_number_is_refused_before_anything_is_held() {
+        let (_t, state) = app(&[]).await;
+        let resp = handlers::global_submit_guess(State(state.clone()), CookieJar::new(), form(&state, "-3"))
+            .await
+            .unwrap();
+        assert_eq!(location(&resp), "/g?msg=invalid");
+        assert_eq!(set_cookie(&resp, crate::held::COOKIE), None);
+    }
+
+    #[tokio::test]
+    async fn locking_twice_is_fine_and_a_different_number_is_not() {
+        let (t, state) = app(&[]).await;
+        let ann = member(&state, "ann@example.com", "ann").await;
+        let session = set_cookie(&sign_in(&state, CookieJar::new(), "ann").await, crate::auth::SESSION_COOKIE).unwrap();
+
+        for _ in 0..2 {
+            let resp = handlers::global_confirm_guess(State(state.clone()), ClientIp(None), jar(&session), form(&state, "7"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/g?msg=saved", "the same guess again is a success");
+        }
+        let resp = handlers::global_confirm_guess(State(state.clone()), ClientIp(None), jar(&session), form(&state, "8"))
+            .await
+            .unwrap();
+        assert_eq!(location(&resp), "/g?msg=already");
+        assert_eq!(guesses(&t.db).await, [(ann, 7)]);
+    }
+
+    #[tokio::test]
+    async fn the_confirmation_shows_the_number_close_time_and_calendar() {
+        let (t, state) = app(&[]).await;
+        let ann = member(&state, "ann@example.com", "ann").await;
+        let session = set_cookie(&sign_in(&state, CookieJar::new(), "ann").await, crate::auth::SESSION_COOKIE).unwrap();
+        let round = Round::current(state.now()).key();
+        db::insert_guess(&t.db, Pool::Global, &round, ann, 7, true).await.unwrap();
+
+        let html = page(&state, jar(&session), Some("saved")).await;
+        assert!(html.contains("you're in"));
+        assert!(html.contains("your number: <b>7</b> &middot; closes 12:42 vienna (in"));
+        assert!(html.contains(&format!(r#"href="/g/round/{round}.ics" download"#)));
+        assert!(html.contains("locked: your number is <b>7</b>"));
+        assert!(!html.contains(r#"id="guess""#), "no input once locked");
+
+        // Back later: the locked line, from what the server holds, no panel.
+        let html = page(&state, jar(&session), None).await;
+        assert!(html.contains("locked: your number is <b>7</b>"));
+        assert!(!html.contains("locked-panel"));
+    }
+
+    #[tokio::test]
+    async fn the_calendar_file_is_for_the_reveal_of_that_round() {
+        let (_t, state) = app(&[]).await;
+        let resp = handlers::global_calendar(State(state.clone()), Path("2026-10-21.ics".into())).await;
+        assert_eq!(resp.headers()["content-type"], "text/calendar; charset=utf-8");
+        assert!(resp.headers()["content-disposition"].to_str().unwrap().contains("i-guess-low-2026-10-21.ics"));
+        let ics = body(resp).await;
+        assert!(ics.contains("DTSTART:20261021T104200Z"), "12:42 CEST is 10:42 UTC");
+        assert!(ics.replace("\r\n ", "").contains("URL:http://test/g/day/2026-10-21"));
+        // Winter time moves it an hour in UTC.
+        let ics = body(handlers::global_calendar(State(state.clone()), Path("2026-12-01.ics".into())).await).await;
+        assert!(ics.contains("DTSTART:20261201T114200Z"));
+        let bad = handlers::global_calendar(State(state.clone()), Path("tomorrow.ics".into())).await;
+        assert_eq!(bad.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn a_guess_after_the_close_is_refused_out_loud() {
+        let (t, state) = app(&[]).await;
+        member(&state, "ann@example.com", "ann").await;
+        let session = set_cookie(&sign_in(&state, CookieJar::new(), "ann").await, crate::auth::SESSION_COOKIE).unwrap();
+        let now = state.now();
+        // One second before the close: in.
+        state.shift_clock(Round::current(now).seconds_left(now) - 1);
+        let typed = form(&state, "7");
+        let resp = handlers::global_confirm_guess(State(state.clone()), ClientIp(None), jar(&session), typed)
+            .await
+            .unwrap();
+        assert_eq!(location(&resp), "/g?msg=saved");
+
+        // Another player's confirmation, sent from the same page, lands one
+        // second after: refused, and told so.
+        stranger(&t.db, "bob", "b").await;
+        sqlx::query("UPDATE accounts SET verified_at = 'x' WHERE username = 'bob'").execute(&t.db).await.unwrap();
+        let late = form(&state, "8");
+        state.shift_clock(2);
+        let resp = handlers::global_confirm_guess(State(state.clone()), ClientIp(None), jar("b"), late)
+            .await
+            .unwrap();
+        assert_eq!(location(&resp), "/g?msg=rolled");
+        assert_eq!(guesses(&t.db).await.len(), 1);
+        let html = page(&state, jar("b"), Some("rolled")).await;
+        assert!(html.contains("too late, round closed"));
+        // So is a first step typed on the old page.
+        let resp = handlers::global_submit_guess(
+            State(state.clone()),
+            jar("b"),
+            Form(GuessForm { guess: "8".into(), round: "2000-01-01".into() }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(location(&resp), "/g?msg=rolled");
+    }
+
+    #[tokio::test]
+    async fn fifty_players_picking_the_same_number_at_once_are_all_kept() {
+        let (t, state) = app(&[]).await;
+        let mut sessions = vec![];
+        for i in 0..50 {
+            stranger(&t.db, &format!("p{i}"), &format!("s{i}")).await;
+            sessions.push(format!("s{i}"));
+        }
+        sqlx::query("UPDATE accounts SET verified_at = 'x'").execute(&t.db).await.unwrap();
+        let round = Round::current(state.now()).key();
+        let tasks: Vec<_> = sessions
+            .into_iter()
+            .map(|s| {
+                let state = state.clone();
+                let round = round.clone();
+                tokio::spawn(async move {
+                    let f = Form(GuessForm { guess: "1".into(), round });
+                    handlers::global_confirm_guess(State(state), ClientIp(None), jar(&s), f).await.unwrap()
+                })
+            })
+            .collect();
+        for task in tasks {
+            assert_eq!(location(&task.await.unwrap()), "/g?msg=saved");
+        }
+        assert_eq!(db::guess_count(&t.db, Pool::Global, &round).await.unwrap(), 50);
+        let tallies = db::round_tallies(&t.db, Pool::Global, &round).await.unwrap();
+        assert_eq!(tallies.len(), 1);
+        assert_eq!(tallies[0].count, 50);
+    }
+
+    #[tokio::test]
+    async fn the_countdown_can_ask_the_server_for_the_time() {
+        let (_t, state) = app(&[]).await;
+        let resp = handlers::round_now(State(state.clone())).await;
+        assert_eq!(resp.headers()["cache-control"], "no-store");
+        let json: serde_json::Value = serde_json::from_str(&body(resp).await).unwrap();
+        assert_eq!(json["round"], Round::current(state.now()).key());
+        assert!(chrono::DateTime::parse_from_rfc3339(json["closes_at"].as_str().unwrap()).is_ok());
+        assert!(chrono::DateTime::parse_from_rfc3339(json["server_now"].as_str().unwrap()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_42_students_round_page_keeps_its_own_round() {
+        let (_t, state) = app(&[]).await;
+        student(&state.db, 1001, "megardes", "s").await;
+        let html = body(
+            handlers::index(State(state.clone()), jar("s"), Query(IndexQuery { msg: None })).await.unwrap(),
+        )
+        .await;
+        assert!(html.contains(r#"action="/guess""#));
+        assert!(html.contains("final once you confirm"));
     }
 }

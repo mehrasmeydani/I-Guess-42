@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Forgot your password &middot; i guess low{% endblock %}
-{% block h1 %}forgot your password{% endblock %}
+{% block heading %}{% endblock %}
 
 {# Already where that button leads. #}
 {% block signin_link %}{% endblock %}
@@ -8,7 +8,7 @@
 {% block content %}
 <section class="sec auth" style="--b: 0">
   <div class="auth-card">
-    <h2 class="auth-title">forgot your password?</h2>
+    <h1 class="auth-title">forgot your password?</h1>
     <p class="auth-sub">type the email you signed up with. if it has an account, we send it a link to pick a new password.</p>
     {% include "_notice.html" %}
     <form class="authform" method="post" action="/forgot">

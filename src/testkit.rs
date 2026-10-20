@@ -38,8 +38,18 @@ pub async fn app_with(cfg: Config) -> (TempDb, AppState, Arc<Mutex<Vec<Mail>>>) 
     (t, state, sent)
 }
 
+/// The cookies a browser would send with a session: built from a request
+/// header, as a real request's are, so removing one sends the removal.
 pub fn jar(token: &str) -> CookieJar {
-    CookieJar::new().add(Cookie::new(auth::SESSION_COOKIE, token.to_string()))
+    sent(&[(auth::SESSION_COOKIE, token)])
+}
+
+/// A jar of cookies as a browser sends them.
+pub fn sent(cookies: &[(&str, &str)]) -> CookieJar {
+    let header: Vec<String> = cookies.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(axum::http::header::COOKIE, header.join("; ").parse().unwrap());
+    CookieJar::from_headers(&headers)
 }
 
 /// A 42 student with a session. Their account id and intra id differ on

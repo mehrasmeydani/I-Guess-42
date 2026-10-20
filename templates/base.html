@@ -5,7 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0c0c0c">
   <title>{% block title %}i guess low{% endblock %}</title>
+  <meta name="description" content="{% block description %}pick the lowest number nobody else picks. one guess a day.{% endblock %}">
+  {# Link previews in chats. Absolute URLs: a preview is fetched by a bot
+     that knows nothing about this page's address. #}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="i guess low">
+  <meta property="og:title" content="{% block og_title %}i guess low{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}pick the lowest number nobody else picks. one guess a day.{% endblock %}">
+  <meta property="og:url" content="{{ crate::templates::public_url() }}{% block path %}/g/{% endblock %}">
+  <meta property="og:image" content="{{ crate::templates::public_url() }}{% block og_image %}/static/og.png{% endblock %}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="i guess low: pick the lowest number nobody else picks">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{% block twitter_title %}i guess low{% endblock %}">
+  <meta name="twitter:description" content="{% block twitter_description %}pick the lowest number nobody else picks. one guess a day.{% endblock %}">
+  <meta name="twitter:image" content="{{ crate::templates::public_url() }}{% block twitter_image %}/static/og.png{% endblock %}">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/static/style.css?v={{ crate::templates::ASSET_VERSION }}">
   <script src="/static/app.js?v={{ crate::templates::ASSET_VERSION }}" defer></script>
 </head>
@@ -13,29 +31,30 @@
   <a class="skip" href="#main">skip to content</a>
 
   {% if test_mode %}
-  <div class="testbanner">
-    <b>test instance</b> &mdash;
+  <aside class="testbanner" aria-label="test instance">
+    <span class="env-chip">[test instance]</span>
     {% if impersonating %}
-      signed in as a demo account.
+      signed in as a demo account.<span class="shifted"></span>
       <form method="post" action="/admin/return" class="inline">
         <button type="submit" class="linkish">back to mine</button>
       </form>
     {% else %}
-      not the live game.
+      not the live game.<span class="shifted"></span>
       {% match user %}
         {% when Some with (_u) %}<a href="/admin">admin</a>
         {% when None %}
       {% endmatch %}
     {% endif %}
-  </div>
+  </aside>
   {% endif %}
 
   <header class="top">
     <a class="brand" href="{{ pool.base() }}/">i guess <b>low</b></a>
-    <nav aria-label="main">
+    <nav class="mainnav" aria-label="main">
       <a {% block nav_round %}{% endblock %} href="{{ pool.base() }}/">round</a>
       <a {% block nav_results %}{% endblock %} href="{{ pool.base() }}/results">results</a>
       <a {% block nav_trends %}{% endblock %} href="{{ pool.base() }}/trends">trends</a>
+      {% match user %}{% when Some with (_u) %}<a {% block nav_me %}{% endblock %} href="{{ pool.base() }}/me">me</a>{% when None %}{% endmatch %}
     </nav>
     {# Two games, one site - but only 42 students ever learn there are two. #}
     {% if crate::templates::sees_42(user) %}
@@ -56,13 +75,15 @@
             <button class="linkish out" type="submit" aria-label="log out {{ u.login }}">log out</button>
           </form>
         {% when None %}
-          {% block signin_link %}<a class="signin" href="/login">log in to play</a>{% endblock %}
+          {% block signin_link %}<a class="signin" href="/login">sign in</a>{% endblock %}
       {% endmatch %}
     </div>
   </header>
 
   <main id="main" tabindex="-1">
-    <h1 class="sr">{% block h1 %}i guess low{% endblock %}</h1>
+    {# Every page has exactly one h1: hidden, naming the page, unless the page
+       shows its own title and replaces this block with it. #}
+    {% block heading %}<h1 class="sr">{% block h1 %}i guess low{% endblock %}</h1>{% endblock %}
     {% block content %}{% endblock %}
   </main>
 

@@ -1,92 +1,137 @@
-// Live countdown to the 12:42 Europe/Vienna deadline. The server sends the
-// remaining seconds, so a wrong clock on the visitor's machine doesn't matter.
+// The countdown to the round's close. The server sends the deadline and its
+// own clock; the gap between that clock and this machine's is measured once
+// and again whenever the tab comes back into view, so a visitor's wrong
+// clock, or a laptop that slept, never moves the deadline.
 (function () {
-  var el = document.querySelector('.countdown');
+  var el = document.querySelector('.countdown[data-closes-at]');
   if (!el) return;
 
-  var left = parseInt(el.dataset.seconds, 10);
-  if (!isFinite(left)) return;
+  var closesAt = Date.parse(el.dataset.closesAt);
+  var offset = Date.parse(el.dataset.serverNow) - Date.now();
+  if (!isFinite(closesAt) || !isFinite(offset)) return;
 
-  // Same flat-24-hour bar as stats::progress_bar in stats.rs.
-  var bar = document.querySelector('.meter-bar');
-  var pct = document.querySelector('.meter-pct');
-  var DAY = 24 * 60 * 60;
-  // How many cells fit is a question about the screen, and the server cannot
-  // see the screen: it paints a short bar that fits the narrowest phone, and
-  // fit() widens it here. Without this file the short one is what stays.
-  var CELLS = 30;
-
-  // The bar is monospace text, so one cell is one character: measure the row
-  // it lives on, take off what the percentage beside it needs, and the rest
-  // divided by a character's width is the cell count.
-  function fit() {
-    if (!bar) return;
-    var row = bar.parentNode;
-    var text = bar.textContent || '';
-    if (!row || !text.length) return;
-    var ch = bar.offsetWidth / text.length;
-    if (!(ch > 0)) return;
-    // Reserve the percentage's widest reading, "100%", plus a character of
-    // gap -- measuring the label as it stands now would fit the bar around
-    // "0%" in the morning and push it off the edge by the afternoon.
-    var room = row.clientWidth - 5 * ch;
-    // The two brackets are not cells.
-    var cells = Math.floor(room / ch) - 2;
-    if (!isFinite(cells)) return;
-    CELLS = Math.max(10, Math.min(300, cells));
-  }
+  var DAY = 24 * 60 * 60 * 1000;
+  var bar = document.querySelector('.progress');
+  var fill = document.querySelector('.progress-fill');
+  var mirrors = document.querySelectorAll('.countdown-mirror');
+  var stateEl = document.querySelector('.roundstatus .state');
+  var closesIn = document.querySelector('.closes-in');
+  var lastMinute = null;
+  var timer = null;
 
   function pad(n) { return n < 10 ? '0' + n : String(n); }
+  function remaining() { return Math.max(0, closesAt - (Date.now() + offset)); }
 
-  function repeat(ch, n) { return new Array(n + 1).join(ch); }
-
-  function label(total) {
-    if (total <= 0) return 'closing…';
-    var h = Math.floor(total / 3600);
-    var m = Math.floor((total % 3600) / 60);
-    var s = total % 60;
-    return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
+  // Same shapes as round::format_duration and round::spoken_duration.
+  function short(ms) {
+    var t = Math.floor(ms / 1000);
+    var h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    if (h > 0) return h + 'h ' + pad(m) + 'm';
+    if (m > 0) return m + 'm ' + pad(s) + 's';
+    return s + 's';
+  }
+  function spoken(ms) {
+    var t = Math.floor(ms / 1000);
+    var h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
+    function unit(n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); }
+    if (!h && !m) return 'less than a minute';
+    if (!h) return unit(m, 'minute');
+    if (!m) return unit(h, 'hour');
+    return unit(h, 'hour') + ' ' + unit(m, 'minute');
   }
 
   function render() {
-    el.textContent = label(left);
-    var done = Math.min(Math.max(DAY - left, 0), DAY);
-    var filled = Math.floor(done * CELLS / DAY);
-    if (bar) bar.textContent = '[' + repeat('#', filled) + repeat('-', CELLS - filled) + ']';
-    if (pct) pct.textContent = Math.floor(done * 100 / DAY) + '%';
+    var ms = remaining();
+    var text = short(ms);
+    el.textContent = text;
+    for (var i = 0; i < mirrors.length; i++) mirrors[i].textContent = text;
+    // What is read out and the bar only change once a minute.
+    var minute = Math.floor(ms / 60000);
+    if (minute !== lastMinute) {
+      lastMinute = minute;
+      el.setAttribute('aria-label', 'closes in ' + spoken(ms));
+      if (bar && fill) {
+        var pct = Math.min(100, Math.max(0, Math.floor((DAY - ms) * 100 / DAY)));
+        bar.setAttribute('aria-valuenow', pct);
+        bar.setAttribute('aria-valuetext', pct + '% of the round gone');
+        fill.style.width = pct + '%';
+      }
+    }
+    if (ms <= 0) closed();
   }
 
-  fit();
-  render();
+  // The deadline passed with the page open: say so, and wait for the server
+  // to have moved on to the next round before going to the results.
+  function closed() {
+    clearInterval(timer);
+    el.textContent = 'revealing…';
+    el.setAttribute('aria-label', 'round closed, revealing the numbers');
+    if (stateEl) stateEl.textContent = 'closed';
+    if (closesIn) closesIn.textContent = 'round closed';
+    var closedRound = (document.querySelector('input[name=round]') || {}).value
+      || el.dataset.closesAt.slice(0, 10);
+    var base = location.pathname.indexOf('/g') === 0 ? '/g' : '';
+    (function poll(tries) {
+      fetch('/api/round', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (now) {
+          if (now.round !== closedRound) {
+            location.assign(base + '/day/' + closedRound);
+          } else if (tries < 30) {
+            setTimeout(function () { poll(tries + 1); }, 2000);
+          }
+        })
+        .catch(function () { if (tries < 30) setTimeout(function () { poll(tries + 1); }, 2000); });
+    })(0);
+  }
 
-  // A rotated phone or a dragged window is a different number of cells.
-  var refit = null;
-  window.addEventListener('resize', function () {
-    if (refit) clearTimeout(refit);
-    refit = setTimeout(function () { fit(); render(); }, 120);
+  // Back from a hidden tab or a sleeping laptop: ask the server for the time
+  // again rather than trust a clock that may have drifted while away.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    fetch('/api/round', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (now) {
+        var server = Date.parse(now.server_now);
+        if (isFinite(server)) offset = server - Date.now();
+        lastMinute = null;
+        render();
+      })
+      .catch(function () { render(); });
   });
 
-  var timer = setInterval(function () {
-    left -= 1;
-    render();
-    if (left <= 0) {
-      clearInterval(timer);
-      // The round just rolled over; pull the fresh one.
-      setTimeout(function () { window.location.assign('/'); }, 1500);
-    }
-  }, 1000);
+  render();
+  timer = setInterval(render, 1000);
 })();
 
-// Vienna wall-clock time in the header - the clock the game runs on.
+// Vienna wall-clock time in the header - the clock the game runs on, which
+// is the server's: on a test instance an admin may have moved it, and the
+// header must agree with the round it shows. The test banner says so.
 (function () {
   var el = document.querySelector('.clock');
   if (!el || !window.Intl) return;
   var fmt = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Vienna', hour: '2-digit', minute: '2-digit'
   });
-  function tick() { el.textContent = fmt.format(new Date()) + ' vienna'; }
+  var offset = 0;
+  function tick() { el.textContent = fmt.format(new Date(Date.now() + offset)) + ' vienna'; }
   tick();
   setInterval(tick, 10 * 1000);
+  if (!window.fetch) return;
+  fetch('/api/round', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (now) {
+      var server = Date.parse(now.server_now);
+      if (isFinite(server)) offset = server - Date.now();
+      tick();
+      var shifted = document.querySelector('.testbanner .shifted');
+      if (shifted && now.clock_offset) {
+        var s = Math.abs(now.clock_offset), d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
+        shifted.textContent = ' · game clock moved ' + (now.clock_offset > 0 ? '+' : '-')
+          + (d ? d + 'd ' : '') + h + 'h';
+      }
+    })
+    .catch(function () {});
 })();
 
 // Loading feedback, the way a CLI does it: a braille spinner in the header
@@ -130,7 +175,7 @@
     var url = new URL(a.href, location.href);
     if (url.origin !== location.origin) return;
     if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
-    spin(url.pathname === '/login' ? 'connecting to intra' : 'loading ' + url.pathname);
+    spin(url.pathname.indexOf('/login/') === 0 ? 'connecting' : 'loading ' + url.pathname);
   });
 
   document.addEventListener('submit', function (e) {
@@ -147,6 +192,13 @@
     if (busyButton) {
       busyLabel = busyButton.textContent;
       busyButton.classList.add('is-busy');
+      // A button without a name sends nothing of its own, so it can be truly
+      // disabled; one with a name (the admin clock) cannot, or its value
+      // would be dropped. Disabled after this event, so the form still goes.
+      if (!busyButton.name) {
+        var b = busyButton;
+        setTimeout(function () { b.disabled = true; }, 0);
+      }
       // Screen readers hear "sending", not a new braille frame every 80ms.
       busyButton.setAttribute('aria-busy', 'true');
       busyButton.setAttribute('aria-label', 'sending');
@@ -162,6 +214,7 @@
     if (busyButton) {
       busyButton.textContent = busyLabel;
       busyButton.classList.remove('is-busy');
+      busyButton.disabled = false;
       busyButton.removeAttribute('aria-busy');
       busyButton.removeAttribute('aria-label');
       busyButton = null;
@@ -170,36 +223,36 @@
   });
 })();
 
-// Charts that start below the fold hold their bars until they are scrolled
-// to, so the columns grow while someone is watching instead of before they
-// get there. The page works the same without this: no IntersectionObserver,
-// or reduced motion asked for, and nothing is ever held.
+// "share result" on a day page: the text is built on the server and never
+// holds the player's own number. The share sheet where there is one, the
+// clipboard otherwise, and a word to say it worked.
 (function () {
-  var charts = document.querySelectorAll('.chart');
-  if (!charts.length || !window.IntersectionObserver) return;
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var button = document.querySelector('button.share[data-share]');
+  if (!button) return;
+  var done = document.querySelector('.share-done');
+  function say(text) { if (done) done.textContent = text; }
+  button.addEventListener('click', function () {
+    var text = button.dataset.share;
+    if (navigator.share) {
+      navigator.share({ text: text }).catch(function () {});
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function () { say('copied - paste it anywhere'); },
+        function () { say('could not copy; select the text below'); }
+      );
+    } else {
+      say(text);
+    }
+  });
+})();
 
-  var held = [];
-  for (var i = 0; i < charts.length; i++) {
-    // A chart already on screen animates now; holding it would only delay
-    // the one the visitor is looking at.
-    if (charts[i].getBoundingClientRect().top < window.innerHeight) continue;
-    charts[i].classList.add('hold');
-    held.push(charts[i]);
-  }
-  if (!held.length) return;
-
-  // A tenth of the viewport of overlap, so the bars start once the chart is
-  // properly in view rather than at the first pixel of it.
-  var io = new IntersectionObserver(function (entries) {
-    entries.forEach(function (e) {
-      if (!e.isIntersecting) return;
-      e.target.classList.add('seen');
-      io.unobserve(e.target);
-    });
-  }, { rootMargin: '0px 0px -10% 0px' });
-
-  held.forEach(function (c) { io.observe(c); });
+// A form that came back with errors: move focus to the summary, so it is
+// read out and the first fix is one Tab away.
+(function () {
+  var summary = document.querySelector('.error-summary');
+  if (summary) summary.focus();
 })();
 
 // The round that just closed, announced for half an hour. The panel and its

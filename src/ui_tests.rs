@@ -1,0 +1,390 @@
+//! The UI/UX spec (requirements R1-R20) checked against rendered pages:
+//! what each page says and links to, for whom, and the platform files.
+
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::Form;
+use axum_extra::extract::cookie::CookieJar;
+
+use crate::app::{AppState, ClientIp};
+use crate::db::{self, Pool};
+use crate::handlers::{self, IndexQuery, ResultsQuery, TrendsQuery};
+use crate::round::Round;
+use crate::testkit::{app, app_with, body, config, jar, location, stranger, student};
+
+fn yesterday(state: &AppState) -> String {
+    Round::current(state.now()).previous_date().format("%Y-%m-%d").to_string()
+}
+
+fn days_ago(state: &AppState, n: i64) -> String {
+    (Round::current(state.now()).date - chrono::Duration::days(n)).format("%Y-%m-%d").to_string()
+}
+
+/// A verified account with a session, playing the global round.
+async fn player(db: &db::Db, name: &str) -> i64 {
+    stranger(db, name, name).await;
+    sqlx::query("UPDATE accounts SET verified_at = 'x' WHERE username = ?1").bind(name).execute(db).await.unwrap();
+    db::viewer_for_session(db, name).await.unwrap().unwrap().account.id
+}
+
+async fn guess(db: &db::Db, date: &str, who: i64, value: i64) {
+    db::insert_guess(db, Pool::Global, date, who, value, true).await.unwrap();
+}
+
+/// Yesterday in the global round: 1 and 2 taken twice, 3 won by "cat",
+/// "ann" picked 1. The day before, "ann" played too.
+async fn a_played_day(state: &AppState) -> (i64, String) {
+    let db = &state.db;
+    let ann = player(db, "ann").await;
+    let bob = player(db, "bob").await;
+    let cat = player(db, "cat").await;
+    let dan = player(db, "dan").await;
+    let day = yesterday(state);
+    for (who, v) in [(ann, 1), (bob, 1), (dan, 2), (cat, 3)] {
+        guess(db, &day, who, v).await;
+    }
+    stranger(db, "eve", "eve-session").await;
+    let eve = db::viewer_for_session(db, "eve-session").await.unwrap().unwrap().account.id;
+    guess(db, &day, eve, 2).await;
+    guess(db, &days_ago(state, 2), ann, 9).await;
+    (ann, day)
+}
+
+async fn day_page(state: &AppState, token: Option<&str>, date: &str) -> String {
+    let jar = token.map(jar).unwrap_or_default();
+    body(handlers::global_day(State(state.clone()), jar, Path(date.to_string())).await.unwrap()).await
+}
+
+#[tokio::test]
+async fn a_day_page_walks_the_calendar_and_leads_back_to_today() {
+    let (_t, state) = app(&[]).await;
+    let (_, day) = a_played_day(&state).await;
+    let before = days_ago(&state, 2);
+    let html = day_page(&state, Some("ann"), &day).await;
+    assert!(html.contains(&format!(r#"href="/g/day/{before}" rel="prev">&larr; {before}</a>"#)));
+    assert!(!html.contains(r#"rel="next""#), "the newest closed round has no next");
+    assert!(html.contains(r#"<a href="/g/">play today's round &rarr;</a>"#));
+    let html = day_page(&state, Some("ann"), &before).await;
+    assert!(html.contains(&format!(r#"href="/g/day/{day}" rel="next">{day} &rarr;</a>"#)));
+    assert!(!html.contains(r#"rel="prev""#), "the first round has no previous");
+    assert!(html.contains(&format!("<title>round {before} &middot; i guess low</title>")));
+}
+
+#[tokio::test]
+async fn a_day_page_says_who_won_and_why_in_a_line_and_in_words() {
+    let (_t, state) = app(&[]).await;
+    let (_, day) = a_played_day(&state).await;
+    let html = day_page(&state, Some("ann"), &day).await;
+    assert!(html.contains("won · 5 players · 1 and 2 were all taken"), "the takeaway, not saying 3 twice");
+    assert!(html.contains("5 players picked 3 different numbers; 2 of them by more than one player."));
+    assert!(html.contains("3 was the lowest number picked by exactly one player."));
+    // Taken numbers struck through; the winner is not.
+    assert!(html.contains("<s>1</s>") && html.contains("<s>2</s>"));
+    assert!(!html.contains("<s>3</s>"));
+    // A table alternative that says what it opens.
+    assert!(html.contains("view as a table (3 numbers)"));
+    assert!(html.contains("hide the table"));
+    assert!(html.contains("<caption class=\"sr\">every number picked in round"));
+    assert!(html.contains("[historical]"), "a live site's closed rounds are historical");
+    // Its own preview picture and description.
+    assert!(html.contains(&format!(r#"content="http://localhost:3000/g/day/{day}/og.png""#)));
+    assert!(html.contains(r#"<meta property="og:description" content="3 won · 5 players · 1 and 2 were all taken">"#));
+}
+
+#[tokio::test]
+async fn your_own_pick_is_marked_and_shared_without_the_number() {
+    let (_t, state) = app(&[]).await;
+    let (_, day) = a_played_day(&state).await;
+    let html = day_page(&state, Some("ann"), &day).await;
+    assert!(html.contains("col many mine"), "ann's 1 is marked on the chart");
+    assert!(html.contains("your pick: <b class=\"mine-text\">1</b>"));
+    // The share text: outcome, winner, headcount, streak, link - not her 1.
+    let start = html.find("data-share=\"").expect("a share button") + "data-share=\"".len();
+    let text = &html[start..start + html[start..].find('"').unwrap()];
+    assert!(text.contains("my pick: 🟥 (taken by 1)"), "{text}");
+    assert!(text.contains("winner: 3 · 5 players"), "{text}");
+    assert!(text.contains("🔥 2-day streak"), "{text}");
+    assert!(text.contains(&format!("http://test/g/day/{day}")), "{text}");
+    assert!(!text.lines().nth(1).unwrap().contains('1') || text.lines().nth(1).unwrap().contains("taken by 1"));
+    // Someone who did not play that day gets no share button.
+    assert!(!day_page(&state, None, &day).await.contains("data-share"));
+}
+
+#[test]
+fn the_share_text_follows_the_design() {
+    use crate::templates::{outcome_symbol, share_text};
+    assert_eq!(outcome_symbol(3, 1, Some(3)), "🟩 won");
+    assert_eq!(outcome_symbol(1, 4, Some(3)), "🟥 (taken by 3)");
+    assert_eq!(outcome_symbol(9, 1, Some(3)), "🟨 unique, not lowest");
+    let text = share_text("2026-10-21", "🟩 won", Some(3), 41, 1, "https://iguesslow.com/g/day/2026-10-21");
+    assert_eq!(text, "i guess low · oct 21\nmy pick: 🟩 won\nwinner: 3 · 41 players\nhttps://iguesslow.com/g/day/2026-10-21");
+    assert!(share_text("2026-10-21", "x", None, 2, 5, "u").contains("winner: nobody · 2 players\n🔥 5-day streak\n"));
+}
+
+#[tokio::test]
+async fn a_rounds_preview_image_exists_only_once_it_has_closed() {
+    let (_t, state) = app(&[]).await;
+    let (_, day) = a_played_day(&state).await;
+    let resp = handlers::global_day_image(State(state.clone()), Path(day.clone())).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()["content-type"], "image/png");
+    assert!(body_bytes(resp).await.starts_with(b"\x89PNG"));
+    // The open round's numbers are secret.
+    let today = Round::current(state.now()).key();
+    player(&state.db, "zed").await;
+    let resp = handlers::global_day_image(State(state.clone()), Path(today)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    // The 42 round's picture is for 42 students only.
+    let resp = handlers::day_image(State(state.clone()), CookieJar::new(), Path(day)).await.unwrap();
+    assert_eq!(location(&resp), "/static/og.png");
+}
+
+async fn body_bytes(resp: axum::response::Response) -> Vec<u8> {
+    axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec()
+}
+
+async fn results_page(state: &AppState, token: Option<&str>) -> String {
+    let jar = token.map(jar).unwrap_or_default();
+    let q = Query(ResultsQuery { q: None, show: None, date: None });
+    body(handlers::global_results(State(state.clone()), jar, q).await.unwrap()).await
+}
+
+#[tokio::test]
+async fn results_list_the_rounds_first_then_the_top_ten() {
+    let (_t, state) = app(&[]).await;
+    // Twelve days, each won by someone different.
+    for i in 1..=12 {
+        let who = player(&state.db, &format!("w{i}")).await;
+        guess(&state.db, &days_ago(&state, i), who, 5).await;
+    }
+    let html = results_page(&state, Some("w1")).await;
+    let rounds = html.find("recent rounds").unwrap();
+    let leaders = html.find("most days won").unwrap();
+    assert!(rounds < leaders, "rounds before the leaderboard");
+    assert!(html.contains(&format!(r#"<td><a href="/g/day/{}">"#, yesterday(&state))));
+    // Ten leaders shown, the rest behind a control that says what it does.
+    let shown = &html[leaders..html[leaders..].find("<details").map_or(html.len(), |i| leaders + i)];
+    assert_eq!(shown.matches("<tr title=").count(), 10);
+    assert!(html.contains("show all 12 winners"));
+    assert!(html.contains("show the top 10 only"));
+    assert!(html.contains("closed rounds &middot; all-time"));
+    assert!(html.contains(r#"aria-current="true" href="/g/results">7</a>"#));
+}
+
+#[tokio::test]
+async fn before_any_round_closes_results_look_ahead_and_filters_wait() {
+    let (_t, state) = app(&[]).await;
+    let html = results_page(&state, None).await;
+    assert!(html.contains("no round has closed yet."));
+    assert!(html.contains("the first results land when this round closes"));
+    assert!(html.contains(r#"id="q" name="q" type="search""#));
+    assert_eq!(html.matches(" disabled>").count() + html.matches(" disabled ").count(), 4, "search, date and both buttons");
+    let trends = body(
+        handlers::global_trends(State(state.clone()), CookieJar::new(), Query(TrendsQuery { days: None }))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(trends.contains("once rounds close, this page shows where the winning numbers land"));
+    assert!(trends.contains("the next round closes"));
+}
+
+#[tokio::test]
+async fn masked_names_are_stable_labels_with_a_word_on_why() {
+    let (_t, state) = app(&[]).await;
+    let (_, day) = a_played_day(&state).await;
+    let signed_out = results_page(&state, None).await;
+    let cat = db::viewer_for_session(&state.db, "cat").await.unwrap().unwrap().account.id;
+    let label = crate::templates::anon_label(cat);
+    assert!(label.starts_with("player #") && label.len() == 12, "{label}");
+    assert!(signed_out.contains(&label));
+    assert!(!signed_out.contains(">cat<"));
+    assert!(signed_out.contains("names are shown to signed-in players"));
+    // The same label on the day page and on the next visit.
+    assert!(day_page(&state, None, &day).await.contains(&label));
+    assert_eq!(crate::templates::anon_label(cat), label);
+    assert_ne!(crate::templates::anon_label(cat + 1), label);
+    // Signed in: the name, and no note.
+    let signed_in = results_page(&state, Some("ann")).await;
+    assert!(signed_in.contains("cat"));
+    assert!(!signed_in.contains("names are shown to signed-in players"));
+}
+
+#[tokio::test]
+async fn trends_open_with_an_answer_and_keep_the_timing_out_of_sight() {
+    // A test instance: the only place the timing appears at all.
+    let (_t, state) = app(&["megardes"]).await;
+    a_played_day(&state).await;
+    let page = |days: &str| {
+        let state = state.clone();
+        let days = Some(days.to_string());
+        async move {
+            body(handlers::global_trends(State(state), CookieJar::new(), Query(TrendsQuery { days })).await.unwrap())
+                .await
+        }
+    };
+    let html = page("7").await;
+    assert!(html.contains("over the last 7 days ("), "{html}");
+    // Won with 9, then 3: the middle of the two, taken as the upper.
+    assert!(html.contains("the middle winning number was 9"));
+    assert!(html.contains(r#"aria-current="true" href="/g/trends?days=7">7d</a>"#));
+    assert!(!html.contains("analysing"), "no staged progress");
+    assert!(html.contains("test details"), "timing only in the test-only details");
+    assert!(page("all").await.contains("over every round so far"));
+
+    // A live site does not show it at all.
+    let mut cfg = config(&[]);
+    cfg.environment = Some("production".into());
+    let (_t2, live, _) = app_with(cfg).await;
+    let html = body(handlers::global_trends(State(live), CookieJar::new(), Query(TrendsQuery { days: None })).await.unwrap()).await;
+    assert!(!html.contains("test details"));
+    assert!(!html.contains(" ms."));
+}
+
+#[tokio::test]
+async fn my_rounds_show_the_record_and_every_round_played() {
+    let (_t, state) = app(&[]).await;
+    a_played_day(&state).await;
+    let html = body(handlers::global_me(State(state.clone()), jar("ann")).await.unwrap()).await;
+    assert!(html.contains("<dt>streak</dt><dd>2 <span class=\"dim\">days</span></dd>"), "{html}");
+    assert!(html.contains("<dt>played</dt><dd>2</dd>"));
+    // Alone two days ago, she won that one with 9.
+    assert!(html.contains("<dt>won</dt><dd>1</dd>"));
+    assert!(html.contains(r#"<dt>best win</dt><dd><span class="win">9</span></dd>"#));
+    let first = html.find(&yesterday(&state)).unwrap();
+    let second = html.find(&days_ago(&state, 2)).unwrap();
+    assert!(first < second, "newest first");
+    assert!(html.contains(r#"<span class="dim">lost</span>"#));
+    assert!(html.contains(r#"<b class="win">won</b>"#));
+    assert!(html.contains(r#"class="on" aria-current="page" href="/g/me">me</a>"#));
+    // Yesterday's winner sees it as a win, and their best.
+    let html = body(handlers::global_me(State(state.clone()), jar("cat")).await.unwrap()).await;
+    assert!(html.contains(r#"<dt>best win</dt><dd><span class="win">3</span></dd>"#));
+    // Signed out: to sign in. And no "me" tab.
+    let resp = handlers::global_me(State(state.clone()), CookieJar::new()).await.unwrap();
+    assert_eq!(location(&resp), "/login");
+    let front = body(handlers::global_index(State(state.clone()), CookieJar::new(), Query(IndexQuery { msg: None })).await.unwrap()).await;
+    assert!(!front.contains("/g/me\">me</a>"));
+}
+
+#[tokio::test]
+async fn the_round_page_shows_a_players_streak() {
+    let (_t, state) = app(&[]).await;
+    a_played_day(&state).await;
+    let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None })).await.unwrap()).await;
+    assert!(html.contains("2-day streak &middot; played 2 &middot; won 1 &middot; best: 9"), "{html}");
+    assert!(html.contains("<title>today's round &middot; i guess low</title>"));
+}
+
+#[tokio::test]
+async fn every_page_has_one_h1_and_the_sign_in_pages_do_not_repeat_it() {
+    let (_t, state) = app(&[]).await;
+    let login = body(crate::signin::login_page_handler(State(state.clone()), CookieJar::new(), Query(Default::default())).await.unwrap()).await;
+    let signup = body(crate::signin::signup_page_handler(State(state.clone()), CookieJar::new()).await).await;
+    let privacy = body(crate::moderation::privacy(State(state.clone()), CookieJar::new()).await.unwrap()).await;
+    let front = body(handlers::global_index(State(state.clone()), CookieJar::new(), Query(IndexQuery { msg: None })).await.unwrap()).await;
+    for (name, html) in [("login", &login), ("signup", &signup), ("privacy", &privacy), ("round", &front)] {
+        assert_eq!(html.matches("<h1").count(), 1, "{name}");
+    }
+    assert!(login.contains(r#"<h1 class="auth-title">sign in</h1>"#));
+    assert!(!login.contains(r#"<h2 class="auth-title">"#));
+    // What each provider learns, beside its button; the 42 mark is decoration.
+    assert!(login.contains("42 shares your login, name and campus."));
+    assert!(login.contains(r#"class="provider-mark mark-42" aria-hidden="true""#));
+}
+
+#[tokio::test]
+async fn a_failed_sign_in_gets_a_focusable_summary_and_marked_fields() {
+    let (_t, state) = app(&["megardes"]).await;
+    let resp = crate::signin::login_email(
+        State(state.clone()),
+        ClientIp(None),
+        CookieJar::new(),
+        Form(crate::signin::EmailLoginForm { login: "nobody".into(), password: "wrong wrong".into() }),
+    )
+    .await
+    .unwrap();
+    let html = body(resp).await;
+    assert!(html.contains(r#"class="error-summary" role="alert" tabindex="-1""#));
+    assert!(html.contains(r#"<p class="field-error" id="login-error">Wrong username, email or password.</p>"#));
+    assert_eq!(html.matches(r#"aria-invalid="true" aria-describedby="login-error""#).count(), 2);
+
+    let resp = crate::signin::signup(
+        State(state.clone()),
+        ClientIp(None),
+        Form(crate::signin::SignupForm {
+            email: "ann@example.com".into(),
+            username: "a".into(),
+            password: "correct horse battery".into(),
+            turnstile: String::new(),
+        }),
+    )
+    .await
+    .unwrap();
+    let html = body(resp).await;
+    assert!(html.contains(r#"<p class="field-error" id="username-error">Usernames are 3 to 20 characters long.</p>"#));
+    assert!(html.contains(r#"aria-describedby="username-hint username-error""#));
+    assert!(!html.contains("email-error"), "only the field that was wrong");
+}
+
+#[tokio::test]
+async fn the_privacy_page_names_its_bases_processors_and_authority() {
+    let (_t, state) = app(&[]).await;
+    let html = body(crate::moderation::privacy(State(state), CookieJar::new()).await.unwrap()).await;
+    for must in [
+        "Art. 6(1)(b) GDPR", "Art. 6(1)(f)", "30 days", "24 hours", "1 hour", "2 days",
+        "Google", "GitHub", "42", "Resend", "Cloudflare", "Data Privacy Framework",
+        "Datenschutzbehörde", "ig42_session", "ig42_held",
+    ] {
+        assert!(html.contains(must), "{must}");
+    }
+    assert!(html.matches("<h2>").count() >= 4, "headed sections");
+}
+
+#[tokio::test]
+async fn the_platform_files_are_served() {
+    let (_t, state) = app(&[]).await;
+    a_played_day(&state).await;
+    let manifest: serde_json::Value = serde_json::from_str(&body(crate::platform::manifest().await).await).unwrap();
+    assert_eq!(manifest["start_url"], "/g/");
+    assert_eq!(manifest["display"], "standalone");
+    assert_eq!(manifest["theme_color"], "#0c0c0c");
+    assert!(manifest["icons"].as_array().unwrap().len() >= 2);
+    let robots = body(crate::platform::robots(State(state.clone())).await).await;
+    assert!(robots.contains("Sitemap: http://test/sitemap.xml"));
+    assert!(robots.contains("Disallow: /admin"));
+    let sitemap = body(crate::platform::sitemap(State(state.clone())).await.unwrap()).await;
+    assert!(sitemap.contains("<loc>http://test/g/</loc>"));
+    assert!(sitemap.contains(&format!("<loc>http://test/g/day/{}</loc>", yesterday(&state))));
+    assert!(!sitemap.contains("http://test/day/"), "the 42 round is not public");
+    for file in ["static/favicon.ico", "static/apple-touch-icon.png", "static/og.png", "static/icon-192.png", "static/icon-512.png"] {
+        assert!(std::path::Path::new(file).exists(), "{file}");
+    }
+}
+
+#[tokio::test]
+async fn pages_carry_an_etag_and_answer_304_when_unchanged() {
+    use axum::routing::get;
+    use tower::ServiceExt;
+    let router = axum::Router::new()
+        .route("/", get(|| async { axum::response::Html("<p>hello</p>") }))
+        .layer(axum::middleware::from_fn(crate::platform::page_caching));
+    let resp = router.clone().oneshot(axum::http::Request::get("/").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(resp.headers()["cache-control"], "private, no-cache");
+    let etag = resp.headers()["etag"].clone();
+    let again = router
+        .oneshot(axum::http::Request::get("/").header("if-none-match", etag).body(axum::body::Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(again.status(), StatusCode::NOT_MODIFIED);
+}
+
+#[tokio::test]
+async fn a_42_students_rounds_stay_in_the_42_round() {
+    let (_t, state) = app(&[]).await;
+    student(&state.db, 1001, "megardes", "s").await;
+    let html = body(handlers::me(State(state.clone()), jar("s")).await.unwrap()).await;
+    assert!(html.contains(r#"href="/me">me</a>"#));
+    let resp = handlers::me(State(state.clone()), jar("ann-none")).await.unwrap();
+    assert_eq!(location(&resp), "/g/me", "anyone else is sent to the global one");
+}

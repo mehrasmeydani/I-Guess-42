@@ -68,7 +68,15 @@ pub struct Config {
     /// too. 42 logins and not usernames, because anyone can pick a username.
     /// Empty: /mod answers 404. On a test instance the admins can as well.
     pub moderators: Vec<String>,
-    /// Who runs the site, for /imprint. Unset fields show as not given.
+    /// ENVIRONMENT: `test` or `production`. Decides the test-instance
+    /// notice, which imprint is shown, and how data is labelled. Unset: a
+    /// test instance exactly when ADMIN_LOGINS is set.
+    pub environment: Option<String>,
+    /// Keys the anonymous "player #3fa2" labels. ANON_LABEL_KEY, or derived
+    /// from the 42 client secret so it is secret and stable without one more
+    /// setting.
+    pub anon_key: String,
+    /// Who runs the site, for /imprint.
     pub imprint_name: Option<String>,
     pub imprint_address: Option<String>,
     pub imprint_email: Option<String>,
@@ -134,6 +142,20 @@ impl Config {
                 .map(|l| l.trim().to_lowercase())
                 .filter(|l| !l.is_empty())
                 .collect(),
+            environment: match nonempty("ENVIRONMENT").as_deref() {
+                None => None,
+                Some(e @ ("test" | "production")) => Some(e.to_string()),
+                Some(other) => anyhow::bail!("ENVIRONMENT must be test or production, not {other:?}"),
+            },
+            anon_key: match nonempty("ANON_LABEL_KEY") {
+                Some(k) => k,
+                None => {
+                    use sha2::Digest;
+                    let secret = std::env::var("FT_CLIENT_SECRET").unwrap_or_default();
+                    let digest = sha2::Sha256::digest(format!("anon-label:{secret}").as_bytes());
+                    digest.iter().map(|b| format!("{b:02x}")).collect()
+                }
+            },
             imprint_name: nonempty("IMPRINT_NAME"),
             imprint_address: nonempty("IMPRINT_ADDRESS"),
             imprint_email: nonempty("IMPRINT_EMAIL"),
@@ -174,6 +196,17 @@ impl Config {
     /// True when this instance is a test instance.
     pub fn test_mode(&self) -> bool {
         !self.admin_logins.is_empty()
+    }
+
+    /// Whether this is a test environment as far as visitors are concerned:
+    /// the notice at the top, the test imprint, data labelled as test data.
+    /// The admin tools still go by `test_mode` alone.
+    pub fn test_env(&self) -> bool {
+        match self.environment.as_deref() {
+            Some("test") => true,
+            Some("production") => false,
+            _ => self.test_mode(),
+        }
     }
 
     /// Whether the 42 login `login` may moderate the global pool.

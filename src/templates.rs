@@ -15,6 +15,33 @@ pub const ASSET_VERSION: u64 = {
     fnv1a(include_bytes!("../static/app.js"), css)
 };
 
+/// Settings the templates need on every page and that never change while the
+/// process runs. Set once at startup; tests get the defaults.
+pub struct Site {
+    /// For absolute URLs in link previews: `https://iguesslow.com`.
+    pub public_url: String,
+    /// Keys the anonymous labels (see `anon_label`).
+    pub anon_key: String,
+}
+
+static SITE: std::sync::OnceLock<Site> = std::sync::OnceLock::new();
+
+pub fn init_site(site: Site) {
+    let _ = SITE.set(site);
+}
+
+fn site() -> &'static Site {
+    SITE.get_or_init(|| Site {
+        public_url: "http://localhost:3000".to_string(),
+        anon_key: "test".to_string(),
+    })
+}
+
+/// The site's address, for `og:url` and `og:image`.
+pub fn public_url() -> &'static str {
+    &site().public_url
+}
+
 /// What is running, printed in the footer: the contents of version.txt,
 /// bumped in the commit that gets tagged and deployed, so the footer and the
 /// git tag cannot drift apart.
@@ -93,15 +120,33 @@ impl From<Viewer> for UserView {
     }
 }
 
-/// What stands in for a login or a real name when the visitor is not allowed
-/// to see it.
-pub const MASK: &str = "*****";
+/// What a player is called for a visitor who may not see their name:
+/// "player #3fa2", from an HMAC of their id. The same player gets the same
+/// label every day and on every page, so their wins can be followed, but it
+/// cannot be turned back into who they are (D6).
+pub fn anon_label(id: i64) -> String {
+    use hmac::{Hmac, Mac};
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(site().anon_key.as_bytes())
+        .expect("HMAC takes keys of any length");
+    mac.update(&id.to_le_bytes());
+    let bytes = mac.finalize().into_bytes();
+    format!("player #{:02x}{:02x}", bytes[0], bytes[1])
+}
 
-/// A login or display name, shown only to a visitor who may see who played.
-/// Everything that carries a student's identity goes through here, so hiding
-/// it is not something a template can forget to do.
-fn named(value: String, reveal: bool) -> String {
-    if reveal { value } else { MASK.to_string() }
+/// The prefix every anonymous label starts with.
+#[cfg(test)]
+pub const MASK: &str = "player #";
+
+/// A login or display name, shown only to a visitor who may see who played,
+/// and an anonymous label otherwise. Everything that carries a player's
+/// identity goes through here, so hiding it is not something a template can
+/// forget to do.
+fn named(value: String, id: Option<i64>, reveal: bool) -> String {
+    match (reveal, id) {
+        (true, _) => value,
+        (false, Some(id)) => anon_label(id),
+        (false, None) => "a player".to_string(),
+    }
 }
 
 pub struct WinnerView {
@@ -127,8 +172,8 @@ impl RoundView {
         // only has a winner if some value was picked exactly once.
         let winner = match (r.winner_login, r.winner_name, r.winning_value) {
             (Some(login), Some(display_name), Some(value)) => Some(WinnerView {
-                login: named(login, reveal),
-                display_name: named(display_name, reveal),
+                login: named(login, r.winner_id, reveal),
+                display_name: named(display_name, r.winner_id, reveal),
                 value_label: group_digits(value),
             }),
             _ => None,
@@ -153,8 +198,8 @@ impl LeaderView {
     /// masked. No `From<LeaderboardRow>`, for the same reason.
     pub fn new(r: LeaderboardRow, reveal: bool) -> Self {
         Self {
-            login: named(r.login, reveal),
-            display_name: named(r.display_name, reveal),
+            login: named(r.login, Some(r.id), reveal),
+            display_name: named(r.display_name, Some(r.id), reveal),
             wins: r.wins,
         }
     }
@@ -193,13 +238,25 @@ pub struct IndexTemplate {
     pub impersonating: bool,
     /// `YYYY-MM-DD`, round-tripped through the form's hidden field.
     pub round_key: String,
-    pub seconds_left: i64,
-    /// Pre-formatted, so the page is right before the countdown script runs.
+    /// Pre-formatted ("18h 32m"), so the page is right before the countdown
+    /// script runs, and the same for a screen reader.
     pub time_left: String,
-    /// How much of the round has elapsed, 0-100, and the same as a text bar.
+    pub time_left_spoken: String,
+    /// The deadline and the server's clock as RFC 3339, for app.js.
+    pub closes_at: String,
+    pub server_now: String,
+    /// The deadline on the Vienna clock, "12:42".
+    pub close_time: String,
+    /// How much of the round has elapsed, 0-100.
     pub progress_pct: i64,
-    pub progress_bar: String,
     pub my_guess_label: Option<String>,
+    /// The guess was locked just now: show the confirmation panel.
+    pub just_locked: bool,
+    pub signed_in: bool,
+    /// Where the .ics for this round's reveal is.
+    pub calendar_href: String,
+    /// The player's record, for the line under the status block.
+    pub stats: Option<crate::stats::PlayerStats>,
     pub guess_count: i64,
     pub last_round: Option<RoundView>,
     /// How much of the announcement window is left, in seconds, or `None`
@@ -248,9 +305,12 @@ pub struct ResultsTemplate {
     /// The round that closed most recently, shown above everything else.
     /// `None` only until a first round has closed.
     pub latest: Option<RoundView>,
-    /// That round's chart. `Some` exactly when `latest` is; the two are kept
-    /// apart because chart.html reads a binding called `chart`.
-    pub chart: Option<Chart>,
+    /// That round in one line, "5 won · 41 players · 1 and 2 were all taken".
+    pub takeaway: Option<String>,
+    /// Where the numbers come from: test, seeded or historical.
+    pub data_source: &'static str,
+    /// When the open round closes, for the page before any round has.
+    pub first_close: String,
     /// The rounds to list: the most recent few, or every match of a search.
     pub rounds: Vec<RoundView>,
     /// How many closed rounds exist in all.
@@ -295,10 +355,6 @@ pub struct DayTemplate {
     pub impersonating: bool,
     pub round: RoundView,
     pub distinct: usize,
-    pub lowest_unpicked_label: String,
-    pub most: Vec<TallyView>,
-    /// Every picked value, for readers who want the numbers rather than the chart.
-    pub all: Vec<TallyView>,
     pub chart: Chart,
     /// The rounds before this one, newest first, so the calendar is reachable
     /// from the round itself instead of only from /results.
@@ -308,6 +364,94 @@ pub struct DayTemplate {
     pub newer: Option<String>,
     /// How many closed rounds there are in all, to say what the list leaves out.
     pub total_rounds: i64,
+    /// The closed round before this one, for the "← date" link.
+    pub previous: Option<String>,
+    /// "5 won · 41 players · 1, 2, 3, 4 were all taken".
+    pub takeaway: String,
+    /// The chart said in words, for anyone who cannot see it.
+    pub summary: String,
+    /// Where the numbers come from: test, seeded, historical or live.
+    pub data_source: &'static str,
+    pub names_visible: bool,
+    /// The visitor's own pick that day, and how it went, if they played.
+    pub my_pick: Option<String>,
+    /// The text "share" copies, for a player who played that day. Never
+    /// contains their own number.
+    pub share_text: Option<String>,
+    /// Every picked number with what became of it, for the table.
+    pub rows: Vec<PickRow>,
+}
+
+/// The takeaway after the big number that already says who won:
+/// "5 won · 41 players · 1 was taken" becomes "won · 41 players · 1 was
+/// taken", so the number is not said twice.
+pub fn after_number(takeaway: &str) -> String {
+    match takeaway.split_once(" won · ") {
+        Some((_, rest)) if !takeaway.starts_with("nobody") => format!("won · {rest}"),
+        _ => takeaway.to_string(),
+    }
+}
+
+/// A number in a day's table: how many picked it, and its fate.
+pub struct PickRow {
+    pub value_label: String,
+    pub count: i64,
+    /// "won", "unique" (picked once, not the lowest) or "taken".
+    pub fate: &'static str,
+}
+
+/// What `share` copies (D7): the day, how the player's pick did, the
+/// winning number and headcount, their streak if it is worth mentioning,
+/// and the link. `outcome` says how they did without saying what they
+/// picked, so the text can be posted without giving the number away.
+pub fn share_text(date: &str, outcome: &str, winner: Option<i64>, players: i64, streak: i64, url: &str) -> String {
+    let day = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|d| d.format("%b %-d").to_string().to_lowercase())
+        .unwrap_or_else(|_| date.to_string());
+    let winner = winner.map_or_else(|| "nobody".to_string(), group_digits);
+    let mut text = format!("i guess low · {day}\nmy pick: {outcome}\nwinner: {winner} · {players} players\n");
+    if streak >= 2 {
+        text.push_str(&format!("🔥 {streak}-day streak\n"));
+    }
+    text.push_str(url);
+    text
+}
+
+/// How a pick did, for the share text: 🟩 won, 🟥 taken by others, or 🟨
+/// picked by nobody else but not the lowest such number.
+pub fn outcome_symbol(mine: i64, count: i64, winner: Option<i64>) -> String {
+    if winner == Some(mine) {
+        "🟩 won".to_string()
+    } else if count > 1 {
+        format!("🟥 (taken by {})", count - 1)
+    } else {
+        "🟨 unique, not lowest".to_string()
+    }
+}
+
+/// A round on the "my rounds" page.
+pub struct MyRoundView {
+    pub date: String,
+    pub pick: String,
+    pub winner: Option<String>,
+    pub won: bool,
+}
+
+/// `/g/me`: a player's record and every round they played (R14.2).
+#[derive(Template)]
+#[template(path = "me.html")]
+pub struct MeTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub stats: crate::stats::PlayerStats,
+    pub best_label: Option<String>,
+    /// Newest first; the first 30, then the rest folded away.
+    pub rounds: Vec<MyRoundView>,
+    pub older: Vec<MyRoundView>,
+    /// Signed in, but not allowed to play this pool (unconfirmed email).
+    pub cannot_play: bool,
 }
 
 /// One day on the trends timeline.
@@ -399,8 +543,53 @@ pub struct TrendsTemplate {
     pub falling: Vec<MoverView>,
     /// The most picked numbers of the whole range.
     pub most: Vec<TallyView>,
-    /// How long reading and analysing the range took, e.g. "12.4 ms".
+    /// How long reading and analysing the range took, e.g. "12.4 ms". Shown
+    /// only in a test instance's collapsed details (R9.9).
     pub took: String,
+    /// What the range answers, in a sentence (R13.1).
+    pub answer: String,
+    /// Where the numbers come from: test, seeded or historical.
+    pub data_source: &'static str,
+    /// When the open round closes, for a range with nothing in it yet.
+    pub first_close: String,
+}
+
+/// What a range of rounds answers, as the trends page opens with it.
+pub fn trends_answer(range: &str, trend: &Trend) -> String {
+    let (Some(first), Some(last)) = (trend.days.first(), trend.days.last()) else {
+        return String::new();
+    };
+    let span = match range {
+        "7" => "over the last 7 days",
+        "30" => "over the last 30 days",
+        _ => "over every round so far",
+    };
+    let winners: Vec<i64> = trend
+        .days
+        .iter()
+        .filter(|d| !d.winner_outlier)
+        .filter_map(|d| d.winner)
+        .collect();
+    let won = match winners.len() {
+        0 => "nobody won a round".to_string(),
+        n => {
+            let mut sorted = winners.clone();
+            sorted.sort_unstable();
+            format!("the middle winning number was {}", group_digits(sorted[n / 2]))
+        }
+    };
+    let crowd = trend
+        .most
+        .first()
+        .map(|m| format!(", and {} was the most picked", group_digits(m.value)))
+        .unwrap_or_default();
+    let rounds = trend.days.len();
+    format!(
+        "{span} ({} to {}, {rounds} {}), {won}{crowd}.",
+        first.date,
+        last.date,
+        if rounds == 1 { "round" } else { "rounds" }
+    )
 }
 
 impl TrendsTemplate {
@@ -500,6 +689,9 @@ impl TrendsTemplate {
             falling: trend.falling.iter().map(mover).collect(),
             most: trend.most.iter().map(Into::into).collect(),
             took: String::new(),
+            answer: trends_answer(range, trend),
+            data_source: "test",
+            first_close: String::new(),
         }
     }
 }
@@ -569,6 +761,38 @@ pub struct ErrorTemplate {
     pub message: String,
 }
 
+/// What was wrong with a submitted form: a summary for the top, which takes
+/// focus, and a line for each field it concerns (R17.5).
+#[derive(Default)]
+pub struct FormErrors {
+    pub summary: Option<String>,
+    pub email: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    /// The email-or-username field on the sign-in form.
+    pub login: Option<String>,
+}
+
+impl FormErrors {
+    /// One problem, with the field it belongs to: "email", "username",
+    /// "password", "login", or "" for one that concerns the whole form.
+    pub fn on(field: &str, message: impl Into<String>) -> Self {
+        let message = message.into();
+        let mut e = FormErrors {
+            summary: Some(message.clone()),
+            ..FormErrors::default()
+        };
+        match field {
+            "email" => e.email = Some(message),
+            "username" => e.username = Some(message),
+            "password" => e.password = Some(message),
+            "login" => e.login = Some(message),
+            _ => {}
+        }
+        e
+    }
+}
+
 /// The sign-in page: every way in that this instance offers.
 #[derive(Template)]
 #[template(path = "login.html")]
@@ -578,6 +802,7 @@ pub struct LoginTemplate {
     pub test_mode: bool,
     pub impersonating: bool,
     pub notice: Option<Notice>,
+    pub errors: FormErrors,
     /// Typed into the email-or-username field last time, so a wrong password
     /// does not cost retyping it.
     pub email: String,
@@ -594,6 +819,7 @@ pub struct SignupTemplate {
     pub test_mode: bool,
     pub impersonating: bool,
     pub notice: Option<Notice>,
+    pub errors: FormErrors,
     pub enabled: bool,
     pub email: String,
     pub username: String,
@@ -707,9 +933,24 @@ pub struct ImprintTemplate {
     pub user: Option<UserView>,
     pub test_mode: bool,
     pub impersonating: bool,
-    pub name: Option<String>,
-    pub address: Option<String>,
-    pub email: Option<String>,
+    /// Who runs the site, as a sentence: see `operator_sentence`.
+    pub operator: String,
+}
+
+/// The imprint's one sentence, from whatever of name, address and contact
+/// is configured. A missing part is left out of the sentence rather than
+/// shown as a placeholder.
+pub fn operator_sentence(name: Option<&str>, address: Option<&str>, email: Option<&str>) -> String {
+    let who = match (name, address) {
+        (Some(n), Some(a)) => format!("i guess low is run by {n}, {a}."),
+        (Some(n), None) => format!("i guess low is run by {n}."),
+        (None, Some(a)) => format!("i guess low is run from {a}."),
+        (None, None) => "i guess low is run by students, for students.".to_string(),
+    };
+    match email {
+        Some(e) => format!("{who} contact: {e}"),
+        None => who,
+    }
 }
 
 /// Render a template, or fall back to a bare 500 if the template itself is broken.
