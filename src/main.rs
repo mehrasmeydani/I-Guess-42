@@ -7,6 +7,7 @@ mod demo;
 mod handlers;
 mod limits;
 mod mail;
+mod oauth;
 mod points;
 mod round;
 mod signin;
@@ -101,14 +102,18 @@ async fn main() -> Result<()> {
         .route("/g/guess", post(handlers::global_submit_guess))
         .route("/g/guess/confirm", post(handlers::global_confirm_guess))
         .route("/login", get(signin::login_page_handler))
-        .route("/login/42", get(handlers::login))
+        .route("/login/42", get(oauth::login_42))
+        .route("/login/{provider}", get(oauth::login))
+        .route("/link/{provider}", get(oauth::link))
+        .route("/auth/github/callback", get(oauth::github_callback))
+        .route("/auth/google/callback", get(oauth::google_callback))
         .route("/login/email", post(signin::login_email))
         .route("/signup", get(signin::signup_page_handler).post(signin::signup))
         .route("/verify", get(signin::verify_page).post(signin::verify))
         .route("/verify/resend", post(signin::resend_verification))
         .route("/forgot", get(signin::forgot_page).post(signin::forgot))
         .route("/reset", get(signin::reset_page_handler).post(signin::reset))
-        .route("/auth/callback", get(handlers::callback))
+        .route("/auth/callback", get(oauth::callback_42))
         .route("/logout", post(handlers::logout))
         .route("/healthz", get(handlers::healthz))
         // 404 unless ADMIN_LOGINS names the signed-in user.

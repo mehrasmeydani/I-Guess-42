@@ -187,19 +187,29 @@ pub async fn account_for_intra(db: &Db, intra_id: i64, login: &str) -> Result<Ac
     let mut tx = db.begin().await?;
     let now = ts(Utc::now());
 
-    let existing: Option<(i64, String)> =
-        sqlx::query_as("SELECT id, username FROM accounts WHERE intra_id = ?1")
-            .bind(intra_id)
-            .fetch_optional(&mut *tx)
-            .await?;
+    // The account playing as this 42 user, or else one that already signs in
+    // with this 42 login without playing the 42 pool (made while the student's
+    // campus was not allowed in), which now starts to.
+    let existing: Option<(i64, String)> = sqlx::query_as(
+        "SELECT id, username FROM accounts WHERE intra_id = ?1
+         UNION ALL
+         SELECT a.id, a.username FROM identities i JOIN accounts a ON a.id = i.account_id
+         WHERE i.provider = '42' AND i.subject = CAST(?1 AS TEXT) AND a.intra_id IS NULL
+         LIMIT 1",
+    )
+    .bind(intra_id)
+    .fetch_optional(&mut *tx)
+    .await?;
     let (id, username) = match existing {
         Some(found) => {
             sqlx::query(
-                "UPDATE accounts SET last_seen_at = ?1, verified_at = COALESCE(verified_at, ?1)
+                "UPDATE accounts SET last_seen_at = ?1, verified_at = COALESCE(verified_at, ?1),
+                                     intra_id = ?3
                  WHERE id = ?2",
             )
                 .bind(&now)
                 .bind(found.0)
+                .bind(intra_id)
                 .execute(&mut *tx)
                 .await?;
             found
@@ -606,28 +616,198 @@ pub async fn purge_expired(db: &Db) -> Result<()> {
 
 // --------------------------------------------------------- oauth states
 
-pub async fn store_oauth_state(db: &Db, state: &str) -> Result<()> {
+/// A sign-in that has left for a provider and not come back yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthState {
+    /// "42", "github" or "google": a state can only finish the flow it began.
+    pub provider: String,
+    /// Set when a signed-in account is adding this login, rather than
+    /// someone signing in with it.
+    pub link_account_id: Option<i64>,
+    /// The PKCE verifier, for providers that take one.
+    pub pkce_verifier: Option<String>,
+}
+
+pub async fn store_oauth_state(db: &Db, state: &str, flow: &OAuthState) -> Result<()> {
     let now = Utc::now();
-    sqlx::query("INSERT INTO oauth_states (state, created_at, expires_at) VALUES (?1, ?2, ?3)")
-        .bind(state)
-        .bind(ts(now))
-        .bind(ts(now + chrono::Duration::minutes(15)))
-        .execute(db)
-        .await?;
+    sqlx::query(
+        "INSERT INTO oauth_states (state, created_at, expires_at, provider, link_account_id, pkce_verifier)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )
+    .bind(state)
+    .bind(ts(now))
+    .bind(ts(now + chrono::Duration::minutes(15)))
+    .bind(&flow.provider)
+    .bind(flow.link_account_id)
+    .bind(&flow.pkce_verifier)
+    .execute(db)
+    .await?;
     Ok(())
 }
 
-/// Returns true if the state was present and unexpired. Single-use: the row is
-/// deleted whether or not it had expired.
-pub async fn consume_oauth_state(db: &Db, state: &str) -> Result<bool> {
+/// The flow a state belongs to, if it was present and unexpired. Single-use:
+/// the row is deleted in the same statement, whether or not it had expired.
+pub async fn consume_oauth_state(db: &Db, state: &str) -> Result<Option<OAuthState>> {
     let now = ts(Utc::now());
-    let rows = sqlx::query("DELETE FROM oauth_states WHERE state = ?1 AND expires_at > ?2")
-        .bind(state)
-        .bind(&now)
-        .execute(db)
-        .await?
-        .rows_affected();
-    Ok(rows > 0)
+    let row: Option<(String, Option<i64>, Option<String>, String)> = sqlx::query_as(
+        "DELETE FROM oauth_states WHERE state = ?1
+         RETURNING provider, link_account_id, pkce_verifier, expires_at",
+    )
+    .bind(state)
+    .fetch_optional(db)
+    .await?;
+    Ok(row
+        .filter(|r| r.3 > now)
+        .map(|(provider, link_account_id, pkce_verifier, _)| OAuthState {
+            provider,
+            link_account_id,
+            pkce_verifier,
+        }))
+}
+
+// ----------------------------------------------------------- identities
+
+/// The account a login belongs to, and whether it may sign in (not banned,
+/// not deleted).
+pub async fn identity_account(db: &Db, provider: &str, subject: &str) -> Result<Option<(i64, bool)>> {
+    let row = sqlx::query_as(
+        "SELECT a.id, a.banned_at IS NULL AND a.deleted_at IS NULL
+         FROM identities i JOIN accounts a ON a.id = i.account_id
+         WHERE i.provider = ?1 AND i.subject = ?2",
+    )
+    .bind(provider)
+    .bind(subject)
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
+}
+
+/// Whether some account already signs in with `email`, by password or
+/// through a provider that reported it.
+pub async fn email_in_use(db: &Db, email: &str) -> Result<bool> {
+    let (n,): (i64,) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM passwords WHERE email = ?1)
+              + (SELECT COUNT(*) FROM identities WHERE email = ?1 COLLATE NOCASE)",
+    )
+    .bind(email)
+    .fetch_one(db)
+    .await?;
+    Ok(n > 0)
+}
+
+/// What came of adding a login to an account.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Linked {
+    Added,
+    /// It was already this account's.
+    Already,
+    /// It belongs to someone else's account.
+    Elsewhere,
+}
+
+/// Adds a login to `account_id`.
+pub async fn link_identity(
+    db: &Db,
+    provider: &str,
+    subject: &str,
+    account_id: i64,
+    email: Option<&str>,
+) -> Result<Linked> {
+    let inserted = sqlx::query(
+        "INSERT INTO identities (provider, subject, account_id, email, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(provider, subject) DO NOTHING",
+    )
+    .bind(provider)
+    .bind(subject)
+    .bind(account_id)
+    .bind(email)
+    .bind(ts(Utc::now()))
+    .execute(db)
+    .await?
+    .rows_affected();
+    if inserted > 0 {
+        return Ok(Linked::Added);
+    }
+    Ok(match identity_account(db, provider, subject).await? {
+        Some((owner, _)) if owner == account_id => Linked::Already,
+        _ => Linked::Elsewhere,
+    })
+}
+
+/// A new account for someone signing in with a provider for the first time.
+/// Verified at once: the provider vouches for them. The username is built on
+/// `wanted` (already shaped by `credentials::username_from`), numbered until
+/// it is free.
+pub async fn create_provider_account(
+    db: &Db,
+    provider: &str,
+    subject: &str,
+    email: Option<&str>,
+    wanted: &str,
+    ip_hash: Option<&str>,
+) -> Result<Account> {
+    let mut tx = db.begin().await?;
+    let now = ts(Utc::now());
+    let mut username = wanted.to_string();
+    for n in 2.. {
+        let (taken,): (i64,) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM accounts WHERE username = ?1)
+                  + (SELECT COUNT(*) FROM users WHERE login = ?1 COLLATE NOCASE)",
+        )
+        .bind(&username)
+        .fetch_one(&mut *tx)
+        .await?;
+        if taken == 0 {
+            break;
+        }
+        username = format!("{wanted}-{n}");
+    }
+    let (id,): (i64,) = sqlx::query_as(
+        "INSERT INTO accounts (username, created_at, last_seen_at, verified_at, signup_ip_hash)
+         VALUES (?1, ?2, ?2, ?2, ?3) RETURNING id",
+    )
+    .bind(&username)
+    .bind(&now)
+    .bind(ip_hash)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO identities (provider, subject, account_id, email, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(provider)
+    .bind(subject)
+    .bind(id)
+    .bind(email)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Account {
+        id,
+        username,
+        intra_id: None,
+        verified: true,
+    })
+}
+
+/// Makes `account_id` play the 42 pool as `intra_id`, when a 42 login is
+/// linked to an account that started elsewhere. Refused (false) if another
+/// account already plays as that 42 user.
+pub async fn attach_intra(db: &Db, account_id: i64, intra_id: i64) -> Result<bool> {
+    let done = sqlx::query(
+        "UPDATE accounts SET intra_id = ?1, verified_at = COALESCE(verified_at, ?3)
+         WHERE id = ?2 AND (intra_id IS NULL OR intra_id = ?1)
+           AND NOT EXISTS (SELECT 1 FROM accounts WHERE intra_id = ?1 AND id != ?2)",
+    )
+    .bind(intra_id)
+    .bind(account_id)
+    .bind(ts(Utc::now()))
+    .execute(db)
+    .await?
+    .rows_affected();
+    Ok(done > 0)
 }
 
 // ---------------------------------------------------------------- game
@@ -1507,11 +1687,24 @@ mod tests {
     #[tokio::test]
     async fn oauth_state_is_single_use() {
         let t = temp_db().await;
-        store_oauth_state(&t.db, "abc").await.unwrap();
+        let flow = OAuthState {
+            provider: "github".into(),
+            link_account_id: Some(4),
+            pkce_verifier: Some("v".into()),
+        };
+        store_oauth_state(&t.db, "abc", &flow).await.unwrap();
 
-        assert!(consume_oauth_state(&t.db, "abc").await.unwrap());
-        assert!(!consume_oauth_state(&t.db, "abc").await.unwrap());
-        assert!(!consume_oauth_state(&t.db, "never-issued").await.unwrap());
+        assert_eq!(consume_oauth_state(&t.db, "abc").await.unwrap(), Some(flow));
+        assert_eq!(consume_oauth_state(&t.db, "abc").await.unwrap(), None);
+        assert_eq!(consume_oauth_state(&t.db, "never-issued").await.unwrap(), None);
+
+        // An expired one is refused, and gone all the same.
+        sqlx::query("INSERT INTO oauth_states (state, created_at, expires_at) VALUES ('old', 'x', '2000-01-01T00:00:00Z')")
+            .execute(&t.db)
+            .await
+            .unwrap();
+        assert_eq!(consume_oauth_state(&t.db, "old").await.unwrap(), None);
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM oauth_states").await, 0);
     }
 
     /// A signed-in 42 player: their `users` row, their account and a session.
@@ -1958,7 +2151,10 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(provider, "42");
-        assert!(consume_oauth_state(db, "pending").await.unwrap());
+        assert_eq!(
+            consume_oauth_state(db, "pending").await.unwrap().map(|f| f.provider),
+            Some("42".to_string())
+        );
 
         // The next sign-in of a migrated player finds their account rather
         // than making a second one.

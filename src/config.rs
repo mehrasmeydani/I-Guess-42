@@ -47,6 +47,23 @@ pub struct Config {
     /// Believe X-Forwarded-For. Only true behind a proxy that sets it, as
     /// Caddy does in compose; otherwise any visitor could claim any address.
     pub trust_proxy: bool,
+    /// The 42 intra API, `https://api.intra.42.fr`; only tests change it.
+    pub ft_api_url: String,
+    /// GitHub OAuth app. Unset: no GitHub button.
+    pub github_client_id: Option<String>,
+    pub github_client_secret: Option<String>,
+    /// GitHub accounts younger than this many days cannot make an account
+    /// here: a fresh one costs nothing, so it is the cheapest fake there is.
+    pub github_min_age_days: i64,
+    /// `https://github.com` (authorize, token) and `https://api.github.com`.
+    pub github_web_url: String,
+    pub github_api_url: String,
+    /// Google OAuth client. Unset: no Google button.
+    pub google_client_id: Option<String>,
+    pub google_client_secret: Option<String>,
+    pub google_auth_url: String,
+    pub google_token_url: String,
+    pub google_userinfo_url: String,
 }
 
 impl Config {
@@ -87,7 +104,34 @@ impl Config {
             ),
             ip_hash_key: nonempty("IP_HASH_KEY"),
             trust_proxy: opt("TRUST_PROXY", "false") == "true",
+            ft_api_url: opt("FT_API_URL", "https://api.intra.42.fr"),
+            github_client_id: nonempty("GITHUB_CLIENT_ID"),
+            github_client_secret: nonempty("GITHUB_CLIENT_SECRET"),
+            github_min_age_days: opt("GITHUB_MIN_ACCOUNT_AGE_DAYS", "30")
+                .trim()
+                .parse()
+                .context("GITHUB_MIN_ACCOUNT_AGE_DAYS must be a whole number")?,
+            github_web_url: opt("GITHUB_WEB_URL", "https://github.com"),
+            github_api_url: opt("GITHUB_API_URL", "https://api.github.com"),
+            google_client_id: nonempty("GOOGLE_CLIENT_ID"),
+            google_client_secret: nonempty("GOOGLE_CLIENT_SECRET"),
+            google_auth_url: opt("GOOGLE_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth"),
+            google_token_url: opt("GOOGLE_TOKEN_URL", "https://oauth2.googleapis.com/token"),
+            google_userinfo_url: opt(
+                "GOOGLE_USERINFO_URL",
+                "https://openidconnect.googleapis.com/v1/userinfo",
+            ),
         })
+    }
+
+    /// GitHub's client id and secret, if both are set.
+    pub fn github(&self) -> Option<(&str, &str)> {
+        Some((self.github_client_id.as_deref()?, self.github_client_secret.as_deref()?))
+    }
+
+    /// Google's client id and secret, if both are set.
+    pub fn google(&self) -> Option<(&str, &str)> {
+        Some((self.google_client_id.as_deref()?, self.google_client_secret.as_deref()?))
     }
 
     /// Whether people can sign up with an email and a password here. It needs

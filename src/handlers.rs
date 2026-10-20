@@ -957,84 +957,8 @@ pub async fn admin_clear(
 }
 
 // -------------------------------------------------------------------- auth
-
-/// Starts signing in with 42.
-pub async fn login(State(state): State<AppState>) -> Result<Response, AppError> {
-    let state_token = auth::random_token();
-    db::store_oauth_state(&state.db, &state_token).await?;
-    let url = auth::authorize_url(&state.cfg, &state_token)?;
-    Ok(Redirect::to(&url).into_response())
-}
-
-#[derive(Deserialize)]
-pub struct CallbackQuery {
-    code: Option<String>,
-    state: Option<String>,
-    error: Option<String>,
-    error_description: Option<String>,
-}
-
-pub async fn callback(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Query(query): Query<CallbackQuery>,
-) -> Result<Response, AppError> {
-    if let Some(err) = query.error {
-        let detail = query.error_description.unwrap_or(err);
-        // Askama escapes this on the way into the page.
-        return Ok(error_page(
-            StatusCode::BAD_REQUEST,
-            &format!("42 refused the sign-in: {detail}"),
-        ));
-    }
-
-    let (Some(code), Some(state_token)) = (query.code, query.state) else {
-        return Ok(error_page(
-            StatusCode::BAD_REQUEST,
-            "That sign-in link is incomplete. Start again from the home page.",
-        ));
-    };
-
-    if !db::consume_oauth_state(&state.db, &state_token).await? {
-        return Ok(error_page(
-            StatusCode::BAD_REQUEST,
-            "That sign-in link has expired or was already used. Start again from the home page.",
-        ));
-    }
-
-    let access_token = auth::exchange_code(&state.http, &state.cfg, &code).await?;
-    let me = auth::fetch_me(&state.http, &access_token).await?;
-
-    // Turned away before anything is stored: no user row, no session.
-    let campus = me.primary_campus_id();
-    if !state.cfg.campus_allowed(campus) {
-        tracing::info!(login = %me.login, ?campus, "refused sign-in from another campus");
-        let home = me
-            .primary_campus_name()
-            .map(|name| format!(" Your intra account belongs to 42 {name}."))
-            .unwrap_or_default();
-        return Ok(error_page(
-            StatusCode::FORBIDDEN,
-            &format!("This game is only open to students of this campus.{home}"),
-        ));
-    }
-
-    db::upsert_user(
-        &state.db,
-        me.id,
-        &me.login,
-        me.display_name(),
-        me.image_url(),
-    )
-    .await?;
-
-    let account = db::account_for_intra(&state.db, me.id, &me.login).await?;
-    let session = auth::random_token();
-    db::create_session(&state.db, &session, account.id, auth::SESSION_TTL_DAYS).await?;
-
-    let jar = jar.add(auth::session_cookie(session, state.cfg.secure_cookies));
-    Ok((jar, Redirect::to("/")).into_response())
-}
+//
+// Signing in lives in oauth.rs (42, GitHub, Google) and signin.rs (email).
 
 pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
     if let Some(token) = auth::session_token(&jar) {

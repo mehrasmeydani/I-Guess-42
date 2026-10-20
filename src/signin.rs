@@ -57,7 +57,7 @@ fn minutes(d: std::time::Duration) -> u64 {
     d.as_secs().div_ceil(60).max(1)
 }
 
-async fn signed_in_to(state: &AppState, jar: CookieJar, account_id: i64, to: &str) -> Result<Response, AppError> {
+pub(crate) async fn signed_in_to(state: &AppState, jar: CookieJar, account_id: i64, to: &str) -> Result<Response, AppError> {
     let token = auth::random_token();
     db::create_session(&state.db, &token, account_id, auth::SESSION_TTL_DAYS).await?;
     let jar = jar.add(auth::session_cookie(token, state.cfg.secure_cookies));
@@ -104,8 +104,8 @@ fn login_page(state: &AppState, viewer: Option<Viewer>, notice: Option<Notice>, 
         notice,
         email,
         email_signup: state.cfg.email_signup(),
-        github: false,
-        google: false,
+        github: state.cfg.github().is_some(),
+        google: state.cfg.google().is_some(),
     }
 }
 
