@@ -34,7 +34,8 @@ deadline, and separate numbers:
 
 One person has one account however many ways they sign in; the account page
 (`/account`) adds and removes them. See [SPEC.md](SPEC.md) for the whole plan,
-including the points and betting still to come.
+including the points and betting still to come. What is left to do by hand before
+it goes live is in [TODO.md](TODO.md).
 
 ## Stack
 
