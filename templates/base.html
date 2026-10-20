@@ -31,11 +31,16 @@
   {% endif %}
 
   <header class="top">
-    <a class="brand" href="/">i guess <b>low</b></a>
+    <a class="brand" href="{{ pool.base() }}/">i guess <b>low</b></a>
     <nav aria-label="main">
-      <a {% block nav_round %}{% endblock %} href="/">round</a>
-      <a {% block nav_results %}{% endblock %} href="/results">results</a>
-      <a {% block nav_trends %}{% endblock %} href="/trends">trends</a>
+      <a {% block nav_round %}{% endblock %} href="{{ pool.base() }}/">round</a>
+      <a {% block nav_results %}{% endblock %} href="{{ pool.base() }}/results">results</a>
+      <a {% block nav_trends %}{% endblock %} href="{{ pool.base() }}/trends">trends</a>
+    </nav>
+    {# Two games, one site: the switch keeps you on the same kind of page. #}
+    <nav class="pools" aria-label="pool">
+      <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/">42 vienna</a>
+      <a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/">global</a>
     </nav>
     <div class="status">
       {# The spinner glyphs are decoration; only the one-off message is read out. #}

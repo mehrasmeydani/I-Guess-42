@@ -75,6 +75,7 @@ impl IntoResponse for AppError {
 
 pub fn error_page(status: StatusCode, message: &str) -> Response {
     let body = templates::render(&ErrorTemplate {
+        pool: crate::db::Pool::Vienna,
         user: None,
         test_mode: false,
         impersonating: false,

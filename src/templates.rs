@@ -2,7 +2,7 @@ use askama::Template;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 
-use crate::db::{GuessRow, LeaderboardRow, RoundSummary, User, Viewer};
+use crate::db::{GuessRow, LeaderboardRow, Pool, RoundSummary, User, Viewer};
 use crate::round;
 use crate::stats::{self, Chart, Tally, Trend};
 
@@ -57,8 +57,6 @@ pub fn group_digits(n: i64) -> String {
 pub struct UserView {
     pub login: String,
     pub display_name: String,
-    /// Plays the 42 pool: a 42 student, or a stand-in on a test instance.
-    pub is_42: bool,
 }
 
 impl From<User> for UserView {
@@ -66,7 +64,6 @@ impl From<User> for UserView {
         Self {
             login: u.login,
             display_name: u.display_name,
-            is_42: true,
         }
     }
 }
@@ -80,7 +77,6 @@ impl From<Viewer> for UserView {
             None => Self {
                 login: v.account.username.clone(),
                 display_name: v.account.username,
-                is_42: false,
             },
         }
     }
@@ -178,6 +174,8 @@ impl Notice {
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct IndexTemplate {
+    /// Which game the page is about; picks link prefixes and pool-only blocks.
+    pub pool: Pool,
     pub user: Option<UserView>,
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
@@ -205,6 +203,9 @@ pub struct IndexTemplate {
     /// `Config::points_announced`.
     pub points_announced: bool,
     pub notice: Option<Notice>,
+    /// Whether the visitor may guess in this pool: a 42 player in the 42
+    /// pool, a verified account in the global one. Signed in is not enough.
+    pub can_play: bool,
 }
 
 /// The "are you sure?" step. Carries the value in both a display form and a
@@ -212,6 +213,8 @@ pub struct IndexTemplate {
 #[derive(Template)]
 #[template(path = "confirm.html")]
 pub struct ConfirmTemplate {
+    /// Which game the page is about; picks link prefixes and pool-only blocks.
+    pub pool: Pool,
     pub user: Option<UserView>,
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
@@ -225,6 +228,8 @@ pub struct ConfirmTemplate {
 #[derive(Template)]
 #[template(path = "results.html")]
 pub struct ResultsTemplate {
+    /// Which game the page is about; picks link prefixes and pool-only blocks.
+    pub pool: Pool,
     pub user: Option<UserView>,
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
@@ -271,6 +276,8 @@ impl From<&Tally> for TallyView {
 #[derive(Template)]
 #[template(path = "day.html")]
 pub struct DayTemplate {
+    /// Which game the page is about; picks link prefixes and pool-only blocks.
+    pub pool: Pool,
     pub user: Option<UserView>,
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
@@ -358,6 +365,8 @@ pub struct MoverView {
 #[derive(Template)]
 #[template(path = "trends.html")]
 pub struct TrendsTemplate {
+    /// Which game the page is about; picks link prefixes and pool-only blocks.
+    pub pool: Pool,
     pub user: Option<UserView>,
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
@@ -385,6 +394,7 @@ pub struct TrendsTemplate {
 
 impl TrendsTemplate {
     pub fn build(
+        pool: Pool,
         user: Option<UserView>,
         test_mode: bool,
         impersonating: bool,
@@ -450,6 +460,7 @@ impl TrendsTemplate {
             ]
         });
         Self {
+            pool,
             user,
             test_mode,
             impersonating,
@@ -502,9 +513,18 @@ impl From<GuessRow> for AdminGuessView {
     }
 }
 
+/// One pool on the admin page: its form value, its name, its open round.
+pub struct AdminPoolView {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub guesses: Vec<AdminGuessView>,
+}
+
 #[derive(Template)]
 #[template(path = "admin.html")]
 pub struct AdminTemplate {
+    /// Which game the page is about; picks link prefixes and pool-only blocks.
+    pub pool: Pool,
     pub user: Option<UserView>,
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
@@ -516,8 +536,8 @@ pub struct AdminTemplate {
     pub round_label: String,
     pub deadline_human: String,
     pub time_left: String,
-    /// The open round's guesses, which players are not allowed to see.
-    pub guesses: Vec<AdminGuessView>,
+    /// Each pool's open round, which players are not allowed to see.
+    pub pools: Vec<AdminPoolView>,
     /// Existing stand-in accounts, offered as one-click sign-ins.
     pub demo_users: Vec<UserView>,
     /// Generated history: (bot players, their guesses).
@@ -528,6 +548,8 @@ pub struct AdminTemplate {
 #[derive(Template)]
 #[template(path = "error.html")]
 pub struct ErrorTemplate {
+    /// Which game the page is about; picks link prefixes and pool-only blocks.
+    pub pool: Pool,
     pub user: Option<UserView>,
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
@@ -554,6 +576,7 @@ pub fn render<T: Template>(template: &T) -> Response {
 #[cfg(test)]
 mod tests {
     use super::{group_digits, TrendsTemplate};
+    use crate::db::Pool;
     use crate::stats::{trend, DayTally};
     use askama::Template;
 
@@ -580,7 +603,7 @@ mod tests {
             value: 2_147_483_648,
             count: 1,
         });
-        let html = TrendsTemplate::build(None, false, false, "7", &trend(&rows))
+        let html = TrendsTemplate::build(Pool::Vienna, None, false, false, "7", &trend(&rows))
             .render()
             .unwrap();
 

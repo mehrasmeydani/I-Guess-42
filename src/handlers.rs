@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::app::{error_page, AppError, AppState};
 use crate::auth;
-use crate::db::{self, Viewer};
+use crate::db::{self, Pool, Viewer};
 use crate::round::Round;
 use crate::stats;
 use crate::templates::{
@@ -61,18 +61,52 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
         ),
         "login_required" => Notice::error("Sign in with 42 before guessing."),
         "not_42" => Notice::error("This round is for 42 Vienna students: sign in with 42 to play it."),
+        "signin" => Notice::error("Sign in before guessing."),
+        "unverified" => Notice::error(
+            "Verify your email address to play: open the link we sent you.",
+        ),
         _ => return None,
     })
 }
 
-/// Whether this visitor may be shown who played. A login and a real name are
-/// a 42 student's personal data, so they leave the server only for a visitor
-/// who plays as a 42 student; everyone else gets `templates::MASK`.
+/// Whether this visitor may be shown who played in `pool`.
 ///
-/// Being signed in is not enough: an account need not be a 42 one, and a
-/// stranger who made an account must not be able to read the 42 pool's names.
-fn names_visible(viewer: Option<&Viewer>) -> bool {
-    viewer.is_some_and(|v| v.intra.is_some())
+/// In the 42 pool a login and a real name are a 42 student's personal data,
+/// so they leave the server only for a visitor who plays as a 42 student;
+/// being signed in is not enough, since an account need not be a 42 one.
+/// In the global pool everyone goes by a username they chose, shown to anyone
+/// signed in. Everyone else gets `templates::MASK`.
+fn names_visible(pool: Pool, viewer: Option<&Viewer>) -> bool {
+    match pool {
+        Pool::Vienna => viewer.is_some_and(|v| v.intra.is_some()),
+        Pool::Global => viewer.is_some(),
+    }
+}
+
+/// The id this visitor's guesses in `pool` are stored under, or `None` if
+/// they may look at the pool but not play it: the 42 pool wants a 42 player
+/// (intra id), the global one a verified account (account id).
+fn player_in(pool: Pool, viewer: &Viewer) -> Option<i64> {
+    match pool {
+        Pool::Vienna => viewer.intra.as_ref().map(|u| u.id),
+        Pool::Global => viewer.account.verified.then_some(viewer.account.id),
+    }
+}
+
+/// Where a pool's front page lives, for redirects back to it.
+fn home(pool: Pool) -> &'static str {
+    match pool {
+        Pool::Vienna => "/",
+        Pool::Global => "/g",
+    }
+}
+
+/// Why `viewer` cannot play `pool`, as a notice code for its front page.
+fn refusal(pool: Pool) -> &'static str {
+    match pool {
+        Pool::Vienna => "not_42",
+        Pool::Global => "unverified",
+    }
 }
 
 #[derive(Deserialize)]
@@ -85,14 +119,31 @@ pub async fn index(
     jar: CookieJar,
     Query(query): Query<IndexQuery>,
 ) -> Result<Response, AppError> {
+    index_in(Pool::Vienna, state, jar, query).await
+}
+
+pub async fn global_index(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<IndexQuery>,
+) -> Result<Response, AppError> {
+    index_in(Pool::Global, state, jar, query).await
+}
+
+async fn index_in(
+    pool: Pool,
+    state: AppState,
+    jar: CookieJar,
+    query: IndexQuery,
+) -> Result<Response, AppError> {
     let now = state.now();
     let round = Round::current(now);
     let round_key = round.key();
 
     let viewer = current_viewer(&state, &jar).await?;
-    let player = viewer.as_ref().and_then(|v| v.intra.as_ref());
+    let player = viewer.as_ref().and_then(|v| player_in(pool, v));
     let my_guess_label = match player {
-        Some(p) => db::my_guess(&state.db, &round_key, p.id)
+        Some(p) => db::my_guess(&state.db, pool, &round_key, p)
             .await?
             .map(group_digits),
         None => None,
@@ -100,11 +151,12 @@ pub async fn index(
 
     let last_round = db::round_summary(
         &state.db,
+        pool,
         &round_key,
         &round.previous_date().format("%Y-%m-%d").to_string(),
     )
     .await?
-    .map(|r| RoundView::new(r, names_visible(viewer.as_ref())));
+    .map(|r| RoundView::new(r, names_visible(pool, viewer.as_ref())));
 
     // For half an hour after 12:42 the round that just closed is announced
     // over the page: it is the one moment the game has, and without this it
@@ -115,13 +167,17 @@ pub async fn index(
         .filter(|left| *left > 0 && last_round.is_some());
 
     // The points line is for players, not for the shop window: it says what
-    // this round is worth to *you*, so it waits until there is a you.
-    let points_announced = player.is_some() && state.cfg.points_announced();
+    // this round is worth to *you*, so it waits until there is a you. Only
+    // the 42 pool pays coalition points.
+    let points_announced =
+        pool == Pool::Vienna && player.is_some() && state.cfg.points_announced();
 
     let seconds_left = round.seconds_left(now);
     let (progress_pct, progress_bar) = stats::progress_bar(seconds_left);
-    let guess_count = db::guess_count(&state.db, &round_key).await?;
+    let guess_count = db::guess_count(&state.db, pool, &round_key).await?;
     Ok(templates::render(&IndexTemplate {
+        pool,
+        can_play: player.is_some(),
         user: viewer.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
@@ -176,19 +232,36 @@ pub async fn results(
     jar: CookieJar,
     Query(query): Query<ResultsQuery>,
 ) -> Result<Response, AppError> {
+    results_in(Pool::Vienna, state, jar, query).await
+}
+
+pub async fn global_results(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<ResultsQuery>,
+) -> Result<Response, AppError> {
+    results_in(Pool::Global, state, jar, query).await
+}
+
+async fn results_in(
+    pool: Pool,
+    state: AppState,
+    jar: CookieJar,
+    query: ResultsQuery,
+) -> Result<Response, AppError> {
     if let Some(date) = query.date.as_deref().filter(|d| !d.is_empty()) {
         // Only a well-formed date is echoed into a URL.
         if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok() {
-            return Ok(Redirect::to(&format!("/day/{date}")).into_response());
+            return Ok(Redirect::to(&format!("{}/day/{date}", pool.base())).into_response());
         }
     }
 
     let round_key = Round::current(state.now()).key();
     let viewer = current_viewer(&state, &jar).await?;
 
-    let named = names_visible(viewer.as_ref());
+    let named = names_visible(pool, viewer.as_ref());
 
-    let all = db::closed_rounds(&state.db, &round_key, HISTORY_LIMIT).await?;
+    let all = db::closed_rounds(&state.db, pool, &round_key, HISTORY_LIMIT).await?;
     let total_rounds = all.len();
 
     // The round that closed most recently, with the same chart the day page
@@ -198,7 +271,7 @@ pub async fn results(
     // more work than this.
     let (latest, chart) = match all.first().cloned() {
         Some(newest) => {
-            let tallies = db::round_tallies(&state.db, &newest.round_date).await?;
+            let tallies = db::round_tallies(&state.db, pool, &newest.round_date).await?;
             let day = stats::analyse(&tallies);
             let chart = stats::day_chart(&tallies, &day);
             (Some(RoundView::new(newest, named)), Some(chart))
@@ -224,7 +297,7 @@ pub async fn results(
         .map(|r| RoundView::new(r, named))
         .collect();
 
-    let mut leaders: Vec<templates::LeaderView> = db::leaderboard(&state.db, &round_key, LEADERBOARD_LIMIT)
+    let mut leaders: Vec<templates::LeaderView> = db::leaderboard(&state.db, pool, &round_key, LEADERBOARD_LIMIT)
         .await?
         .into_iter()
         .map(|r| templates::LeaderView::new(r, named))
@@ -232,6 +305,7 @@ pub async fn results(
     let rest = leaders.split_off(leaders.len().min(PODIUM));
 
     Ok(templates::render(&ResultsTemplate {
+        pool,
         user: viewer.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
@@ -254,6 +328,23 @@ pub async fn day(
     jar: CookieJar,
     Path(date): Path<String>,
 ) -> Result<Response, AppError> {
+    day_in(Pool::Vienna, state, jar, date).await
+}
+
+pub async fn global_day(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(date): Path<String>,
+) -> Result<Response, AppError> {
+    day_in(Pool::Global, state, jar, date).await
+}
+
+async fn day_in(
+    pool: Pool,
+    state: AppState,
+    jar: CookieJar,
+    date: String,
+) -> Result<Response, AppError> {
     let no_such_day = || error_page(StatusCode::NOT_FOUND, "No closed round on that day.");
 
     // Only well-formed dates reach the database.
@@ -266,28 +357,29 @@ pub async fn day(
     // round_summary only answers for closed rounds, which is what keeps the
     // open round's numbers secret: no summary, no tallies.
     let open_round = Round::current(state.now()).key();
-    let Some(summary) = db::round_summary(&state.db, &open_round, &date).await? else {
+    let Some(summary) = db::round_summary(&state.db, pool, &open_round, &date).await? else {
         return Ok(no_such_day());
     };
 
-    let tallies = db::round_tallies(&state.db, &date).await?;
+    let tallies = db::round_tallies(&state.db, pool, &date).await?;
     let stats = stats::analyse(&tallies);
     let chart = stats::day_chart(&tallies, &stats);
     let viewer = current_viewer(&state, &jar).await?;
-    let named = names_visible(viewer.as_ref());
+    let named = names_visible(pool, viewer.as_ref());
 
     // The neighbouring rounds, so one day leads to the next without a detour
     // through /results. Backwards by the listful, forwards one step, which is
     // all it takes to climb back out of the history.
-    let earlier: Vec<RoundView> = db::rounds_before(&state.db, &open_round, &date, DAY_HISTORY)
+    let earlier: Vec<RoundView> = db::rounds_before(&state.db, pool, &open_round, &date, DAY_HISTORY)
         .await?
         .into_iter()
         .map(|r| RoundView::new(r, named))
         .collect();
-    let newer = db::round_after(&state.db, &open_round, &date).await?;
-    let total_rounds = db::closed_round_count(&state.db, &open_round).await?;
+    let newer = db::round_after(&state.db, pool, &open_round, &date).await?;
+    let total_rounds = db::closed_round_count(&state.db, pool, &open_round).await?;
 
     Ok(templates::render(&DayTemplate {
+        pool,
         user: viewer.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
@@ -314,6 +406,23 @@ pub async fn trends(
     jar: CookieJar,
     Query(query): Query<TrendsQuery>,
 ) -> Result<Response, AppError> {
+    trends_in(Pool::Vienna, state, jar, query).await
+}
+
+pub async fn global_trends(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<TrendsQuery>,
+) -> Result<Response, AppError> {
+    trends_in(Pool::Global, state, jar, query).await
+}
+
+async fn trends_in(
+    pool: Pool,
+    state: AppState,
+    jar: CookieJar,
+    query: TrendsQuery,
+) -> Result<Response, AppError> {
     let (range, days) = match query.days.as_deref() {
         Some("30") => ("30", Some(30)),
         Some("all") => ("all", None),
@@ -335,9 +444,10 @@ pub async fn trends(
     // Timed from the query to the finished view model, and shown on the page:
     // an honest number for how heavy the analysis is.
     let started = std::time::Instant::now();
-    let rows = db::range_tallies(&state.db, &from, &open_round).await?;
+    let rows = db::range_tallies(&state.db, pool, &from, &open_round).await?;
     let trend = stats::trend(&rows);
     let mut page = TrendsTemplate::build(
+        pool,
         viewer.map(UserView::from),
         state.cfg.test_mode(),
         auth::admin_return_token(&jar).is_some(),
@@ -387,29 +497,70 @@ pub async fn submit_guess(
     jar: CookieJar,
     Form(form): Form<GuessForm>,
 ) -> Result<Response, AppError> {
-    let Some(viewer) = current_viewer(&state, &jar).await? else {
-        return Ok(Redirect::to("/?msg=login_required").into_response());
+    submit_guess_in(Pool::Vienna, state, jar, form).await
+}
+
+pub async fn global_submit_guess(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<GuessForm>,
+) -> Result<Response, AppError> {
+    submit_guess_in(Pool::Global, state, jar, form).await
+}
+
+/// Back to the pool's front page with a notice code.
+fn back(pool: Pool, code: &str) -> Response {
+    Redirect::to(&format!("{}?msg={code}", home(pool))).into_response()
+}
+
+/// The signed-in visitor and the id they play `pool` as, or the redirect
+/// that turns them away: not signed in, or not allowed in this pool.
+async fn player_or_back(
+    pool: Pool,
+    state: &AppState,
+    jar: &CookieJar,
+) -> Result<Result<(Viewer, i64), Response>, AppError> {
+    let Some(viewer) = current_viewer(state, jar).await? else {
+        let code = match pool {
+            Pool::Vienna => "login_required",
+            Pool::Global => "signin",
+        };
+        return Ok(Err(back(pool, code)));
     };
-    let Some(player) = viewer.intra.clone() else {
-        return Ok(Redirect::to("/?msg=not_42").into_response());
+    match player_in(pool, &viewer) {
+        Some(player) => Ok(Ok((viewer, player))),
+        None => Ok(Err(back(pool, refusal(pool)))),
+    }
+}
+
+async fn submit_guess_in(
+    pool: Pool,
+    state: AppState,
+    jar: CookieJar,
+    form: GuessForm,
+) -> Result<Response, AppError> {
+    let (viewer, player) = match player_or_back(pool, &state, &jar).await? {
+        Ok(found) => found,
+        Err(away) => return Ok(away),
     };
 
     let value = match parse_guess(&form.guess) {
         Ok(v) => v,
-        Err(code) => return Ok(Redirect::to(&format!("/?msg={code}")).into_response()),
+        Err(code) => return Ok(back(pool, code)),
     };
 
     let round = Round::current(state.now());
     let round_key = round.key();
 
-    if db::my_guess(&state.db, &round_key, player.id)
+    if db::my_guess(&state.db, pool, &round_key, player)
         .await?
         .is_some()
     {
-        return Ok(Redirect::to("/?msg=already").into_response());
+        return Ok(back(pool, "already"));
     }
 
     Ok(templates::render(&ConfirmTemplate {
+        pool,
         user: Some(UserView::from(viewer)),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
@@ -428,32 +579,47 @@ pub async fn confirm_guess(
     jar: CookieJar,
     Form(form): Form<GuessForm>,
 ) -> Result<Response, AppError> {
-    let Some(viewer) = current_viewer(&state, &jar).await? else {
-        return Ok(Redirect::to("/?msg=login_required").into_response());
-    };
-    let Some(player) = viewer.intra.clone() else {
-        return Ok(Redirect::to("/?msg=not_42").into_response());
+    confirm_guess_in(Pool::Vienna, state, jar, form).await
+}
+
+pub async fn global_confirm_guess(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<GuessForm>,
+) -> Result<Response, AppError> {
+    confirm_guess_in(Pool::Global, state, jar, form).await
+}
+
+async fn confirm_guess_in(
+    pool: Pool,
+    state: AppState,
+    jar: CookieJar,
+    form: GuessForm,
+) -> Result<Response, AppError> {
+    let player = match player_or_back(pool, &state, &jar).await? {
+        Ok((_, player)) => player,
+        Err(away) => return Ok(away),
     };
 
     let value = match parse_guess(&form.guess) {
         Ok(v) => v,
-        Err(code) => return Ok(Redirect::to(&format!("/?msg={code}")).into_response()),
+        Err(code) => return Ok(back(pool, code)),
     };
 
     // If the deadline passed between the two steps, refuse rather than
     // quietly committing an irreversible guess to a round they never saw.
     let round_key = Round::current(state.now()).key();
     if form.round != round_key {
-        return Ok(Redirect::to("/?msg=rolled").into_response());
+        return Ok(back(pool, "rolled"));
     }
 
-    let msg = if db::insert_guess(&state.db, &round_key, player.id, value, true).await? {
+    let msg = if db::insert_guess(&state.db, pool, &round_key, player, value, true).await? {
         "saved"
     } else {
         // Lost a race with another tab; the first guess stands.
         "already"
     };
-    Ok(Redirect::to(&format!("/?msg={msg}")).into_response())
+    Ok(back(pool, msg))
 }
 
 // ------------------------------------------------------------------- admin
@@ -498,6 +664,7 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
 
     let last_round = db::round_summary(
         &state.db,
+        Pool::Vienna,
         &round_key,
         &round.previous_date().format("%Y-%m-%d").to_string(),
     )
@@ -506,6 +673,7 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
     .map(|r| RoundView::new(r, true));
 
     Ok(templates::render(&AdminTemplate {
+        pool: Pool::Vienna,
         user: Some(UserView::from(viewer)),
         test_mode: true,
         impersonating: auth::admin_return_token(&jar).is_some(),
@@ -524,11 +692,26 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
         round_label: crate::round::format_round_date(&round_key),
         deadline_human: round.deadline_human(),
         time_left: crate::round::format_duration(round.seconds_left(now)),
-        guesses: db::round_guesses(&state.db, &round_key)
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect(),
+        pools: vec![
+            templates::AdminPoolView {
+                key: "vienna",
+                label: "42 vienna",
+                guesses: db::round_guesses(&state.db, Pool::Vienna, &round_key)
+                    .await?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+            },
+            templates::AdminPoolView {
+                key: "global",
+                label: "global",
+                guesses: db::round_guesses(&state.db, Pool::Global, &round_key)
+                    .await?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+            },
+        ],
         demo_counts: db::demo_counts(&state.db).await?,
         demo_users: db::demo_users(&state.db)
             .await?
@@ -572,6 +755,9 @@ pub async fn admin_clock(
 pub struct FakeGuessForm {
     login: String,
     guess: String,
+    /// "vienna" (the default) or "global".
+    #[serde(default)]
+    pool: Option<String>,
     /// Present only when the checkbox is ticked; HTML omits unchecked boxes.
     #[serde(default)]
     ghost: Option<String>,
@@ -600,10 +786,17 @@ pub async fn admin_fake_guess(
         Some(u) => u,
         None => db::create_test_user(&state.db, &login).await?,
     };
+    // The global pool is keyed by account; a stand-in gets one like anyone
+    // signing in, and so plays both pools.
+    let pool = admin_pool(form.pool.as_deref());
+    let id = match pool {
+        Pool::Vienna => player.id,
+        Pool::Global => db::account_for_intra(&state.db, player.id, &player.login).await?.id,
+    };
 
     let participates = form.ghost.is_none();
     let round_key = Round::current(state.now()).key();
-    let msg = if db::insert_guess(&state.db, &round_key, player.id, value, participates).await? {
+    let msg = if db::insert_guess(&state.db, pool, &round_key, id, value, participates).await? {
         if participates {
             "added"
         } else {
@@ -696,6 +889,22 @@ pub async fn admin_return(
 #[derive(Deserialize)]
 pub struct DemoForm {
     days: i64,
+    #[serde(default)]
+    pool: Option<String>,
+}
+
+/// Which pool an admin form is about: "global", or the 42 pool by default.
+fn admin_pool(value: Option<&str>) -> Pool {
+    match value {
+        Some("global") => Pool::Global,
+        _ => Pool::Vienna,
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PoolForm {
+    #[serde(default)]
+    pool: Option<String>,
 }
 
 /// Fills the closed rounds before today with random bot guesses, so the
@@ -713,7 +922,7 @@ pub async fn admin_demo(
     // Generated before any await: the thread-local RNG cannot be held across one.
     let guesses = crate::demo::generate(&mut rand::thread_rng(), last_closed, days);
     let started = std::time::Instant::now();
-    let added = db::insert_demo(&state.db, &guesses).await?;
+    let added = db::insert_demo(&state.db, admin_pool(form.pool.as_deref()), &guesses).await?;
     tracing::info!(days, added, took = ?started.elapsed(), "generated demo history");
     Ok(Redirect::to("/admin").into_response())
 }
@@ -732,12 +941,13 @@ pub async fn admin_demo_remove(
 pub async fn admin_clear(
     State(state): State<AppState>,
     jar: CookieJar,
+    Form(form): Form<PoolForm>,
 ) -> Result<Response, AppError> {
     if require_admin(&state, &jar).await?.is_none() {
         return Ok(admin_gone());
     }
     let round_key = Round::current(state.now()).key();
-    db::clear_round(&state.db, &round_key).await?;
+    db::clear_round(&state.db, admin_pool(form.pool.as_deref()), &round_key).await?;
     Ok(Redirect::to("/admin?msg=cleared").into_response())
 }
 
@@ -847,6 +1057,7 @@ pub async fn not_found() -> Response {
 #[cfg(test)]
 mod tests {
     use super::{names_visible, parse_guess, round_matches};
+    use crate::db::Pool;
     use crate::db::RoundSummary;
 
     fn round(date: &str, winner: Option<(&str, i64)>) -> RoundSummary {
@@ -896,7 +1107,7 @@ mod tests {
         use crate::templates::{LeaderView, RoundView, MASK};
 
         let student = Viewer {
-            account: Account { id: 1, username: "megardes".to_string(), intra_id: Some(7) },
+            account: Account { id: 1, username: "megardes".to_string(), intra_id: Some(7), verified: true },
             intra: Some(User {
                 id: 7,
                 login: "megardes".to_string(),
@@ -907,12 +1118,16 @@ mod tests {
         // Signed in, but not through 42: a stranger with an account must not
         // be able to read the 42 pool's logins.
         let stranger = Viewer {
-            account: Account { id: 2, username: "stranger".to_string(), intra_id: None },
+            account: Account { id: 2, username: "stranger".to_string(), intra_id: None, verified: true },
             intra: None,
         };
-        assert!(names_visible(Some(&student)));
-        assert!(!names_visible(Some(&stranger)));
-        assert!(!names_visible(None));
+        assert!(names_visible(Pool::Vienna, Some(&student)));
+        assert!(!names_visible(Pool::Vienna, Some(&stranger)));
+        assert!(!names_visible(Pool::Vienna, None));
+        // The global pool goes by chosen usernames, shown to anyone signed in.
+        assert!(names_visible(Pool::Global, Some(&student)));
+        assert!(names_visible(Pool::Global, Some(&stranger)));
+        assert!(!names_visible(Pool::Global, None));
 
         let r = round("2026-08-14", Some(("megardes", 1_337)));
         let shown = RoundView::new(r.clone(), true).winner.unwrap();
@@ -953,7 +1168,7 @@ mod tests {
         use crate::app::AppState;
         use crate::auth;
         use crate::config::Config;
-        use crate::db::{self, test_support::{temp_db, TempDb}};
+        use crate::db::{self, Pool, test_support::{temp_db, TempDb}};
         use crate::handlers::{self, GuessForm, ImpersonateForm, ResultsQuery};
         use crate::round::Round;
 
@@ -1100,7 +1315,7 @@ mod tests {
             stranger(&t.db, "stranger", "x").await;
             // A closed round that megardes won.
             let yesterday = Round::current(state.now()).previous_date().format("%Y-%m-%d").to_string();
-            db::insert_guess(&t.db, &yesterday, 1001, 3, true).await.unwrap();
+            db::insert_guess(&t.db, Pool::Vienna, &yesterday, 1001, 3, true).await.unwrap();
 
             let page = |token: &'static str, q: &str| {
                 let state = state.clone();
@@ -1123,6 +1338,159 @@ mod tests {
             // Nor find out by searching for the login.
             assert!(page("x", "megardes").await.contains("no round matches"));
             assert!(!page("s", "megardes").await.contains("no round matches"));
+        }
+
+        /// A stranger whose account is verified, as a GitHub, Google or
+        /// confirmed email sign-in will be.
+        async fn verified(db: &db::Db, username: &str, token: &str) -> i64 {
+            stranger(db, username, token).await;
+            let v = db::viewer_for_session(db, token).await.unwrap().unwrap();
+            sqlx::query("UPDATE accounts SET verified_at = 'x' WHERE id = ?1")
+                .bind(v.account.id)
+                .execute(db)
+                .await
+                .unwrap();
+            v.account.id
+        }
+
+        async fn global_guesses(db: &db::Db) -> Vec<(i64, i64)> {
+            sqlx::query_as("SELECT user_id, value FROM global_guesses ORDER BY user_id")
+                .fetch_all(db)
+                .await
+                .unwrap()
+        }
+
+        async fn global_page(state: &AppState, token: Option<&str>) -> String {
+            let jar = token.map(jar).unwrap_or_default();
+            body(
+                handlers::global_index(State(state.clone()), jar, Query(handlers::IndexQuery { msg: None }))
+                    .await
+                    .unwrap(),
+            )
+            .await
+        }
+
+        #[tokio::test]
+        async fn anyone_verified_plays_the_global_pool_under_their_account() {
+            let (t, state) = app(&[]).await;
+            let ann = verified(&t.db, "ann", "a").await;
+
+            let html = global_page(&state, Some("a")).await;
+            assert!(html.contains(r#"action="/g/guess""#), "the form posts to the global pool");
+
+            let resp = handlers::global_submit_guess(State(state.clone()), jar("a"), guess(&state, "7"))
+                .await
+                .unwrap();
+            assert!(body(resp).await.contains(r#"action="/g/guess/confirm""#));
+            let resp = handlers::global_confirm_guess(State(state.clone()), jar("a"), guess(&state, "7"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/g?msg=saved");
+            assert_eq!(global_guesses(&t.db).await, [(ann, 7)]);
+            assert!(guesses(&t.db).await.is_empty(), "the 42 pool is untouched");
+
+            let resp = handlers::global_confirm_guess(State(state.clone()), jar("a"), guess(&state, "3"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/g?msg=already");
+        }
+
+        #[tokio::test]
+        async fn an_unverified_account_sees_the_global_pool_but_cannot_play() {
+            let (t, state) = app(&[]).await;
+            stranger(&t.db, "new", "n").await;
+
+            let html = global_page(&state, Some("n")).await;
+            assert!(!html.contains(r#"action="/g/guess""#));
+            assert!(html.contains("verify your email"));
+            for resp in [
+                handlers::global_submit_guess(State(state.clone()), jar("n"), guess(&state, "7")).await.unwrap(),
+                handlers::global_confirm_guess(State(state.clone()), jar("n"), guess(&state, "7")).await.unwrap(),
+            ] {
+                assert_eq!(location(&resp), "/g?msg=unverified");
+            }
+            assert!(global_guesses(&t.db).await.is_empty());
+
+            let resp = handlers::global_confirm_guess(State(state.clone()), CookieJar::new(), guess(&state, "7"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/g?msg=signin");
+        }
+
+        #[tokio::test]
+        async fn a_42_student_plays_both_pools_separately() {
+            let (t, state) = app(&[]).await;
+            student(&t.db, 1001, "megardes", "s").await;
+            let account = db::viewer_for_session(&t.db, "s").await.unwrap().unwrap().account.id;
+
+            handlers::confirm_guess(State(state.clone()), jar("s"), guess(&state, "4")).await.unwrap();
+            handlers::global_confirm_guess(State(state.clone()), jar("s"), guess(&state, "9")).await.unwrap();
+            assert_eq!(guesses(&t.db).await, [(1001, 4)]);
+            assert_eq!(global_guesses(&t.db).await, [(account, 9)]);
+
+            // Each front page shows that pool's sealed number.
+            let vienna = body(
+                handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None }))
+                    .await
+                    .unwrap(),
+            )
+            .await;
+            assert!(vienna.contains(r#"<p class="sealed-value">4</p>"#));
+            assert!(global_page(&state, Some("s")).await.contains(r#"<p class="sealed-value">9</p>"#));
+        }
+
+        #[tokio::test]
+        async fn global_results_name_players_to_anyone_signed_in() {
+            let (t, state) = app(&[]).await;
+            let ann = verified(&t.db, "ann", "a").await;
+            stranger(&t.db, "watcher", "w").await;
+            let yesterday = Round::current(state.now()).previous_date().format("%Y-%m-%d").to_string();
+            db::insert_guess(&t.db, Pool::Global, &yesterday, ann, 3, true).await.unwrap();
+
+            let page = |token: Option<&'static str>| {
+                let state = state.clone();
+                async move {
+                    let jar = token.map(jar).unwrap_or_default();
+                    body(
+                        handlers::global_results(
+                            State(state),
+                            jar,
+                            Query(ResultsQuery { q: None, show: None, date: None }),
+                        )
+                        .await
+                        .unwrap(),
+                    )
+                    .await
+                }
+            };
+            let html = page(Some("w")).await;
+            assert!(html.contains("ann"), "an account, even unverified, sees who won");
+            assert!(html.contains(&format!(r#"href="/g/day/{yesterday}""#)), "links stay in the pool");
+            assert!(!page(None).await.contains("ann"), "signed out does not");
+            // The 42 pool has nothing for that day.
+            let vienna = body(
+                handlers::results(State(state.clone()), jar("w"), Query(ResultsQuery { q: None, show: None, date: None }))
+                    .await
+                    .unwrap(),
+            )
+            .await;
+            assert!(!vienna.contains(&yesterday));
+        }
+
+        #[tokio::test]
+        async fn the_pool_switch_marks_where_you_are() {
+            let (_t, state) = app(&[]).await;
+            let global = global_page(&state, None).await;
+            assert!(global.contains(r#"<a class="on" aria-current="true" href="/g/">global</a>"#));
+            assert!(global.contains(r#"href="/g/results""#));
+            let vienna = body(
+                handlers::index(State(state.clone()), CookieJar::new(), Query(handlers::IndexQuery { msg: None }))
+                    .await
+                    .unwrap(),
+            )
+            .await;
+            assert!(vienna.contains(r#"<a class="on" aria-current="true" href="/">42 vienna</a>"#));
+            assert!(vienna.contains(r#"href="/results""#));
         }
 
         #[tokio::test]

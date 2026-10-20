@@ -62,7 +62,7 @@
           {% include "chart.html" %}
         {% when None %}
       {% endmatch %}
-      <p class="morelink"><a href="/day/{{ r.date_key }}">details &rarr;</a></p>
+      <p class="morelink"><a href="{{ pool.base() }}/day/{{ r.date_key }}">details &rarr;</a></p>
     </section>
   {% when None %}
 {% endmatch %}
@@ -70,14 +70,14 @@
 <section class="sec" style="--b: 2">
   <h2 class="rule"><span>rounds</span>
     <span class="ranges">
-      <a class="{% if q.is_empty() && show == "7" %}on{% endif %}" href="/results">7</a>
-      <a class="{% if q.is_empty() && show == "30" %}on{% endif %}" href="/results?show=30">30</a>
-      <a class="{% if q.is_empty() && show == "all" %}on{% endif %}" href="/results?show=all">all</a>
+      <a class="{% if q.is_empty() && show == "7" %}on{% endif %}" href="{{ pool.base() }}/results">7</a>
+      <a class="{% if q.is_empty() && show == "30" %}on{% endif %}" href="{{ pool.base() }}/results?show=30">30</a>
+      <a class="{% if q.is_empty() && show == "all" %}on{% endif %}" href="{{ pool.base() }}/results?show=all">all</a>
     </span>
   </h2>
 
   <div class="finders">
-    <form method="get" action="/results" class="finder" role="search">
+    <form method="get" action="{{ pool.base() }}/results" class="finder" role="search">
       <label for="q">search rounds</label>
       <div class="finder-row">
         <input id="q" name="q" type="search" value="{{ q }}" placeholder="{% if names_visible %}login, number or month{% else %}number or month{% endif %}"
@@ -85,7 +85,7 @@
         <button type="submit">search</button>
       </div>
     </form>
-    <form method="get" action="/results" class="finder">
+    <form method="get" action="{{ pool.base() }}/results" class="finder">
       <label for="date">go to a day</label>
       <div class="finder-row">
         <input id="date" name="date" type="date" required>
@@ -98,7 +98,7 @@
     {% if q.is_empty() %}
       <p class="dim">no round has closed yet. the first one closes at 12:42.</p>
     {% else %}
-      <p class="dim">no round matches "{{ q }}". <a href="/results">clear</a></p>
+      <p class="dim">no round matches "{{ q }}". <a href="{{ pool.base() }}/results">clear</a></p>
     {% endif %}
   {% else %}
     <table class="grid">
@@ -106,7 +106,7 @@
       <tbody>
         {% for r in rounds %}
           <tr>
-            <td><a href="/day/{{ r.date_key }}">{{ r.date_key }}</a></td>
+            <td><a href="{{ pool.base() }}/day/{{ r.date_key }}">{{ r.date_key }}</a></td>
             {% match r.winner %}
               {% when Some with (w) %}
                 <td>{{ w.login }}</td>
@@ -124,10 +124,10 @@
       {% if q.is_empty() %}
         {{ rounds.len() }} of {{ total_rounds }} rounds.
         {% if rounds.len() < total_rounds %}
-          {% if show == "7" %}<a href="/results?show=30">show 30</a> &middot; {% endif %}<a href="/results?show=all">show all</a>
+          {% if show == "7" %}<a href="{{ pool.base() }}/results?show=30">show 30</a> &middot; {% endif %}<a href="{{ pool.base() }}/results?show=all">show all</a>
         {% endif %}
       {% else %}
-        {{ rounds.len() }} {% if rounds.len() == 1 %}round matches{% else %}rounds match{% endif %} "{{ q }}". <a href="/results">clear</a>
+        {{ rounds.len() }} {% if rounds.len() == 1 %}round matches{% else %}rounds match{% endif %} "{{ q }}". <a href="{{ pool.base() }}/results">clear</a>
       {% endif %}
     </p>
   {% endif %}

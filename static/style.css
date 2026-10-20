@@ -82,6 +82,10 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .top nav a { color: var(--fg); text-decoration: none; }
 .top nav a.on { background: var(--hi); color: var(--bg); padding: 0 6px; margin: 0 -6px; }
 .top nav a:hover { background: var(--hi); color: var(--bg); }
+/* The pool switch: one box, two halves, the open one filled in green. */
+.top nav.pools { gap: 0; border: 1px solid var(--dim); }
+.top nav.pools a { padding: 0 8px; }
+.top nav.pools a.on { margin: 0; background: var(--green); color: var(--bg); }
 
 .status { display: flex; align-items: center; gap: 14px; margin-left: auto; color: var(--dim); white-space: nowrap; }
 .status form { margin: 0; }
@@ -739,6 +743,7 @@ p, li { text-wrap: pretty; }
   /* Two rows on a phone: brand and account, then the navigation. */
   .top { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
   .top nav { grid-column: 1 / -1; grid-row: 2; margin: 0 -10px; }
+  .top nav.pools { grid-row: 3; justify-self: start; margin: 0; }
   .status { margin-left: 0; gap: 10px; }
   .podium li { padding: 10px 8px 10px 0; }
   .podium li + li { padding-left: 10px; }

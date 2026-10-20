@@ -32,6 +32,8 @@ pub struct Account {
     /// The `users` row this account plays the 42 pool as. Set for 42 students
     /// and the stand-ins of a test instance, `None` for everyone else.
     pub intra_id: Option<i64>,
+    /// Proved it can be reached; only verified accounts play the global pool.
+    pub verified: bool,
 }
 
 /// Whoever a session belongs to: their account, and their 42 player if they
@@ -40,6 +42,46 @@ pub struct Account {
 pub struct Viewer {
     pub account: Account,
     pub intra: Option<User>,
+}
+
+/// Which game a query is about. The two pools are the same game on separate
+/// tables of the same shape: `guesses` keyed by intra id with `users` for
+/// names, and `global_guesses` keyed by account id with `global_players`.
+/// Table names only ever come from here, never from input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pool {
+    /// The 42 Vienna students' round, as it has always been.
+    Vienna,
+    /// Open to every verified account.
+    Global,
+}
+
+impl Pool {
+    fn guesses(self) -> &'static str {
+        match self {
+            Pool::Vienna => "guesses",
+            Pool::Global => "global_guesses",
+        }
+    }
+
+    fn players(self) -> &'static str {
+        match self {
+            Pool::Vienna => "users",
+            Pool::Global => "global_players",
+        }
+    }
+
+    pub fn is_global(self) -> bool {
+        self == Pool::Global
+    }
+
+    /// The path prefix of this pool's pages: `/results` or `/g/results`.
+    pub fn base(self) -> &'static str {
+        match self {
+            Pool::Vienna => "",
+            Pool::Global => "/g",
+        }
+    }
 }
 
 /// One closed round, with its winner if the round produced one.
@@ -152,7 +194,10 @@ pub async fn account_for_intra(db: &Db, intra_id: i64, login: &str) -> Result<Ac
             .await?;
     let (id, username) = match existing {
         Some(found) => {
-            sqlx::query("UPDATE accounts SET last_seen_at = ?1 WHERE id = ?2")
+            sqlx::query(
+                "UPDATE accounts SET last_seen_at = ?1, verified_at = COALESCE(verified_at, ?1)
+                 WHERE id = ?2",
+            )
                 .bind(&now)
                 .bind(found.0)
                 .execute(&mut *tx)
@@ -161,9 +206,10 @@ pub async fn account_for_intra(db: &Db, intra_id: i64, login: &str) -> Result<Ac
         }
         None => {
             let username = free_username(&mut tx, login).await?;
+            // 42 vouches for its students, so the account is verified at once.
             let (id,): (i64,) = sqlx::query_as(
-                "INSERT INTO accounts (username, intra_id, created_at, last_seen_at)
-                 VALUES (?1, ?2, ?3, ?3) RETURNING id",
+                "INSERT INTO accounts (username, intra_id, created_at, last_seen_at, verified_at)
+                 VALUES (?1, ?2, ?3, ?3, ?3) RETURNING id",
             )
             .bind(&username)
             .bind(intra_id)
@@ -191,6 +237,7 @@ pub async fn account_for_intra(db: &Db, intra_id: i64, login: &str) -> Result<Ac
         id,
         username,
         intra_id: Some(intra_id),
+        verified: true,
     })
 }
 
@@ -236,6 +283,7 @@ struct SessionRow {
     account_id: i64,
     username: String,
     intra_id: Option<i64>,
+    verified: bool,
     login: Option<String>,
     display_name: Option<String>,
     image_url: Option<String>,
@@ -247,6 +295,7 @@ struct SessionRow {
 pub async fn viewer_for_session(db: &Db, token: &str) -> Result<Option<Viewer>> {
     let row = sqlx::query_as::<_, SessionRow>(
         "SELECT a.id AS account_id, a.username, a.intra_id,
+                a.verified_at IS NOT NULL AS verified,
                 u.login, u.display_name, u.image_url
          FROM account_sessions s
          JOIN accounts a ON a.id = s.account_id
@@ -273,6 +322,7 @@ pub async fn viewer_for_session(db: &Db, token: &str) -> Result<Option<Viewer>> 
                 id: r.account_id,
                 username: r.username,
                 intra_id: r.intra_id,
+                verified: r.verified,
             },
             intra,
         }
@@ -330,31 +380,35 @@ pub async fn consume_oauth_state(db: &Db, state: &str) -> Result<bool> {
 // ---------------------------------------------------------------- game
 
 /// Records a guess. Returns `false` if this player already had one for the
-/// round, leaving the original untouched.
+/// round, leaving the original untouched. `player` is an intra id in the 42
+/// pool and an account id in the global one.
 ///
 /// Guesses are final, so this must never overwrite. `DO NOTHING` makes the
 /// check and the insert one atomic statement: two requests racing each other
 /// cannot both succeed, which a read-then-write pair could not guarantee.
 pub async fn insert_guess(
     db: &Db,
+    pool: Pool,
     round_date: &str,
-    user_id: i64,
+    player: i64,
     value: i64,
     participates: bool,
 ) -> Result<bool> {
-    let inserted = sqlx::query(
-        "INSERT INTO guesses (round_date, user_id, value, submitted_at, participates)
+    let sql = format!(
+        "INSERT INTO {} (round_date, user_id, value, submitted_at, participates)
          VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(round_date, user_id) DO NOTHING",
-    )
-    .bind(round_date)
-    .bind(user_id)
-    .bind(value)
-    .bind(ts(Utc::now()))
-    .bind(participates)
-    .execute(db)
-    .await?
-    .rows_affected();
+        pool.guesses()
+    );
+    let inserted = sqlx::query(&sql)
+        .bind(round_date)
+        .bind(player)
+        .bind(value)
+        .bind(ts(Utc::now()))
+        .bind(participates)
+        .execute(db)
+        .await?
+        .rows_affected();
     Ok(inserted > 0)
 }
 
@@ -368,21 +422,25 @@ pub struct GuessRow {
     pub participates: bool,
 }
 
-pub async fn round_guesses(db: &Db, round_date: &str) -> Result<Vec<GuessRow>> {
-    let rows = sqlx::query_as::<_, GuessRow>(
-        "SELECT u.login, u.display_name, g.value, g.participates
-         FROM guesses g JOIN users u ON u.id = g.user_id
+pub async fn round_guesses(db: &Db, pool: Pool, round_date: &str) -> Result<Vec<GuessRow>> {
+    let sql = format!(
+        "SELECT p.login, p.display_name, g.value, g.participates
+         FROM {} g JOIN {} p ON p.id = g.user_id
          WHERE g.round_date = ?1
          ORDER BY g.participates DESC, g.value ASC",
-    )
-    .bind(round_date)
-    .fetch_all(db)
-    .await?;
+        pool.guesses(),
+        pool.players()
+    );
+    let rows = sqlx::query_as::<_, GuessRow>(&sql)
+        .bind(round_date)
+        .fetch_all(db)
+        .await?;
     Ok(rows)
 }
 
-pub async fn clear_round(db: &Db, round_date: &str) -> Result<u64> {
-    let n = sqlx::query("DELETE FROM guesses WHERE round_date = ?1")
+pub async fn clear_round(db: &Db, pool: Pool, round_date: &str) -> Result<u64> {
+    let sql = format!("DELETE FROM {} WHERE round_date = ?1", pool.guesses());
+    let n = sqlx::query(&sql)
         .bind(round_date)
         .execute(db)
         .await?
@@ -435,7 +493,10 @@ pub async fn create_test_user(db: &Db, login: &str) -> Result<User> {
 /// ids, like every stand-in) and records their guesses. A bot that already
 /// has a guess for a day keeps it, so running this twice tops up rather than
 /// duplicates. One transaction, so it is quick and all-or-nothing.
-pub async fn insert_demo(db: &Db, guesses: &[DemoGuess]) -> Result<u64> {
+///
+/// The global pool is keyed by account, so there each bot also gets an
+/// account linked to its `users` row; deleting the bots takes both away.
+pub async fn insert_demo(db: &Db, pool: Pool, guesses: &[DemoGuess]) -> Result<u64> {
     let mut tx = db.begin().await?;
     let now = ts(Utc::now());
 
@@ -469,15 +530,41 @@ pub async fn insert_demo(db: &Db, guesses: &[DemoGuess]) -> Result<u64> {
                 id
             }
         };
+        let id = match pool {
+            Pool::Vienna => id,
+            Pool::Global => {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO accounts
+                         (username, intra_id, created_at, last_seen_at, verified_at)
+                     VALUES (?1, ?2, ?3, ?3, ?3)",
+                )
+                .bind(&login)
+                .bind(id)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await?;
+                let account: Option<(i64,)> =
+                    sqlx::query_as("SELECT id FROM accounts WHERE intra_id = ?1")
+                        .bind(id)
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                match account {
+                    Some((account,)) => account,
+                    None => anyhow::bail!("the username {login} is taken by a real account"),
+                }
+            }
+        };
         ids.push(id);
     }
 
+    let insert = format!(
+        "INSERT OR IGNORE INTO {} (round_date, user_id, value, submitted_at, participates)
+         VALUES (?1, ?2, ?3, ?4, 1)",
+        pool.guesses()
+    );
     let mut added = 0;
     for g in guesses {
-        added += sqlx::query(
-            "INSERT OR IGNORE INTO guesses (round_date, user_id, value, submitted_at, participates)
-             VALUES (?1, ?2, ?3, ?4, 1)",
-        )
+        added += sqlx::query(&insert)
         .bind(&g.round_date)
         .bind(ids[g.bot])
         .bind(g.value)
@@ -499,12 +586,16 @@ pub async fn remove_demo(db: &Db) -> Result<u64> {
     Ok(n)
 }
 
-/// How many bots exist and how many guesses they hold.
+/// How many bots exist and how many guesses they hold, in both pools.
 pub async fn demo_counts(db: &Db) -> Result<(i64, i64)> {
     let counts: (i64, i64) = sqlx::query_as(
         "SELECT
              (SELECT COUNT(*) FROM users WHERE id < 0 AND login LIKE 'bot-%'),
              (SELECT COUNT(*) FROM guesses g JOIN users u ON u.id = g.user_id
+              WHERE u.id < 0 AND u.login LIKE 'bot-%')
+           + (SELECT COUNT(*) FROM global_guesses g
+              JOIN accounts a ON a.id = g.user_id
+              JOIN users u ON u.id = a.intra_id
               WHERE u.id < 0 AND u.login LIKE 'bot-%')",
     )
     .fetch_one(db)
@@ -512,61 +603,84 @@ pub async fn demo_counts(db: &Db) -> Result<(i64, i64)> {
     Ok(counts)
 }
 
-pub async fn my_guess(db: &Db, round_date: &str, user_id: i64) -> Result<Option<i64>> {
-    let value: Option<(i64,)> =
-        sqlx::query_as("SELECT value FROM guesses WHERE round_date = ?1 AND user_id = ?2")
-            .bind(round_date)
-            .bind(user_id)
-            .fetch_optional(db)
-            .await?;
+pub async fn my_guess(db: &Db, pool: Pool, round_date: &str, player: i64) -> Result<Option<i64>> {
+    let sql = format!(
+        "SELECT value FROM {} WHERE round_date = ?1 AND user_id = ?2",
+        pool.guesses()
+    );
+    let value: Option<(i64,)> = sqlx::query_as(&sql)
+        .bind(round_date)
+        .bind(player)
+        .fetch_optional(db)
+        .await?;
     Ok(value.map(|v| v.0))
 }
 
-pub async fn guess_count(db: &Db, round_date: &str) -> Result<i64> {
-    let (n,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM guesses WHERE round_date = ?1 AND participates = 1")
-            .bind(round_date)
-            .fetch_one(db)
-            .await?;
+pub async fn guess_count(db: &Db, pool: Pool, round_date: &str) -> Result<i64> {
+    let sql = format!(
+        "SELECT COUNT(*) FROM {} WHERE round_date = ?1 AND participates = 1",
+        pool.guesses()
+    );
+    let (n,): (i64,) = sqlx::query_as(&sql)
+        .bind(round_date)
+        .fetch_one(db)
+        .await?;
     Ok(n)
 }
 
 /// The winner of a round is the *lowest value that exactly one player picked*.
 /// A round with no such value has no winner.
-const WINNER_CTE: &str = "
+fn winner_cte(pool: Pool) -> String {
+    let g = pool.guesses();
+    format!(
+        "
     WITH rounds AS (
         SELECT round_date, COUNT(*) AS total
-        FROM guesses WHERE round_date < ?1 AND participates = 1
+        FROM {g} WHERE round_date < ?1 AND participates = 1
         GROUP BY round_date
     ),
     uniq AS (
         SELECT round_date, value
-        FROM guesses WHERE round_date < ?1 AND participates = 1
+        FROM {g} WHERE round_date < ?1 AND participates = 1
         GROUP BY round_date, value
         HAVING COUNT(*) = 1
     ),
     winners AS (
         SELECT round_date, MIN(value) AS value FROM uniq GROUP BY round_date
     )
-";
+"
+    )
+}
+
+/// The winner CTE, then every closed round with its winner's name; callers
+/// add their own WHERE / ORDER / LIMIT.
+fn summaries(pool: Pool) -> String {
+    format!(
+        "{}
+         SELECT r.round_date, r.total,
+                w.value    AS winning_value,
+                p.login    AS winner_login,
+                p.display_name AS winner_name
+         FROM rounds r
+         LEFT JOIN winners w ON w.round_date = r.round_date
+         LEFT JOIN {} g ON g.round_date = w.round_date AND g.value = w.value
+                       AND g.participates = 1
+         LEFT JOIN {} p ON p.id = g.user_id",
+        winner_cte(pool),
+        pool.guesses(),
+        pool.players()
+    )
+}
 
 /// Closed rounds, newest first. `open_round` is the round still taking
 /// guesses; everything strictly before it is closed.
-pub async fn closed_rounds(db: &Db, open_round: &str, limit: i64) -> Result<Vec<RoundSummary>> {
-    let sql = format!(
-        "{WINNER_CTE}
-         SELECT r.round_date, r.total,
-                w.value    AS winning_value,
-                u.login    AS winner_login,
-                u.display_name AS winner_name
-         FROM rounds r
-         LEFT JOIN winners w ON w.round_date = r.round_date
-         LEFT JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
-                            AND g.participates = 1
-         LEFT JOIN users   u ON u.id = g.user_id
-         ORDER BY r.round_date DESC
-         LIMIT ?2"
-    );
+pub async fn closed_rounds(
+    db: &Db,
+    pool: Pool,
+    open_round: &str,
+    limit: i64,
+) -> Result<Vec<RoundSummary>> {
+    let sql = format!("{} ORDER BY r.round_date DESC LIMIT ?2", summaries(pool));
     let rows = sqlx::query_as::<_, RoundSummary>(&sql)
         .bind(open_round)
         .bind(limit)
@@ -576,20 +690,13 @@ pub async fn closed_rounds(db: &Db, open_round: &str, limit: i64) -> Result<Vec<
 }
 
 /// Summary for one specific closed round.
-pub async fn round_summary(db: &Db, open_round: &str, date: &str) -> Result<Option<RoundSummary>> {
-    let sql = format!(
-        "{WINNER_CTE}
-         SELECT r.round_date, r.total,
-                w.value    AS winning_value,
-                u.login    AS winner_login,
-                u.display_name AS winner_name
-         FROM rounds r
-         LEFT JOIN winners w ON w.round_date = r.round_date
-         LEFT JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
-                            AND g.participates = 1
-         LEFT JOIN users   u ON u.id = g.user_id
-         WHERE r.round_date = ?2"
-    );
+pub async fn round_summary(
+    db: &Db,
+    pool: Pool,
+    open_round: &str,
+    date: &str,
+) -> Result<Option<RoundSummary>> {
+    let sql = format!("{} WHERE r.round_date = ?2", summaries(pool));
     let row = sqlx::query_as::<_, RoundSummary>(&sql)
         .bind(open_round)
         .bind(date)
@@ -600,14 +707,16 @@ pub async fn round_summary(db: &Db, open_round: &str, date: &str) -> Result<Opti
 
 /// How many rounds have closed. A count rather than a list: the day page only
 /// wants to say what its own short list leaves out.
-pub async fn closed_round_count(db: &Db, open_round: &str) -> Result<i64> {
-    let n: i64 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT round_date) FROM guesses
+pub async fn closed_round_count(db: &Db, pool: Pool, open_round: &str) -> Result<i64> {
+    let sql = format!(
+        "SELECT COUNT(DISTINCT round_date) FROM {}
          WHERE round_date < ?1 AND participates = 1",
-    )
-    .bind(open_round)
-    .fetch_one(db)
-    .await?;
+        pool.guesses()
+    );
+    let n: i64 = sqlx::query_scalar(&sql)
+        .bind(open_round)
+        .fetch_one(db)
+        .await?;
     Ok(n)
 }
 
@@ -616,24 +725,14 @@ pub async fn closed_round_count(db: &Db, open_round: &str) -> Result<i64> {
 /// through /results.
 pub async fn rounds_before(
     db: &Db,
+    pool: Pool,
     open_round: &str,
     date: &str,
     limit: i64,
 ) -> Result<Vec<RoundSummary>> {
     let sql = format!(
-        "{WINNER_CTE}
-         SELECT r.round_date, r.total,
-                w.value    AS winning_value,
-                u.login    AS winner_login,
-                u.display_name AS winner_name
-         FROM rounds r
-         LEFT JOIN winners w ON w.round_date = r.round_date
-         LEFT JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
-                            AND g.participates = 1
-         LEFT JOIN users   u ON u.id = g.user_id
-         WHERE r.round_date < ?2
-         ORDER BY r.round_date DESC
-         LIMIT ?3"
+        "{} WHERE r.round_date < ?2 ORDER BY r.round_date DESC LIMIT ?3",
+        summaries(pool)
     );
     let rows = sqlx::query_as::<_, RoundSummary>(&sql)
         .bind(open_round)
@@ -646,62 +745,86 @@ pub async fn rounds_before(
 
 /// The closed round right after `date`, if `date` is not the newest one. Stays
 /// below `open_round`, so today never leaks out as a link.
-pub async fn round_after(db: &Db, open_round: &str, date: &str) -> Result<Option<String>> {
-    let row: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT MIN(round_date) FROM guesses
+pub async fn round_after(
+    db: &Db,
+    pool: Pool,
+    open_round: &str,
+    date: &str,
+) -> Result<Option<String>> {
+    let sql = format!(
+        "SELECT MIN(round_date) FROM {}
          WHERE round_date > ?1 AND round_date < ?2 AND participates = 1",
-    )
-    .bind(date)
-    .bind(open_round)
-    .fetch_optional(db)
-    .await?;
+        pool.guesses()
+    );
+    let row: Option<Option<String>> = sqlx::query_scalar(&sql)
+        .bind(date)
+        .bind(open_round)
+        .fetch_optional(db)
+        .await?;
     Ok(row.flatten())
 }
 
 /// How many players picked each value in a round, lowest value first. Ghosts
 /// are left out, as everywhere else in the game. Callers must only ask about
 /// closed rounds - this does not check, and an open round's numbers are secret.
-pub async fn round_tallies(db: &Db, round_date: &str) -> Result<Vec<Tally>> {
-    let rows = sqlx::query_as::<_, Tally>(
+pub async fn round_tallies(db: &Db, pool: Pool, round_date: &str) -> Result<Vec<Tally>> {
+    let sql = format!(
         "SELECT value, COUNT(*) AS count
-         FROM guesses WHERE round_date = ?1 AND participates = 1
+         FROM {} WHERE round_date = ?1 AND participates = 1
          GROUP BY value ORDER BY value",
-    )
-    .bind(round_date)
-    .fetch_all(db)
-    .await?;
+        pool.guesses()
+    );
+    let rows = sqlx::query_as::<_, Tally>(&sql)
+        .bind(round_date)
+        .fetch_all(db)
+        .await?;
     Ok(rows)
 }
 
 /// Per-day tallies for every closed round from `from` (inclusive) up to the
 /// open round (exclusive), oldest day first. Ghosts are left out. Stopping
 /// before `open_round` is what keeps the open round's numbers secret.
-pub async fn range_tallies(db: &Db, from: &str, open_round: &str) -> Result<Vec<DayTally>> {
-    let rows = sqlx::query_as::<_, DayTally>(
+pub async fn range_tallies(
+    db: &Db,
+    pool: Pool,
+    from: &str,
+    open_round: &str,
+) -> Result<Vec<DayTally>> {
+    let sql = format!(
         "SELECT round_date, value, COUNT(*) AS count
-         FROM guesses
+         FROM {}
          WHERE round_date >= ?1 AND round_date < ?2 AND participates = 1
          GROUP BY round_date, value
          ORDER BY round_date, value",
-    )
-    .bind(from)
-    .bind(open_round)
-    .fetch_all(db)
-    .await?;
+        pool.guesses()
+    );
+    let rows = sqlx::query_as::<_, DayTally>(&sql)
+        .bind(from)
+        .bind(open_round)
+        .fetch_all(db)
+        .await?;
     Ok(rows)
 }
 
-pub async fn leaderboard(db: &Db, open_round: &str, limit: i64) -> Result<Vec<LeaderboardRow>> {
+pub async fn leaderboard(
+    db: &Db,
+    pool: Pool,
+    open_round: &str,
+    limit: i64,
+) -> Result<Vec<LeaderboardRow>> {
     let sql = format!(
-        "{WINNER_CTE}
-         SELECT u.login, u.display_name, COUNT(*) AS wins
+        "{}
+         SELECT p.login, p.display_name, COUNT(*) AS wins
          FROM winners w
-         JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
-                        AND g.participates = 1
-         JOIN users   u ON u.id = g.user_id
-         GROUP BY u.id
-         ORDER BY wins DESC, u.login ASC
-         LIMIT ?2"
+         JOIN {} g ON g.round_date = w.round_date AND g.value = w.value
+                   AND g.participates = 1
+         JOIN {} p ON p.id = g.user_id
+         GROUP BY p.id
+         ORDER BY wins DESC, p.login ASC
+         LIMIT ?2",
+        winner_cte(pool),
+        pool.guesses(),
+        pool.players()
     );
     let rows = sqlx::query_as::<_, LeaderboardRow>(&sql)
         .bind(open_round)
@@ -730,13 +853,14 @@ pub struct Payout {
 /// there is no honest id to name.
 pub async fn unpaid_round(db: &Db, open_round: &str, round_date: &str) -> Result<Option<Payout>> {
     let sql = format!(
-        "{WINNER_CTE}
+        "{}
          SELECT g.user_id
          FROM winners w
          JOIN guesses g ON g.round_date = w.round_date AND g.value = w.value
                         AND g.participates = 1
          WHERE w.round_date = ?2 AND g.user_id > 0
-           AND NOT EXISTS (SELECT 1 FROM payouts p WHERE p.round_date = w.round_date)"
+           AND NOT EXISTS (SELECT 1 FROM payouts p WHERE p.round_date = w.round_date)",
+        winner_cte(Pool::Vienna)
     );
     let row: Option<(i64,)> = sqlx::query_as(&sql)
         .bind(open_round)
@@ -853,7 +977,7 @@ mod tests {
             )
             .await
             .unwrap();
-            insert_guess(db, round, *user_id, *value, true)
+            insert_guess(db, Pool::Vienna, round, *user_id, *value, true)
                 .await
                 .unwrap();
         }
@@ -865,7 +989,7 @@ mod tests {
         // Two people grabbed 1, so it is burned. 2 is the lowest survivor.
         seed(&t.db, "2026-09-05", &[(1, 1), (2, 1), (3, 2), (4, 3)]).await;
 
-        let r = round_summary(&t.db, "2026-09-06", "2026-09-05")
+        let r = round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-05")
             .await
             .unwrap()
             .unwrap();
@@ -879,7 +1003,7 @@ mod tests {
         let t = temp_db().await;
         seed(&t.db, "2026-09-05", &[(1, 5), (2, 5), (3, 7), (4, 7)]).await;
 
-        let r = round_summary(&t.db, "2026-09-06", "2026-09-05")
+        let r = round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-05")
             .await
             .unwrap()
             .unwrap();
@@ -893,7 +1017,7 @@ mod tests {
         let t = temp_db().await;
         seed(&t.db, "2026-09-05", &[(1, 9_000_000_000)]).await;
 
-        let r = round_summary(&t.db, "2026-09-06", "2026-09-05")
+        let r = round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-05")
             .await
             .unwrap()
             .unwrap();
@@ -910,27 +1034,27 @@ mod tests {
         seed(&t.db, "2026-09-06", &[(1, 5), (2, 6)]).await; // still open
 
         let open = "2026-09-06";
-        let earlier = rounds_before(&t.db, open, "2026-09-05", 10).await.unwrap();
+        let earlier = rounds_before(&t.db, Pool::Vienna, open, "2026-09-05", 10).await.unwrap();
         let dates: Vec<&str> = earlier.iter().map(|r| r.round_date.as_str()).collect();
         assert_eq!(dates, ["2026-09-04", "2026-09-03"], "newest first, and not itself");
         assert_eq!(earlier[0].winning_value, Some(2));
         assert_eq!(earlier[1].winning_value, None, "every number collided that day");
 
         // The limit cuts the oldest rounds, not the nearest ones.
-        let one = rounds_before(&t.db, open, "2026-09-05", 1).await.unwrap();
+        let one = rounds_before(&t.db, Pool::Vienna, open, "2026-09-05", 1).await.unwrap();
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].round_date, "2026-09-04");
 
         assert_eq!(
-            round_after(&t.db, open, "2026-09-04").await.unwrap().as_deref(),
+            round_after(&t.db, Pool::Vienna, open, "2026-09-04").await.unwrap().as_deref(),
             Some("2026-09-05")
         );
         // The open round is not a round to link to, and the first day has
         // nothing before it.
-        assert_eq!(round_after(&t.db, open, "2026-09-05").await.unwrap(), None);
-        assert!(rounds_before(&t.db, open, "2026-09-03", 10).await.unwrap().is_empty());
+        assert_eq!(round_after(&t.db, Pool::Vienna, open, "2026-09-05").await.unwrap(), None);
+        assert!(rounds_before(&t.db, Pool::Vienna, open, "2026-09-03", 10).await.unwrap().is_empty());
 
-        assert_eq!(closed_round_count(&t.db, open).await.unwrap(), 3);
+        assert_eq!(closed_round_count(&t.db, Pool::Vienna, open).await.unwrap(), 3);
     }
 
     #[tokio::test]
@@ -938,16 +1062,16 @@ mod tests {
         let t = temp_db().await;
         seed(&t.db, "2026-09-06", &[(1, 1), (2, 2)]).await;
 
-        assert!(round_summary(&t.db, "2026-09-06", "2026-09-06")
+        assert!(round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-06")
             .await
             .unwrap()
             .is_none());
-        assert!(closed_rounds(&t.db, "2026-09-06", 10)
+        assert!(closed_rounds(&t.db, Pool::Vienna, "2026-09-06", 10)
             .await
             .unwrap()
             .is_empty());
         // ...and it is still visible as an in-progress headcount.
-        assert_eq!(guess_count(&t.db, "2026-09-06").await.unwrap(), 2);
+        assert_eq!(guess_count(&t.db, Pool::Vienna, "2026-09-06").await.unwrap(), 2);
     }
 
     #[tokio::test]
@@ -956,10 +1080,10 @@ mod tests {
         seed(&t.db, "2026-09-05", &[(1, 50)]).await;
 
         // The second attempt reports that nothing was written...
-        assert!(!insert_guess(&t.db, "2026-09-05", 1, 3, true).await.unwrap());
+        assert!(!insert_guess(&t.db, Pool::Vienna, "2026-09-05", 1, 3, true).await.unwrap());
         // ...and the original number is untouched.
-        assert_eq!(my_guess(&t.db, "2026-09-05", 1).await.unwrap(), Some(50));
-        assert_eq!(guess_count(&t.db, "2026-09-05").await.unwrap(), 1);
+        assert_eq!(my_guess(&t.db, Pool::Vienna, "2026-09-05", 1).await.unwrap(), Some(50));
+        assert_eq!(guess_count(&t.db, Pool::Vienna, "2026-09-05").await.unwrap(), 1);
     }
 
     #[tokio::test]
@@ -967,9 +1091,9 @@ mod tests {
         let t = temp_db().await;
         seed(&t.db, "2026-09-05", &[(1, 50)]).await;
 
-        assert!(insert_guess(&t.db, "2026-09-06", 1, 3, true).await.unwrap());
-        assert_eq!(my_guess(&t.db, "2026-09-05", 1).await.unwrap(), Some(50));
-        assert_eq!(my_guess(&t.db, "2026-09-06", 1).await.unwrap(), Some(3));
+        assert!(insert_guess(&t.db, Pool::Vienna, "2026-09-06", 1, 3, true).await.unwrap());
+        assert_eq!(my_guess(&t.db, Pool::Vienna, "2026-09-05", 1).await.unwrap(), Some(50));
+        assert_eq!(my_guess(&t.db, Pool::Vienna, "2026-09-06", 1).await.unwrap(), Some(3));
     }
 
     #[tokio::test]
@@ -980,12 +1104,12 @@ mod tests {
         seed(&t.db, "2026-09-05", &[(1, 8), (2, 3)]).await; // p2 wins
         seed(&t.db, "2026-09-06", &[(1, 1)]).await; // still open
 
-        let rounds = closed_rounds(&t.db, "2026-09-06", 10).await.unwrap();
+        let rounds = closed_rounds(&t.db, Pool::Vienna, "2026-09-06", 10).await.unwrap();
         let dates: Vec<&str> = rounds.iter().map(|r| r.round_date.as_str()).collect();
         assert_eq!(dates, ["2026-09-05", "2026-09-04", "2026-09-03"]);
         assert_eq!(rounds[1].winning_value, None);
 
-        let board = leaderboard(&t.db, "2026-09-06", 10).await.unwrap();
+        let board = leaderboard(&t.db, Pool::Vienna, "2026-09-06", 10).await.unwrap();
         assert_eq!(board.len(), 2);
         assert!(board.iter().all(|r| r.wins == 1));
     }
@@ -998,9 +1122,9 @@ mod tests {
         upsert_user(&t.db, -1, "ghosty", "Ghosty", None)
             .await
             .unwrap();
-        insert_guess(&t.db, "2026-09-05", -1, 2, false).await.unwrap();
+        insert_guess(&t.db, Pool::Vienna, "2026-09-05", -1, 2, false).await.unwrap();
 
-        let tallies = round_tallies(&t.db, "2026-09-05").await.unwrap();
+        let tallies = round_tallies(&t.db, Pool::Vienna, "2026-09-05").await.unwrap();
         assert_eq!(
             tallies,
             [Tally { value: 1, count: 1 }, Tally { value: 3, count: 2 }]
@@ -1015,7 +1139,7 @@ mod tests {
         seed(&t.db, "2026-09-06", &[(1, 5)]).await;
         seed(&t.db, "2026-09-07", &[(1, 9)]).await; // still open
 
-        let rows = range_tallies(&t.db, "2026-09-05", "2026-09-07").await.unwrap();
+        let rows = range_tallies(&t.db, Pool::Vienna, "2026-09-05", "2026-09-07").await.unwrap();
         let got: Vec<(&str, i64, i64)> = rows
             .iter()
             .map(|r| (r.round_date.as_str(), r.value, r.count))
@@ -1034,9 +1158,9 @@ mod tests {
             DemoGuess { round_date: "2026-09-05".into(), bot: 1, value: 7 },
             DemoGuess { round_date: "2026-09-04".into(), bot: 0, value: 1 },
         ];
-        assert_eq!(insert_demo(&t.db, &guesses).await.unwrap(), 3);
+        assert_eq!(insert_demo(&t.db, Pool::Vienna, &guesses).await.unwrap(), 3);
         // Running it again adds nothing: those bots already guessed those days.
-        assert_eq!(insert_demo(&t.db, &guesses).await.unwrap(), 0);
+        assert_eq!(insert_demo(&t.db, Pool::Vienna, &guesses).await.unwrap(), 0);
         assert_eq!(demo_counts(&t.db).await.unwrap(), (demo::BOTS as i64, 3));
 
         // Bots stay out of the sign-in-as list.
@@ -1046,7 +1170,7 @@ mod tests {
         remove_demo(&t.db).await.unwrap();
         assert_eq!(demo_counts(&t.db).await.unwrap(), (0, 0));
         // The real player's guess and the hand-made stand-in survive.
-        assert_eq!(guess_count(&t.db, "2026-09-05").await.unwrap(), 1);
+        assert_eq!(guess_count(&t.db, Pool::Vienna, "2026-09-05").await.unwrap(), 1);
         assert!(user_by_login(&t.db, "alice").await.unwrap().is_some());
     }
 
@@ -1058,17 +1182,17 @@ mod tests {
         upsert_user(&t.db, -1, "ghosty", "Ghosty", None)
             .await
             .unwrap();
-        assert!(insert_guess(&t.db, "2026-09-05", -1, 1, false)
+        assert!(insert_guess(&t.db, Pool::Vienna, "2026-09-05", -1, 1, false)
             .await
             .unwrap());
 
-        let r = round_summary(&t.db, "2026-09-06", "2026-09-05")
+        let r = round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-05")
             .await
             .unwrap()
             .unwrap();
         assert_eq!(r.winning_value, Some(5), "a ghost must not win");
         assert_eq!(r.total, 2, "a ghost must not be counted");
-        assert_eq!(guess_count(&t.db, "2026-09-05").await.unwrap(), 2);
+        assert_eq!(guess_count(&t.db, Pool::Vienna, "2026-09-05").await.unwrap(), 2);
     }
 
     #[tokio::test]
@@ -1080,11 +1204,11 @@ mod tests {
         upsert_user(&t.db, -1, "ghosty", "Ghosty", None)
             .await
             .unwrap();
-        assert!(insert_guess(&t.db, "2026-09-05", -1, 3, false)
+        assert!(insert_guess(&t.db, Pool::Vienna, "2026-09-05", -1, 3, false)
             .await
             .unwrap());
 
-        let r = round_summary(&t.db, "2026-09-06", "2026-09-05")
+        let r = round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-05")
             .await
             .unwrap()
             .unwrap();
@@ -1099,11 +1223,11 @@ mod tests {
         upsert_user(&t.db, -1, "ghosty", "Ghosty", None)
             .await
             .unwrap();
-        insert_guess(&t.db, "2026-09-07", -1, 1, false)
+        insert_guess(&t.db, Pool::Vienna, "2026-09-07", -1, 1, false)
             .await
             .unwrap();
 
-        let rows = round_guesses(&t.db, "2026-09-07").await.unwrap();
+        let rows = round_guesses(&t.db, Pool::Vienna, "2026-09-07").await.unwrap();
         assert_eq!(rows.len(), 2);
         // Participating entries sort first.
         assert!(rows[0].participates);
@@ -1285,7 +1409,7 @@ mod tests {
     async fn removing_the_demo_takes_impersonated_bots_accounts_with_it() {
         let t = temp_db().await;
         let guesses = vec![DemoGuess { round_date: "2026-09-05".into(), bot: 0, value: 3 }];
-        insert_demo(&t.db, &guesses).await.unwrap();
+        insert_demo(&t.db, Pool::Vienna, &guesses).await.unwrap();
         let bot = user_by_login(&t.db, "bot-001").await.unwrap().unwrap();
         let account = account_for_intra(&t.db, bot.id, &bot.login).await.unwrap();
         create_session(&t.db, "tok", account.id, 30).await.unwrap();
@@ -1297,6 +1421,140 @@ mod tests {
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 1);
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM account_sessions").await, 1);
         assert!(viewer_for_session(&t.db, "mine").await.unwrap().is_some());
+    }
+
+    // ------------------------------------------------------- the global pool
+
+    /// A verified account with no 42 player behind it.
+    async fn global_player(db: &Db, username: &str) -> i64 {
+        let id = plain_account(db, username).await;
+        sqlx::query("UPDATE accounts SET verified_at = created_at WHERE id = ?1")
+            .bind(id)
+            .execute(db)
+            .await
+            .unwrap();
+        id
+    }
+
+    #[tokio::test]
+    async fn the_global_pool_is_won_the_same_way_under_usernames() {
+        let t = temp_db().await;
+        let ann = global_player(&t.db, "ann").await;
+        let bob = global_player(&t.db, "bob").await;
+        let student = signed_in(&t.db, 7, "megardes", "tok").await;
+        for (who, value) in [(ann, 1), (bob, 1), (student.id, 2)] {
+            assert!(insert_guess(&t.db, Pool::Global, "2026-09-05", who, value, true).await.unwrap());
+        }
+
+        let r = round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.winning_value, Some(2));
+        assert_eq!(r.total, 3);
+        // Named by username, with the 42 tag in the long form.
+        assert_eq!(r.winner_login.as_deref(), Some("megardes"));
+        assert_eq!(r.winner_name.as_deref(), Some("megardes (42)"));
+
+        let board = leaderboard(&t.db, Pool::Global, "2026-09-06", 10).await.unwrap();
+        assert_eq!(board.len(), 1);
+        assert_eq!((board[0].login.as_str(), board[0].wins), ("megardes", 1));
+    }
+
+    #[tokio::test]
+    async fn the_two_pools_never_see_each_others_guesses() {
+        let t = temp_db().await;
+        let student = signed_in(&t.db, 7, "megardes", "tok").await;
+        let ann = global_player(&t.db, "ann").await;
+        upsert_user(&t.db, 8, "other", "Other", None).await.unwrap();
+
+        // The same student plays both pools on the same day, with different numbers.
+        insert_guess(&t.db, Pool::Vienna, "2026-09-05", 7, 3, true).await.unwrap();
+        insert_guess(&t.db, Pool::Vienna, "2026-09-05", 8, 5, true).await.unwrap();
+        insert_guess(&t.db, Pool::Global, "2026-09-05", student.id, 5, true).await.unwrap();
+        insert_guess(&t.db, Pool::Global, "2026-09-05", ann, 3, true).await.unwrap();
+
+        // Each pool is won on its own numbers: a 3 in one pool does not burn
+        // the 3 in the other.
+        let vienna = round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
+        let global = round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
+        assert_eq!((vienna.winning_value, vienna.winner_login.as_deref()), (Some(3), Some("megardes")));
+        assert_eq!((global.winning_value, global.winner_login.as_deref()), (Some(3), Some("ann")));
+
+        assert_eq!(my_guess(&t.db, Pool::Vienna, "2026-09-05", 7).await.unwrap(), Some(3));
+        assert_eq!(my_guess(&t.db, Pool::Global, "2026-09-05", student.id).await.unwrap(), Some(5));
+        assert_eq!(guess_count(&t.db, Pool::Vienna, "2026-09-06").await.unwrap(), 0);
+        assert_eq!(
+            range_tallies(&t.db, Pool::Global, "", "2026-09-06").await.unwrap().len(),
+            2
+        );
+        // Coalition points only ever look at the 42 pool.
+        assert_eq!(
+            unpaid_round(&t.db, "2026-09-06", "2026-09-05").await.unwrap().map(|p| p.winner_id),
+            Some(7)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_global_guess_is_final_too() {
+        let t = temp_db().await;
+        let ann = global_player(&t.db, "ann").await;
+        assert!(insert_guess(&t.db, Pool::Global, "2026-09-05", ann, 50, true).await.unwrap());
+        assert!(!insert_guess(&t.db, Pool::Global, "2026-09-05", ann, 3, true).await.unwrap());
+        assert_eq!(my_guess(&t.db, Pool::Global, "2026-09-05", ann).await.unwrap(), Some(50));
+    }
+
+    #[tokio::test]
+    async fn global_ghosts_and_clearing_stay_in_their_pool() {
+        let t = temp_db().await;
+        let ann = global_player(&t.db, "ann").await;
+        let ghost = global_player(&t.db, "ghost").await;
+        upsert_user(&t.db, 7, "megardes", "M", None).await.unwrap();
+        insert_guess(&t.db, Pool::Global, "2026-09-05", ann, 5, true).await.unwrap();
+        insert_guess(&t.db, Pool::Global, "2026-09-05", ghost, 1, false).await.unwrap();
+        insert_guess(&t.db, Pool::Vienna, "2026-09-05", 7, 9, true).await.unwrap();
+
+        let r = round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
+        assert_eq!((r.winning_value, r.total), (Some(5), 1), "a ghost neither wins nor counts");
+        assert_eq!(round_guesses(&t.db, Pool::Global, "2026-09-05").await.unwrap().len(), 2);
+
+        assert_eq!(clear_round(&t.db, Pool::Global, "2026-09-05").await.unwrap(), 2);
+        assert_eq!(guess_count(&t.db, Pool::Vienna, "2026-09-05").await.unwrap(), 1, "42 pool untouched");
+    }
+
+    #[tokio::test]
+    async fn global_demo_history_goes_in_and_comes_back_out_cleanly() {
+        let t = temp_db().await;
+        let ann = global_player(&t.db, "ann").await;
+        insert_guess(&t.db, Pool::Global, "2026-09-05", ann, 4, true).await.unwrap();
+        let guesses = vec![
+            DemoGuess { round_date: "2026-09-05".into(), bot: 0, value: 3 },
+            DemoGuess { round_date: "2026-09-05".into(), bot: 1, value: 7 },
+        ];
+        assert_eq!(insert_demo(&t.db, Pool::Global, &guesses).await.unwrap(), 2);
+        assert_eq!(insert_demo(&t.db, Pool::Global, &guesses).await.unwrap(), 0);
+        assert_eq!(insert_demo(&t.db, Pool::Vienna, &guesses).await.unwrap(), 2);
+        assert_eq!(demo_counts(&t.db).await.unwrap(), (demo::BOTS as i64, 4));
+
+        let r = round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
+        assert_eq!((r.winning_value, r.winner_login.as_deref()), (Some(3), Some("bot-001")));
+
+        remove_demo(&t.db).await.unwrap();
+        assert_eq!(demo_counts(&t.db).await.unwrap(), (0, 0));
+        // The real player, their guess and their account are left alone.
+        assert_eq!(guess_count(&t.db, Pool::Global, "2026-09-05").await.unwrap(), 1);
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_42_sign_in_verifies_the_account() {
+        let t = temp_db().await;
+        let account = signed_in(&t.db, 7, "megardes", "tok").await;
+        assert!(account.verified);
+        assert!(viewer_for_session(&t.db, "tok").await.unwrap().unwrap().account.verified);
+        let plain = plain_account(&t.db, "stranger").await;
+        create_session(&t.db, "p", plain, 30).await.unwrap();
+        assert!(!viewer_for_session(&t.db, "p").await.unwrap().unwrap().account.verified);
     }
 
     // ------------------------------------------------- the accounts migration
@@ -1363,9 +1621,9 @@ mod tests {
 
         // What the 42 pool says before the migration...
         let open = "2026-09-07";
-        let before_rounds = closed_rounds(&old, open, 100).await.unwrap();
-        let before_board = leaderboard(&old, open, 100).await.unwrap();
-        let before_tallies = range_tallies(&old, "", open).await.unwrap();
+        let before_rounds = closed_rounds(&old, Pool::Vienna, open, 100).await.unwrap();
+        let before_board = leaderboard(&old, Pool::Vienna, open, 100).await.unwrap();
+        let before_tallies = range_tallies(&old, Pool::Vienna, "", open).await.unwrap();
         old.close().await;
 
         t.db = connect(&format!("sqlite://{}", t.path.display())).await.unwrap();
@@ -1373,9 +1631,9 @@ mod tests {
 
         // ...is exactly what it says after.
         let fmt = |v: &dyn std::fmt::Debug| format!("{v:?}");
-        assert_eq!(fmt(&closed_rounds(db, open, 100).await.unwrap()), fmt(&before_rounds));
-        assert_eq!(fmt(&leaderboard(db, open, 100).await.unwrap()), fmt(&before_board));
-        assert_eq!(range_tallies(db, "", open).await.unwrap(), before_tallies);
+        assert_eq!(fmt(&closed_rounds(db, Pool::Vienna, open, 100).await.unwrap()), fmt(&before_rounds));
+        assert_eq!(fmt(&leaderboard(db, Pool::Vienna, open, 100).await.unwrap()), fmt(&before_board));
+        assert_eq!(range_tallies(db, Pool::Vienna, "", open).await.unwrap(), before_tallies);
         assert_eq!(unpaid_round(db, open, "2026-09-05").await.unwrap(), None, "still settled");
 
         // Every live session still signs in the same person, as their 42 user.
@@ -1511,9 +1769,9 @@ mod tests {
         let guesses = count(&copy, "SELECT COUNT(*) FROM guesses").await;
         let payouts = count(&copy, "SELECT COUNT(*) FROM payouts").await;
         let open = crate::round::Round::current(Utc::now()).key();
-        let before_rounds = format!("{:?}", closed_rounds(&copy, &open, i64::MAX).await.unwrap());
-        let before_board = format!("{:?}", leaderboard(&copy, &open, i64::MAX).await.unwrap());
-        let before_tallies = range_tallies(&copy, "", &open).await.unwrap();
+        let before_rounds = format!("{:?}", closed_rounds(&copy, Pool::Vienna, &open, i64::MAX).await.unwrap());
+        let before_board = format!("{:?}", leaderboard(&copy, Pool::Vienna, &open, i64::MAX).await.unwrap());
+        let before_tallies = range_tallies(&copy, Pool::Vienna, "", &open).await.unwrap();
         copy.close().await;
 
         let started = std::time::Instant::now();
@@ -1531,9 +1789,9 @@ mod tests {
         assert_eq!(count(&db, "SELECT COUNT(*) FROM users").await, users);
         assert_eq!(count(&db, "SELECT COUNT(*) FROM guesses").await, guesses);
         assert_eq!(count(&db, "SELECT COUNT(*) FROM payouts").await, payouts);
-        assert_eq!(format!("{:?}", closed_rounds(&db, &open, i64::MAX).await.unwrap()), before_rounds);
-        assert_eq!(format!("{:?}", leaderboard(&db, &open, i64::MAX).await.unwrap()), before_board);
-        assert_eq!(range_tallies(&db, "", &open).await.unwrap(), before_tallies);
+        assert_eq!(format!("{:?}", closed_rounds(&db, Pool::Vienna, &open, i64::MAX).await.unwrap()), before_rounds);
+        assert_eq!(format!("{:?}", leaderboard(&db, Pool::Vienna, &open, i64::MAX).await.unwrap()), before_board);
+        assert_eq!(range_tallies(&db, Pool::Vienna, "", &open).await.unwrap(), before_tallies);
         // No real student is left without an account.
         assert_eq!(
             count(&db, "SELECT COUNT(*) FROM users u WHERE u.id > 0
@@ -1583,9 +1841,9 @@ mod tests {
         // A ghost guess from /admin, and a stand-in player: neither is a 42
         // account taking part in the round.
         upsert_user(&t.db, 14, "p14", "Player 14", None).await.unwrap();
-        insert_guess(&t.db, "2026-09-05", 14, 9, false).await.unwrap();
+        insert_guess(&t.db, Pool::Vienna, "2026-09-05", 14, 9, false).await.unwrap();
         let bot = create_test_user(&t.db, "bot-001").await.unwrap();
-        insert_guess(&t.db, "2026-09-05", bot.id, 7, true).await.unwrap();
+        insert_guess(&t.db, Pool::Vienna, "2026-09-05", bot.id, 7, true).await.unwrap();
 
         assert_eq!(
             unpaid_round(&t.db, "2026-09-06", "2026-09-05").await.unwrap(),
@@ -1609,7 +1867,7 @@ mod tests {
 
         // Won by a stand-in, which has no 42 account.
         let bot = create_test_user(&t.db, "bot-002").await.unwrap();
-        insert_guess(&t.db, "2026-09-03", bot.id, 1, true).await.unwrap();
+        insert_guess(&t.db, Pool::Vienna, "2026-09-03", bot.id, 1, true).await.unwrap();
         assert_eq!(unpaid_round(&t.db, "2026-09-06", "2026-09-03").await.unwrap(), None);
     }
 

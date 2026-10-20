@@ -26,7 +26,7 @@
                 <p class="announce-who">nobody won &middot; no number was picked just once &middot; {{ r.total }} played</p>
             {% endmatch %}
             <p class="announce-links">
-              <a href="/day/{{ r.date_key }}">the whole round &rarr;</a>
+              <a href="{{ pool.base() }}/day/{{ r.date_key }}">the whole round &rarr;</a>
               <label class="announce-close" for="announce-done">dismiss</label>
             </p>
           </div>
@@ -37,7 +37,7 @@
 {% endmatch %}
 
 <section class="sec" style="--b: 0" aria-labelledby="round-h">
-  <h2 class="rule" id="round-h"><span>round {{ round_key }}</span><span class="tag live">open</span></h2>
+  <h2 class="rule" id="round-h"><span>{% if pool.is_global() %}global {% endif %}round {{ round_key }}</span><span class="tag live">open</span></h2>
   {# role=timer is not announced on every tick; the visible clock is enough. #}
   <p class="countdown" role="timer" aria-label="time left in this round" data-seconds="{{ seconds_left }}">{{ time_left }}</p>
   <p class="meter" aria-hidden="true"><span class="meter-bar">{{ progress_bar }}</span> <span class="meter-pct">{{ progress_pct }}%</span></p>
@@ -46,11 +46,12 @@
     <p><b>12:42</b><span>closes, vienna time</span></p>
     {% match user %}
       {% when Some with (u) %}
-        {% if u.is_42 %}
+        {% if can_play %}
           {% match my_guess_label %}
             {% when Some with (_g) %}<p class="you in"><b>you're in</b><span>your number is locked</span></p>
             {% when None %}<p class="you"><b>not yet</b><span>you haven't guessed today</span></p>
           {% endmatch %}
+        {% else if pool.is_global() %}<p class="you"><b>verify</b><span>confirm your email to play</span></p>
         {% else %}<p class="you"><b>42 only</b><span>this round is for 42 students</span></p>
         {% endif %}
       {% when None %}<p class="you"><b>guest</b><span>log in to play</span></p>
@@ -68,10 +69,15 @@
   {% match user %}
     {% when Some with (u) %}
       {# Signed in is not the same as playing here: an account that is not a
-         42 one sees the round but gets no form. /guess refuses it as well. #}
-      {% if !u.is_42 %}
+         42 one sees the 42 round but gets no form, and an unverified one gets
+         none in the global round. /guess refuses both as well. #}
+      {% if !can_play %}
         <h2 class="rule"><span>play</span></h2>
-        <p class="dim">this round is for 42 Vienna students &mdash; sign in with 42 to play it.</p>
+        {% if pool.is_global() %}
+          <p class="dim">verify your email address to play &mdash; open the link we sent you.</p>
+        {% else %}
+          <p class="dim">this round is for 42 Vienna students &mdash; sign in with 42 to play it, or play the <a href="/g">global round</a>.</p>
+        {% endif %}
       {% else %}
       {% match my_guess_label %}
         {% when Some with (g) %}
@@ -83,7 +89,7 @@
           <p class="dim">hidden until 12:42</p>
         {% when None %}
           <h2 class="rule"><label for="guess">your number</label></h2>
-          <form class="guessform" method="post" action="/guess">
+          <form class="guessform" method="post" action="{{ pool.base() }}/guess">
             <input type="hidden" name="round" value="{{ round_key }}">
             <input id="guess" name="guess" type="text" inputmode="numeric" enterkeyhint="go"
                    pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
@@ -100,7 +106,7 @@
 
   {% match last_round %}
     {% when Some with (r) %}
-      <p class="lastlink"><a class="btn ghost" href="/day/{{ r.date_key }}">analyse yesterday &rarr;</a></p>
+      <p class="lastlink"><a class="btn ghost" href="{{ pool.base() }}/day/{{ r.date_key }}">analyse yesterday &rarr;</a></p>
     {% when None %}
   {% endmatch %}
 </section>
@@ -124,7 +130,7 @@
 {% match last_round %}
   {% when Some with (r) %}
     <section class="sec" style="--b: 3">
-      <h2 class="rule"><span>last round</span><a class="tag" href="/day/{{ r.date_key }}">{{ r.date_key }} &rarr;</a></h2>
+      <h2 class="rule"><span>last round</span><a class="tag" href="{{ pool.base() }}/day/{{ r.date_key }}">{{ r.date_key }} &rarr;</a></h2>
       {% match r.winner %}
         {% when Some with (w) %}
           <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }} &middot; {{ r.total }} played</span></p>

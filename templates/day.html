@@ -17,7 +17,7 @@
 </section>
 
 <section class="sec" style="--b: 1">
-  <h2 class="rule"><span>spread</span><a class="tag" href="/trends">trends &rarr;</a></h2>
+  <h2 class="rule"><span>spread</span><a class="tag" href="{{ pool.base() }}/trends">trends &rarr;</a></h2>
   <p class="legend">
     <span><i class="win">█</i> winner</span>
     <span><i class="once">█</i> picked by one player</span>
@@ -55,7 +55,7 @@
 <section class="sec" style="--b: 4">
   <h2 class="rule"><span>earlier rounds</span>
     {% match newer %}
-      {% when Some with (d) %}<a class="tag" href="/day/{{ d }}">{{ d }} &rarr;</a>
+      {% when Some with (d) %}<a class="tag" href="{{ pool.base() }}/day/{{ d }}">{{ d }} &rarr;</a>
       {% when None %}<span class="tag">newest</span>
     {% endmatch %}
   </h2>
@@ -67,7 +67,7 @@
       <tbody>
         {% for r in earlier %}
           <tr>
-            <td><a href="/day/{{ r.date_key }}">{{ r.date_key }}</a></td>
+            <td><a href="{{ pool.base() }}/day/{{ r.date_key }}">{{ r.date_key }}</a></td>
             {% match r.winner %}
               {% when Some with (w) %}
                 <td>{{ w.login }}</td>
@@ -83,7 +83,7 @@
     </table>
     <p class="dim listed">
       the {{ earlier.len() }} {% if earlier.len() == 1 %}round{% else %}rounds{% endif %} before this one, of {{ total_rounds }} closed in all.
-      <a href="/results">every round &rarr;</a>
+      <a href="{{ pool.base() }}/results">every round &rarr;</a>
     </p>
   {% endif %}
 </section>
