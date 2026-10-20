@@ -6,7 +6,7 @@ use axum_extra::extract::cookie::CookieJar;
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::app::{error_page, AppError, AppState};
+use crate::app::{error_page, AppError, AppState, ClientIp};
 use crate::auth;
 use crate::db::{self, Pool, Viewer};
 use crate::round::Round;
@@ -586,15 +586,19 @@ pub async fn confirm_guess(
     jar: CookieJar,
     Form(form): Form<GuessForm>,
 ) -> Result<Response, AppError> {
-    confirm_guess_in(Pool::Vienna, state, jar, form).await
+    confirm_guess_in(Pool::Vienna, state, jar, form, None).await
 }
 
 pub async fn global_confirm_guess(
     State(state): State<AppState>,
+    ip: ClientIp,
     jar: CookieJar,
     Form(form): Form<GuessForm>,
 ) -> Result<Response, AppError> {
-    confirm_guess_in(Pool::Global, state, jar, form).await
+    // Where a global guess came from, as a keyed hash, for spotting one
+    // person playing many accounts. The 42 pool needs none of that.
+    let ip_hash = crate::signin::ip_hash(&state, &ip);
+    confirm_guess_in(Pool::Global, state, jar, form, ip_hash).await
 }
 
 async fn confirm_guess_in(
@@ -602,6 +606,7 @@ async fn confirm_guess_in(
     state: AppState,
     jar: CookieJar,
     form: GuessForm,
+    ip_hash: Option<String>,
 ) -> Result<Response, AppError> {
     let player = match player_or_back(pool, &state, &jar).await? {
         Ok((_, player)) => player,
@@ -621,6 +626,9 @@ async fn confirm_guess_in(
     }
 
     let msg = if db::insert_guess(&state.db, pool, &round_key, player, value, true).await? {
+        if let Some(hash) = ip_hash {
+            db::set_guess_ip_hash(&state.db, &round_key, player, &hash).await?;
+        }
         "saved"
     } else {
         // Lost a race with another tab; the first guess stands.
@@ -1254,17 +1262,31 @@ mod tests {
                 .await
                 .unwrap();
             assert!(body(resp).await.contains(r#"action="/g/guess/confirm""#));
-            let resp = handlers::global_confirm_guess(State(state.clone()), jar("a"), guess(&state, "7"))
+            let resp = handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), jar("a"), guess(&state, "7"))
                 .await
                 .unwrap();
             assert_eq!(location(&resp), "/g?msg=saved");
             assert_eq!(global_guesses(&t.db).await, [(ann, 7)]);
             assert!(guesses(&t.db).await.is_empty(), "the 42 pool is untouched");
 
-            let resp = handlers::global_confirm_guess(State(state.clone()), jar("a"), guess(&state, "3"))
+            let resp = handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), jar("a"), guess(&state, "3"))
                 .await
                 .unwrap();
             assert_eq!(location(&resp), "/g?msg=already");
+        }
+
+        #[tokio::test]
+        async fn a_global_guess_notes_a_hash_of_where_it_came_from() {
+            let mut cfg = crate::testkit::config(&[]);
+            cfg.ip_hash_key = Some("k".into());
+            let (t, state, _) = crate::testkit::app_with(cfg).await;
+            verified(&t.db, "ann", "a").await;
+            let ip = crate::app::ClientIp(Some("203.0.113.7".parse().unwrap()));
+            handlers::global_confirm_guess(State(state.clone()), ip, jar("a"), guess(&state, "7")).await.unwrap();
+            let (hash,): (Option<String>,) = sqlx::query_as("SELECT ip_hash FROM global_guesses").fetch_one(&t.db).await.unwrap();
+            let hash = hash.unwrap();
+            assert_eq!(hash.len(), 16);
+            assert!(!hash.contains("203.0"));
         }
 
         #[tokio::test]
@@ -1277,13 +1299,13 @@ mod tests {
             assert!(html.contains("verify your email"));
             for resp in [
                 handlers::global_submit_guess(State(state.clone()), jar("n"), guess(&state, "7")).await.unwrap(),
-                handlers::global_confirm_guess(State(state.clone()), jar("n"), guess(&state, "7")).await.unwrap(),
+                handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), jar("n"), guess(&state, "7")).await.unwrap(),
             ] {
                 assert_eq!(location(&resp), "/g?msg=unverified");
             }
             assert!(global_guesses(&t.db).await.is_empty());
 
-            let resp = handlers::global_confirm_guess(State(state.clone()), CookieJar::new(), guess(&state, "7"))
+            let resp = handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), CookieJar::new(), guess(&state, "7"))
                 .await
                 .unwrap();
             assert_eq!(location(&resp), "/g?msg=signin");
@@ -1296,7 +1318,7 @@ mod tests {
             let account = db::viewer_for_session(&t.db, "s").await.unwrap().unwrap().account.id;
 
             handlers::confirm_guess(State(state.clone()), jar("s"), guess(&state, "4")).await.unwrap();
-            handlers::global_confirm_guess(State(state.clone()), jar("s"), guess(&state, "9")).await.unwrap();
+            handlers::global_confirm_guess(State(state.clone()), crate::app::ClientIp(None), jar("s"), guess(&state, "9")).await.unwrap();
             assert_eq!(guesses(&t.db).await, [(1001, 4)]);
             assert_eq!(global_guesses(&t.db).await, [(account, 9)]);
 

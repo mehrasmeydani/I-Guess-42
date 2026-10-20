@@ -258,6 +258,10 @@ button.danger:focus-visible { background: var(--red); border-color: var(--red); 
 .logins form, .logins .btn { margin: 0; }
 .logins .btn, .logins button { padding: 4px 12px; }
 
+.prose ul { padding-left: 1.2em; max-width: 72ch; }
+.prose li { margin: 8px 0; }
+.prose p { max-width: 72ch; }
+
 .ways { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .ways li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 

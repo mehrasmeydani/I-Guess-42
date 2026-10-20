@@ -686,6 +686,156 @@ pub async fn delete_account(db: &Db, account_id: i64) -> Result<()> {
     Ok(())
 }
 
+// ------------------------------------------------------------ moderation
+
+/// An account as a moderator sees it.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct ModAccount {
+    pub id: i64,
+    pub username: String,
+    /// The 42 login, for an account that plays the 42 pool.
+    pub login: Option<String>,
+    pub created_at: String,
+    pub banned_at: Option<String>,
+    pub ban_reason: Option<String>,
+}
+
+const MOD_ACCOUNT: &str = "SELECT a.id, a.username, u.login, a.created_at, a.banned_at, a.ban_reason
+     FROM accounts a LEFT JOIN users u ON u.id = a.intra_id";
+
+pub async fn mod_account(db: &Db, username: &str) -> Result<Option<ModAccount>> {
+    let sql = format!("{MOD_ACCOUNT} WHERE a.username = ?1 AND a.deleted_at IS NULL");
+    let row = sqlx::query_as::<_, ModAccount>(&sql)
+        .bind(username)
+        .fetch_optional(db)
+        .await?;
+    Ok(row)
+}
+
+pub async fn banned_accounts(db: &Db) -> Result<Vec<ModAccount>> {
+    let sql = format!("{MOD_ACCOUNT} WHERE a.banned_at IS NOT NULL ORDER BY a.banned_at DESC");
+    let rows = sqlx::query_as::<_, ModAccount>(&sql).fetch_all(db).await?;
+    Ok(rows)
+}
+
+/// Bans an account: signed out everywhere and unable to sign in again, and
+/// its guess in the open global round no longer counts. Rounds already
+/// closed are left as they were.
+pub async fn ban_account(db: &Db, account_id: i64, reason: &str, open_round: &str) -> Result<()> {
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE accounts SET banned_at = ?1, ban_reason = ?2 WHERE id = ?3")
+        .bind(ts(Utc::now()))
+        .bind(reason)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM account_sessions WHERE account_id = ?1")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE global_guesses SET participates = 0 WHERE user_id = ?1 AND round_date = ?2")
+        .bind(account_id)
+        .bind(open_round)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn unban_account(db: &Db, account_id: i64) -> Result<()> {
+    sqlx::query("UPDATE accounts SET banned_at = NULL, ban_reason = NULL WHERE id = ?1")
+        .bind(account_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Accounts that look like they might be one person: a group of usernames
+/// and what they have in common. For a moderator to look at, never acted on
+/// by itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cluster {
+    pub why: String,
+    pub usernames: Vec<String>,
+}
+
+/// Groups of at least `min` accounts that signed up from one address in the
+/// last 30 days, or guessed in the global pool from one address in the last
+/// 7, and runs of `min` or more sign-ups within ten minutes of each other.
+/// The 42 pool is left out: every account there is a different student.
+pub async fn clusters(db: &Db, min: i64) -> Result<Vec<Cluster>> {
+    let now = Utc::now();
+    let month_ago = ts(now - chrono::Duration::days(30));
+    let week_ago = (now - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+    let split = |names: String| -> Vec<String> {
+        let mut v: Vec<String> = names.split(',').map(str::to_string).collect();
+        v.sort();
+        v
+    };
+    let mut out = Vec::new();
+
+    let signups: Vec<(String, String)> = sqlx::query_as(
+        "SELECT signup_ip_hash, group_concat(username) FROM accounts
+         WHERE signup_ip_hash IS NOT NULL AND created_at >= ?1 AND deleted_at IS NULL
+         GROUP BY signup_ip_hash HAVING COUNT(*) >= ?2",
+    )
+    .bind(&month_ago)
+    .bind(min)
+    .fetch_all(db)
+    .await?;
+    out.extend(signups.into_iter().map(|(hash, names)| Cluster {
+        why: format!("signed up from one address ({hash})"),
+        usernames: split(names),
+    }));
+
+    let guesses: Vec<(String, String)> = sqlx::query_as(
+        "SELECT g.ip_hash, group_concat(DISTINCT a.username) FROM global_guesses g
+         JOIN accounts a ON a.id = g.user_id
+         WHERE g.ip_hash IS NOT NULL AND g.round_date >= ?1
+         GROUP BY g.ip_hash HAVING COUNT(DISTINCT g.user_id) >= ?2",
+    )
+    .bind(&week_ago)
+    .bind(min)
+    .fetch_all(db)
+    .await?;
+    out.extend(guesses.into_iter().map(|(hash, names)| Cluster {
+        why: format!("guessed from one address this week ({hash})"),
+        usernames: split(names),
+    }));
+
+    // Bursts, found in Rust: the timestamps are text, and a sliding window is
+    // easier to say here than in SQL.
+    let recent: Vec<(String, String)> = sqlx::query_as(
+        "SELECT username, created_at FROM accounts
+         WHERE intra_id IS NULL AND created_at >= ?1 AND deleted_at IS NULL
+         ORDER BY created_at",
+    )
+    .bind(&month_ago)
+    .fetch_all(db)
+    .await?;
+    let times: Vec<(String, DateTime<Utc>)> = recent
+        .into_iter()
+        .filter_map(|(name, at)| Some((name, DateTime::parse_from_rfc3339(&at).ok()?.with_timezone(&Utc))))
+        .collect();
+    let mut i = 0;
+    while i < times.len() {
+        let mut j = i;
+        while j + 1 < times.len() && times[j + 1].1 - times[i].1 <= chrono::Duration::minutes(10) {
+            j += 1;
+        }
+        if (j - i + 1) as i64 >= min {
+            out.push(Cluster {
+                why: format!("signed up within ten minutes ({})", times[i].1.format("%Y-%m-%d %H:%M UTC")),
+                usernames: split(times[i..=j].iter().map(|t| t.0.clone()).collect::<Vec<_>>().join(",")),
+            });
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
 // ------------------------------------------------------------- sessions
 
 pub async fn create_session(db: &Db, token: &str, account_id: i64, ttl_days: i64) -> Result<()> {
@@ -1014,6 +1164,17 @@ pub async fn insert_guess(
         .await?
         .rows_affected();
     Ok(inserted > 0)
+}
+
+/// Notes where a global guess came from (a keyed hash, see `signin::ip_hash`).
+pub async fn set_guess_ip_hash(db: &Db, round_date: &str, account_id: i64, hash: &str) -> Result<()> {
+    sqlx::query("UPDATE global_guesses SET ip_hash = ?1 WHERE round_date = ?2 AND user_id = ?3")
+        .bind(hash)
+        .bind(round_date)
+        .bind(account_id)
+        .execute(db)
+        .await?;
+    Ok(())
 }
 
 /// Every guess in a round, with who made it. Admin/test use only - this is

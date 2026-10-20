@@ -19,13 +19,28 @@ Guessing 1 is only clever if nobody else does.
   headcount is public.
 - If every number in a round was picked by two or more people, nobody wins.
 
+## Two rounds
+
+There are two games on one site, with the same rules and the same 12:42
+deadline, and separate numbers:
+
+- **42 Vienna** (`/`): for 42 Vienna students, signed in with 42. Pays
+  coalition points. Logins are only shown to other 42 students.
+- **global** (`/g`): for anyone with a verified account, signed in with
+  42, GitHub, Google or an email and password. 42 students play both,
+  separately, with one click between them.
+
+One person has one account however many ways they sign in; the account page
+(`/account`) adds and removes them. See [SPEC.md](SPEC.md) for the whole plan,
+including the points and betting still to come.
+
 ## Stack
 
 | | |
 |---|---|
 | Web | `axum` 0.8, server-rendered `askama` templates |
 | Storage | SQLite via `sqlx` (runtime queries — no `DATABASE_URL` needed at build time) |
-| Auth | 42 intra OAuth2 authorization code flow, opaque server-side sessions |
+| Auth | 42 intra, GitHub and Google OAuth2 (PKCE for the last two), email + argon2id passwords, opaque server-side sessions |
 
 No JavaScript beyond a 20-line countdown; the game itself works without it.
 
@@ -336,6 +351,18 @@ watching it, and a container restart drops whatever requests are in flight.
 | `ALLOWED_CAMPUS_IDS` | no | `53` (42 Vienna); empty lets every campus in |
 | `IGLCP_API_KEY` | no | empty (no coalition points); pays everyone who played a round and more to its winner, ignored in test mode |
 | `IGLCP_API_URL` | no | `https://iglcp-api.42vienna.com` |
+| `PUBLIC_URL` | no | origin of `FT_REDIRECT_URI`; base of emailed links and the GitHub/Google redirect URIs |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | no | empty (no GitHub button); callback `$PUBLIC_URL/auth/github/callback` |
+| `GITHUB_MIN_ACCOUNT_AGE_DAYS` | no | `30` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | no | empty (no Google button); callback `$PUBLIC_URL/auth/google/callback` |
+| `RESEND_API_KEY` | no | empty: no mail; email sign-up is off on a live site, and a test instance prints mails to the log |
+| `MAIL_FROM` | no | `i guess low <noreply@iguesslow.com>` |
+| `MAIL_DAILY_LIMIT` | no | `90` (under Resend's free 100 a day; resets get 10 more) |
+| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | empty (no CAPTCHA on sign-up) |
+| `IP_HASH_KEY` | no | empty: no address-derived data is stored |
+| `TRUST_PROXY` | no | `false`; compose sets it, since Caddy is in front |
+| `MODERATORS` | no | empty (`/mod` answers 404); 42 logins, comma-separated |
+| `IMPRINT_NAME` / `IMPRINT_ADDRESS` / `IMPRINT_EMAIL` | no | shown on `/imprint` |
 | `RUST_LOG` | no | `i_guess_42=info,tower_http=warn` |
 | `ENV_FILE` | no | `.env`; point it at another file to keep two setups side by side |
 
@@ -345,12 +372,20 @@ watching it, and a container restart drops whatever requests are in flight.
 src/
   main.rs        router, startup, hourly session sweep
   config.rs      environment
+  oauth.rs       sign-in through 42, GitHub and Google, and linking logins
+  signin.rs      email + password: sign up, sign in, verify, reset
+  credentials.rs username, email and password rules; hashing
+  account.rs     /account: rename, logins, password, delete
+  moderation.rs  /mod for the global round; /privacy and /imprint
+  mail.rs        the few mails sent, through Resend (or the log)
+  limits.rs      in-memory rate limits
+  lists/         common passwords, disposable email domains
   points.rs      coalition points for players and winners (42 Vienna API)
   round.rs       12:42 Europe/Vienna round boundaries (+ DST handling)
   stats.rs       day and multi-day statistics and charts
   demo.rs        random bot history for test instances
   db.rs          schema access; the winner query lives here
-  auth.rs        42 OAuth2 flow and session cookies
+  auth.rs        42 API calls and session cookies
   handlers.rs    routes
   templates.rs   view structs
   app.rs         shared state and the error page
@@ -410,9 +445,21 @@ numbers secret until 12:42.
   minutes.
 - `SameSite=Lax` is what stops cross-site guess submissions; there is no
   separate CSRF token.
-- Only students whose **primary** 42 campus is in `ALLOWED_CAMPUS_IDS` can
-  sign in. Anyone else is turned away at the OAuth callback, before a user
-  row or session is created. Visitors from other campuses keep their home
-  campus as primary, so they are refused too.
+- Only students whose **primary** 42 campus is in `ALLOWED_CAMPUS_IDS` play
+  the 42 Vienna round. A 42 student of any other campus can still sign in
+  with 42 and play the global round, but gets no user row, so the 42 round
+  never hears of them.
+- Passwords are argon2id (19 MiB, t=2), at most four hashes at once. An
+  unknown email still costs a hash, so a failed sign-in takes as long either
+  way, and says the same thing. Failed sign-ins, sign-ups and mails are rate
+  limited per email and per address.
+- Emailed links are single-use, short-lived, stored only as SHA-256, and
+  confirmed with a button so a mail scanner opening them cannot spend them.
+  Signing up with a registered address looks the same as a new one; the
+  owner gets a mail instead.
+- Logins are never joined up because they share an email. A login can only
+  be linked to an account by finishing the flow in that account's session.
+- Admin and moderator rights go by **42 login**, never by username, which
+  anyone can choose.
 - The client secret is only ever sent to `api.intra.42.fr` in a POST body, and
   is never logged.

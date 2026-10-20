@@ -8,6 +8,7 @@ mod demo;
 mod handlers;
 mod limits;
 mod mail;
+mod moderation;
 mod oauth;
 mod points;
 mod round;
@@ -121,6 +122,12 @@ async fn main() -> Result<()> {
         .route("/account/unlink", post(account::unlink))
         .route("/account/password", post(account::password))
         .route("/account/delete", post(account::delete))
+        // 404 unless MODERATORS names the signed-in 42 login.
+        .route("/mod", get(moderation::moderation))
+        .route("/mod/ban", post(moderation::ban))
+        .route("/mod/unban", post(moderation::unban))
+        .route("/privacy", get(moderation::privacy))
+        .route("/imprint", get(moderation::imprint))
         .route("/healthz", get(handlers::healthz))
         // 404 unless ADMIN_LOGINS names the signed-in user.
         .route("/admin", get(handlers::admin))

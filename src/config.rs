@@ -64,6 +64,14 @@ pub struct Config {
     pub google_auth_url: String,
     pub google_token_url: String,
     pub google_userinfo_url: String,
+    /// 42 logins who may moderate the global pool at /mod, on the live site
+    /// too. 42 logins and not usernames, because anyone can pick a username.
+    /// Empty: /mod answers 404. On a test instance the admins can as well.
+    pub moderators: Vec<String>,
+    /// Who runs the site, for /imprint. Unset fields show as not given.
+    pub imprint_name: Option<String>,
+    pub imprint_address: Option<String>,
+    pub imprint_email: Option<String>,
 }
 
 impl Config {
@@ -121,6 +129,14 @@ impl Config {
                 "GOOGLE_USERINFO_URL",
                 "https://openidconnect.googleapis.com/v1/userinfo",
             ),
+            moderators: opt("MODERATORS", "")
+                .split(',')
+                .map(|l| l.trim().to_lowercase())
+                .filter(|l| !l.is_empty())
+                .collect(),
+            imprint_name: nonempty("IMPRINT_NAME"),
+            imprint_address: nonempty("IMPRINT_ADDRESS"),
+            imprint_email: nonempty("IMPRINT_EMAIL"),
         })
     }
 
@@ -158,6 +174,12 @@ impl Config {
     /// True when this instance is a test instance.
     pub fn test_mode(&self) -> bool {
         !self.admin_logins.is_empty()
+    }
+
+    /// Whether the 42 login `login` may moderate the global pool.
+    pub fn is_moderator(&self, login: &str) -> bool {
+        let login = login.to_lowercase();
+        self.moderators.contains(&login) || (self.test_mode() && self.is_admin(&login))
     }
 
     pub fn is_admin(&self, login: &str) -> bool {

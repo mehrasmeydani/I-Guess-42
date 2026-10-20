@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Imprint &middot; i guess low{% endblock %}
+{% block h1 %}imprint{% endblock %}
+
+{% block content %}
+<section class="sec prose" style="--b: 0">
+  <h2 class="rule"><span>imprint</span></h2>
+  <dl class="kv">
+    <dt>run by</dt><dd>{{ name.as_deref().unwrap_or("not given") }}</dd>
+    <dt>address</dt><dd>{{ address.as_deref().unwrap_or("not given") }}</dd>
+    <dt>contact</dt><dd>{% match email %}{% when Some with (e) %}<a href="mailto:{{ e }}">{{ e }}</a>{% when None %}not given{% endmatch %}</dd>
+  </dl>
+  <p class="dim">a free game for fun. no money changes hands. see also <a href="/privacy">privacy</a>.</p>
+</section>
+{% endblock %}

@@ -34,6 +34,7 @@ away all the answers.
 - [`src/db.rs` — storage and the winner query](#srcdbrs--storage-and-the-winner-query)
 - [`src/auth.rs` — signing in with 42](#srcauthrs--signing-in-with-42)
 - [`src/handlers.rs` — the routes](#srchandlersrs--the-routes)
+- [Accounts and signing in](#accounts-and-signing-in)
 - [`src/templates.rs` — view models](#srctemplatesrs--view-models)
 - [`templates/` — the HTML](#templates--the-html)
 - [`static/` — CSS and the countdown](#static--css-and-the-countdown)
@@ -917,7 +918,7 @@ generator, you have handed out everyone's account.
 ### Building the authorize URL
 
 ```rust
-let mut url = Url::parse(AUTHORIZE_URL)?;
+let mut url = Url::parse(&format!("{}/oauth/authorize", cfg.ft_api_url))?;
 url.query_pairs_mut()
     .append_pair("client_id", &cfg.client_id)
     .append_pair("redirect_uri", &cfg.redirect_uri)
@@ -934,10 +935,14 @@ intermittent-looking OAuth failures.
 `response_type=code` selects this flow. `scope=public` is the minimum 42
 offers — ask for no more than you need.
 
+`ft_api_url` is `https://api.intra.42.fr` unless `FT_API_URL` says otherwise,
+which only tests do: they point it at a fake server so the whole callback runs
+for real (see `oauth.rs`).
+
 ### The exchange
 
 ```rust
-let resp = http.post(TOKEN_URL)
+let resp = http.post(format!("{}/oauth/token", cfg.ft_api_url))
     .form(&[
         ("grant_type", "authorization_code"),
         ("client_id", cfg.client_id.as_str()),
@@ -1264,64 +1269,21 @@ values are only exposed on `/admin`.
 
 ### `callback`
 
-```rust
-if let Some(err) = query.error {
-    let detail = query.error_description.unwrap_or(err);
-    return Ok(error_page(StatusCode::BAD_REQUEST,
-        &format!("42 refused the sign-in: {detail}")));
-}
+The 42 callback moved to `oauth.rs` (`callback_42`) when GitHub and Google
+joined it; see [Accounts and signing in](#accounts-and-signing-in) below. The
+ideas from the original are all still there:
 
-let (Some(code), Some(state_token)) = (query.code, query.state) else {
-    return Ok(error_page(StatusCode::BAD_REQUEST, "That sign-in link is incomplete..."));
-};
+- the provider's own refusal (`?error=`) is shown, escaped by Askama;
+- the `state` is consumed **before** the token exchange, in one statement, so
+  no work is done for a request that cannot prove it started the flow and a
+  state cannot be replayed;
+- the access token is used and dropped, never stored;
+- `upsert_user` refreshes the display name and avatar at every sign-in.
 
-if !db::consume_oauth_state(&state.db, &state_token).await? {
-    return Ok(error_page(StatusCode::BAD_REQUEST, "That sign-in link has expired..."));
-}
-
-let access_token = auth::exchange_code(&state.http, &state.cfg, &code).await?;
-let me = auth::fetch_me(&state.http, &access_token).await?;
-
-if !state.cfg.campus_allowed(me.primary_campus_id()) {
-    return Ok(error_page(StatusCode::FORBIDDEN,
-        "This game is only open to students of this campus..."));
-}
-
-db::upsert_user(&state.db, me.id, &me.login, me.display_name(), me.image_url()).await?;
-
-let account = db::account_for_intra(&state.db, me.id, &me.login).await?;
-let session = auth::random_token();
-db::create_session(&state.db, &session, account.id, auth::SESSION_TTL_DAYS).await?;
-
-let jar = jar.add(auth::session_cookie(session, state.cfg.secure_cookies));
-Ok((jar, Redirect::to("/")).into_response())
-```
-
-The `state` check is the security-critical line, and it comes **before** the
-token exchange — no work is done for a request that cannot prove it started the
-flow. `consume_oauth_state` deletes the row as it checks, in one statement, so
-a state cannot be replayed.
-
-The campus check sits **before** `upsert_user`: someone from another campus
-leaves no user row and gets no session. The refusal names their home campus
-when 42 provides it, so a confused visitor knows why.
-
-`upsert_user` means the login refreshes the display name and avatar every time,
-so a changed intra profile propagates without extra machinery.
-
-`account_for_intra` finds the account linked to that intra id, or makes one on
-the first sign-in, named after the login. If someone without 42 already has
-that name it becomes `login-42`; the 42 pool keeps showing the login either
-way, because it reads `users`, not `accounts`. The session belongs to the
-account.
-
-The access token is used twice and then dropped. It is never stored — the app
-has no further use for the 42 API, so keeping it would be pure liability.
-
-Returning `(jar, Redirect)` works because `CookieJar` implements
-`IntoResponseParts`: the tuple becomes a response with the `Set-Cookie` header
-attached. `Redirect::to` is `303 See Other`, the correct status for
-"POST/action finished, now go GET this".
+What changed is the campus check. It used to turn other campuses away; now it
+only decides whether the student plays the **42 Vienna** round. Anyone else
+signing in with 42 gets an account for the global round and no `users` row, so
+the 42 round never hears of them.
 
 ### `healthz`
 
@@ -1440,6 +1402,130 @@ An unchecked HTML checkbox sends **nothing at all**, rather than a false value.
 `#[serde(default)]` plus `Option` is how you read one: absent means unchecked.
 Getting this wrong gives a form that fails to submit whenever the box is
 cleared.
+
+---
+
+## Accounts and signing in
+
+Everything since the global round arrived, in one place.
+
+### Two pools, one set of queries
+
+`db::Pool` is `Vienna` or `Global`. Every query that reads or writes guesses
+takes one, and the pool picks two table names:
+
+| | guesses | names from | id stored |
+|---|---|---|---|
+| `Pool::Vienna` | `guesses` | `users` | intra id |
+| `Pool::Global` | `global_guesses` | `global_players` (a view over `accounts`) | account id |
+
+Both tables have the same columns (`global_guesses.user_id` holds an
+*account* id), and the view has the same columns as `users`, so each query is
+written once with the two names spliced in. The names only ever come from the
+enum, never from input. The handlers are written once too: `index_in(pool,
+…)`, `results_in`, `day_in`, `trends_in`, with one thin route function per
+pool, and every template has a `pool` field whose `base()` (`""` or `"/g"`)
+prefixes its links.
+
+Who may play is `player_in(pool, viewer)`: in the 42 round, the viewer's
+intra id (no 42 player, no form, and `/guess` refuses); in the global round,
+their account id, if the account is **verified**. Who may see names is
+`names_visible(pool, viewer)`: 42 students only in the 42 round, anyone signed
+in in the global one.
+
+### Accounts, identities, sessions
+
+An **account** is a person. It has a username and, for a 42 student,
+`intra_id` pointing at their `users` row. An **identity** is one way of
+signing in: `(provider, subject)`, where subject is the intra id, the GitHub
+id, Google's `sub`, or the email. Sessions belong to accounts.
+
+Identities are never joined up because they share an email. If a Google
+sign-in brings an address an account already uses, it is refused with "sign
+in the way you did before, then add Google". Matching by email would hand an
+account to whoever controls that address at another provider.
+
+### `oauth.rs` — 42, GitHub, Google
+
+One flow for three providers. `start` stores a single-use `state` with the
+provider's name, the linking account if any, and (GitHub, Google) a PKCE
+verifier, then redirects. `arrived` checks the callback: no provider refusal,
+code and state present, state consumed and **for this provider**. Then each
+provider's own calls say who the visitor is, and:
+
+- **linking** (`/link/{provider}`, from the account page) adds the identity to
+  the account that started it. `finish_link` insists the session finishing
+  the flow is that same account; otherwise an attacker could start linking on
+  their own account and have a victim's browser finish it, tying the victim's
+  login to the attacker.
+- **signing in** finds the identity's account, or makes one: verified at once,
+  username built from the GitHub login or the email's start
+  (`credentials::username_from`, numbered until free). GitHub accounts younger
+  than `GITHUB_MIN_ACCOUNT_AGE_DAYS` cannot make one: a fresh GitHub account
+  is the cheapest fake there is.
+
+Google is asked who someone is through its userinfo endpoint with the access
+token, over TLS, rather than by checking an ID token's signature.
+
+### `signin.rs` and `credentials.rs` — email and password
+
+The rules (`credentials.rs`) are plain functions: usernames 3–20 of
+`[a-z0-9_-]`, reserved words and every 42 login excluded; emails normalised,
+disposable domains refused (a bundled CC0 list); passwords 10–128 characters,
+not one of the common ones (a bundled list), not the email or username. No
+"must contain a digit" rules, after NIST 800-63B.
+
+Hashing is argon2id at OWASP's baseline, run on the blocking pool behind a
+four-permit semaphore so a burst of sign-ins cannot take 19 MiB each without
+limit. `verify_password(_, None)` still hashes, against a decoy, so an unknown
+email takes as long as a wrong password.
+
+The pages are written so a visitor learns nothing they did not know:
+
+- **sign up** ends on "check your inbox" whether the address was new or not.
+  A known address gets a mail telling its owner, and no second account. Nobody
+  is signed in until they open the link, so not even a cookie differs.
+- **verify** and **reset** links are 64 random characters; only their SHA-256
+  is stored. Opening one shows a button and spends nothing, because mail
+  scanners open links to check them. The POST spends it, in one `UPDATE …
+  RETURNING`.
+- **forgot** says the same thing for every address.
+- **reset** checks the new password before spending the link, ends every
+  session of the account, and confirms the address (the link came through it).
+
+`limits.rs` counts failures per email and per address in memory (a restart
+forgets, which is fine for this). `mail.rs` sends through Resend, or to the log
+on a test instance without a key, and never past `MAIL_DAILY_LIMIT` a day,
+with ten extra for resets.
+
+`ClientIp` (in `app.rs`) is where an address comes from: the right-most
+`X-Forwarded-For` entry when `TRUST_PROXY` is set (Caddy appends what it saw;
+anything to the left is the client's own claim), else the TCP peer. Addresses
+are only ever stored as `credentials::ip_hash`: an HMAC keyed with
+`IP_HASH_KEY` and the month, cut to 16 hex characters.
+
+### `account.rs` and `moderation.rs`
+
+The account page renames (once a month; a 42 student may take their own
+login back), adds and removes logins (never the last one, never the 42 login
+the 42 round depends on), adds or changes a password (the current one first,
+under the sign-in limit), and deletes the account: identities, password,
+sessions and name go; the row stays as `deleted-<id>` so past rounds add up;
+the 42 round's own record of a student is not the account's to delete.
+
+`/mod` is for `MODERATORS`, named by 42 login because anyone can pick a
+username. A ban signs the account out, keeps it out, and voids its guess in
+the open global round; closed rounds are not rewritten. The "worth a look"
+list groups accounts that signed up or guessed from one address hash, or
+signed up within ten minutes of each other. Hints for a human, never acted on
+by themselves.
+
+### Testing it
+
+`testkit.rs` builds an app on a throwaway database with mail kept in memory,
+and gives session cookies and response helpers. `oauth.rs`'s tests start a
+fake server that plays 42, GitHub and Google at once (a code stands for a
+person), so every callback runs end to end, PKCE included.
 
 ---
 
@@ -2016,6 +2102,12 @@ database the same way (a copy is made, the file itself is never written):
 ```bash
 MIGRATE_CHECK_DB=/path/to/game.db cargo test migrating_a_copy -- --ignored --nocapture
 ```
+
+`0006_global_pool.sql` adds `global_guesses` (the same shape as `guesses`,
+keyed by account), the `global_players` view, and `accounts.verified_at`.
+`0007_sign_in.sql` adds `passwords`, `email_tokens` (hashes only) and
+`mail_log`, and two account columns: the sign-up address hash and when the
+username last changed.
 
 There is deliberately **no `winners` table**. Winners are derived from
 `guesses`, so there is no scheduled job, nothing to run at 12:42, and no way

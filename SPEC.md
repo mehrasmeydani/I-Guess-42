@@ -1,6 +1,6 @@
 # Spec: open to everyone — global pool, logins, points and betting
 
-Status: **Phase 1 built** (on the `global` branch, not deployed); phases 2–4 not started. This is the plan the next releases follow.
+Status: **Phases 1 and 2 built** (on the `global` branch, not deployed); phases 3–4 not started. This is the plan the next releases follow.
 Where it disagrees with the code, the code describes what runs today and this
 file describes what is meant to run next.
 
@@ -930,7 +930,37 @@ usual release flow in the README.
   a copy of the live database migrates with everyone still signed in.
   (Not deployed on its own; see above.)
 
-### Phase 2 — global pool and logins
+### Phase 2 — global pool and logins — **done**
+
+Built as planned, with these differences, all deliberate:
+
+- **Migrations** are numbered `0006_global_pool.sql` and `0007_sign_in.sql`
+  (the global tables came first). `global_guesses` names its column `user_id`
+  like `guesses`, holding an account id, and a `global_players` view mirrors
+  `users`, so every query is written once for both pools.
+- **Sign-up does not sign in.** The account signs in when its owner opens the
+  emailed link. Signing in at once would set a cookie for a new address and
+  not for a known one, which tells a visitor which addresses are registered.
+  An unconfirmed account can still sign in with its password and see the
+  global round; it plays once confirmed.
+- **Emailed links show a button** and are spent by a POST, because mail
+  scanners open links to check them.
+- **Google** is asked who someone is through the userinfo endpoint, not by
+  reading the ID token.
+- **The client address** is the *right-most* `X-Forwarded-For` entry (the one
+  Caddy appended), and only when `TRUST_PROXY` is set.
+- **`MODERATORS` are 42 logins**, not usernames, which anyone can choose. On
+  a test instance the admins moderate too.
+- **A 42 student of another campus** signs in with 42 to the global round;
+  if their campus is let in later, the same account starts playing the
+  42 round.
+- **Not built yet from 11.3**: the "consecutive run below the winner"
+  pattern. Real blocking means duplicating low numbers, which honest players
+  also do, so a useful rule needs real data first. Shared sign-up and guess
+  addresses and ten-minute sign-up bursts are shown.
+- **42 pool unchanged**, as required: same tables, same payouts. The only
+  visible change there is that a non-42 account sees it with names masked and
+  no guess form.
 
 - Migrations `0006` and `0007`.
 - `/login` chooser, GitHub, Google, email + password with verify/forgot/reset,

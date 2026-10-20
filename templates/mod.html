@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Moderation &middot; i guess low{% endblock %}
+{% block h1 %}moderation{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>ban an account</span></h2>
+  {% include "_notice.html" %}
+  <form class="authform" method="post" action="/mod/ban">
+    <label for="username">username</label>
+    <input id="username" name="username" type="text" autocomplete="off" spellcheck="false" required>
+    <label for="reason">why</label>
+    <input id="reason" name="reason" type="text" autocomplete="off" required maxlength="200">
+    <p class="hint">signs them out everywhere and keeps them out; their guess in today's global round stops counting.
+      a 42 student banned here is shut out of both rounds. closed rounds are not changed.</p>
+    <button type="submit" class="danger">ban</button>
+  </form>
+</section>
+
+<section class="sec" style="--b: 1">
+  <h2 class="rule"><span>worth a look</span><span class="tag">{{ clusters.len() }}</span></h2>
+  {% if clusters.is_empty() %}
+    <p class="dim">nothing stands out: no three accounts share an address or a ten-minute sign-up window.</p>
+  {% else %}
+    <table class="history">
+      <tbody>
+        {% for c in clusters %}
+          <tr><td class="dim">{{ c.why }}</td><td>{{ c.usernames.join(", ") }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">shared networks are common (a campus, a dorm, a phone carrier). these are hints, not proof.</p>
+  {% endif %}
+</section>
+
+<section class="sec" style="--b: 2">
+  <h2 class="rule"><span>banned</span><span class="tag">{{ banned.len() }}</span></h2>
+  {% if banned.is_empty() %}
+    <p class="dim">nobody.</p>
+  {% else %}
+    <table class="history logins">
+      <tbody>
+        {% for b in banned %}
+          <tr>
+            <td><b>{{ b.username }}</b>{% match b.login %}{% when Some with (l) %} <span class="dim">42: {{ l }}</span>{% when None %}{% endmatch %}</td>
+            <td class="dim">{{ b.ban_reason.as_deref().unwrap_or("") }}</td>
+            <td class="num">
+              <form method="post" action="/mod/unban" class="inline">
+                <input type="hidden" name="username" value="{{ b.username }}">
+                <button type="submit" class="ghost">unban</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endblock %}

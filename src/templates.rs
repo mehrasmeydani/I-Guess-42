@@ -668,6 +668,39 @@ pub struct AccountTemplate {
     pub email_signup: bool,
 }
 
+#[derive(Template)]
+#[template(path = "mod.html")]
+pub struct ModTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub notice: Option<Notice>,
+    pub clusters: Vec<crate::db::Cluster>,
+    pub banned: Vec<crate::db::ModAccount>,
+}
+
+#[derive(Template)]
+#[template(path = "privacy.html")]
+pub struct PrivacyTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+}
+
+#[derive(Template)]
+#[template(path = "imprint.html")]
+pub struct ImprintTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub name: Option<String>,
+    pub address: Option<String>,
+    pub email: Option<String>,
+}
+
 /// Render a template, or fall back to a bare 500 if the template itself is broken.
 pub fn render<T: Template>(template: &T) -> Response {
     match template.render() {
