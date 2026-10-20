@@ -261,7 +261,6 @@ pub struct DayTemplate {
     pub distinct: usize,
     pub lowest_unpicked_label: String,
     pub most: Vec<TallyView>,
-    pub least: Vec<TallyView>,
     /// Every picked value, for readers who want the numbers rather than the chart.
     pub all: Vec<TallyView>,
     pub chart: Chart,
@@ -283,7 +282,8 @@ pub struct DayLineView {
     pub players_pct: i64,
     pub winner_label: Option<String>,
     pub winner_pct: i64,
-    pub lowest_free_label: String,
+    /// Far above the day's other picks, and left out of the averages.
+    pub winner_outlier: bool,
 }
 
 /// An older-half vs newer-half comparison, printed as `before -> after`.
@@ -361,8 +361,6 @@ pub struct TrendsTemplate {
     pub falling: Vec<MoverView>,
     /// The most picked numbers of the whole range.
     pub most: Vec<TallyView>,
-    /// The lowest numbers nobody picked in the range, as labels.
-    pub never: Vec<String>,
     /// How long reading and analysing the range took, e.g. "12.4 ms".
     pub took: String,
 }
@@ -395,9 +393,21 @@ impl TrendsTemplate {
             .as_ref()
             .map_or_else(Default::default, |h| (date_span(&h.older), date_span(&h.newer)));
         let most_players = trend.days.iter().map(|d| d.players).max().unwrap_or(1).max(1);
-        let top_winner = trend.days.iter().filter_map(|d| d.winner).max().unwrap_or(1).max(1);
-        // Rounded up, so any non-zero value shows at least a sliver.
-        let share = |v: i64, of: i64| (v * 100 + of - 1) / of;
+        // An outlier winner would flatten every other day's bar to a sliver.
+        let top_winner = trend
+            .days
+            .iter()
+            .filter(|d| !d.winner_outlier)
+            .filter_map(|d| d.winner)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        // Rounded up, so any non-zero value shows at least a sliver; capped,
+        // since an outlier is past the top. In i128, as winners reach i64::MAX.
+        let share = |v: i64, of: i64| {
+            let (v, of) = (i128::from(v), i128::from(of));
+            ((v * 100 + of - 1) / of).min(100) as i64
+        };
         let changes = trend.halves.as_ref().map_or_else(Vec::new, |h| {
             vec![
                 ChangeView::new(
@@ -408,7 +418,7 @@ impl TrendsTemplate {
                 ),
                 ChangeView::new(
                     "winning number",
-                    "average of the numbers that won; days with no winner are skipped",
+                    "average of the numbers that won; days with no winner, and outliers far above the day's other picks, are skipped",
                     h.winner.0,
                     h.winner.1,
                 ),
@@ -439,7 +449,7 @@ impl TrendsTemplate {
                     players_pct: share(d.players, most_players),
                     winner_label: d.winner.map(group_digits),
                     winner_pct: d.winner.map_or(0, |w| share(w, top_winner)),
-                    lowest_free_label: group_digits(d.lowest_free),
+                    winner_outlier: d.winner_outlier,
                 })
                 .collect(),
             changes,
@@ -448,7 +458,6 @@ impl TrendsTemplate {
             rising: trend.rising.iter().map(mover).collect(),
             falling: trend.falling.iter().map(mover).collect(),
             most: trend.most.iter().map(Into::into).collect(),
-            never: trend.never.iter().copied().map(group_digits).collect(),
             took: String::new(),
         }
     }

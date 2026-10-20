@@ -405,6 +405,9 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 }
 .barcell.win .minibar { background: var(--green); }
 .barcell.win b { color: var(--green); }
+/* Past the top of the scale: drawn full, but faded so it does not read as the
+   biggest win of the range. */
+.barcell.outlier .minibar { opacity: 0.35; }
 
 details summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--hi); font-weight: 700; list-style: none; }
 details summary::-webkit-details-marker { display: none; }

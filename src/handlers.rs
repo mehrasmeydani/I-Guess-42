@@ -295,7 +295,6 @@ pub async fn day(
         distinct: stats.distinct,
         lowest_unpicked_label: group_digits(stats.lowest_unpicked),
         most: stats.most.iter().map(Into::into).collect(),
-        least: stats.least.iter().map(Into::into).collect(),
         all: tallies.iter().map(Into::into).collect(),
         chart,
         earlier,

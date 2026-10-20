@@ -12,8 +12,8 @@ pub struct Tally {
     pub count: i64,
 }
 
-/// How many numbers the "most picked", "least picked" and "never picked"
-/// lists show, on a day page and over a whole range alike.
+/// How many numbers the "most picked" list shows, on a day page and over a
+/// whole range alike.
 const TOP: usize = 5;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -26,9 +26,6 @@ pub struct DayStats {
     pub lowest_unpicked: i64,
     /// Most-picked first; ties go to the lower number.
     pub most: Vec<Tally>,
-    /// Least-picked first, among numbers somebody did pick; ties go to the
-    /// lower number.
-    pub least: Vec<Tally>,
 }
 
 /// `tallies` must be sorted by value, one row per distinct value, as the
@@ -50,17 +47,12 @@ pub fn analyse(tallies: &[Tally]) -> DayStats {
     most.sort_by(|a, b| b.count.cmp(&a.count).then(a.value.cmp(&b.value)));
     most.truncate(TOP);
 
-    let mut least = tallies.to_vec();
-    least.sort_by(|a, b| a.count.cmp(&b.count).then(a.value.cmp(&b.value)));
-    least.truncate(TOP);
-
     DayStats {
         total: tallies.iter().map(|t| t.count).sum(),
         distinct: tallies.len(),
         winner,
         lowest_unpicked,
         most,
-        least,
     }
 }
 
@@ -291,6 +283,11 @@ pub struct DayLine {
     pub date: String,
     pub players: i64,
     pub winner: Option<i64>,
+    /// The winner sat far above everything else picked that day: every lower
+    /// number collided and one player off at, say, `i64::MAX` was left alone.
+    /// It still won, but it says nothing about where winners land, so it is
+    /// kept out of the averages and the bar scale.
+    pub winner_outlier: bool,
     pub lowest_free: i64,
 }
 
@@ -303,7 +300,8 @@ pub struct Mover {
 }
 
 /// Averages over the older and the newer half of the range, in hundredths
-/// so they stay integers. `None` where a half had no winners at all.
+/// so they stay integers. `None` where a half had no winners at all, outlier
+/// winners not counted.
 pub struct Halves {
     /// First and last date of each half, `YYYY-MM-DD`.
     pub older: (String, String),
@@ -325,15 +323,46 @@ pub struct Trend {
     /// The crowd's favourites over the whole range, most picked first; ties go
     /// to the lower number.
     pub most: Vec<Tally>,
-    /// The lowest numbers nobody picked on any day of the range. Every one of
-    /// them would have won each of those rounds, which is the useful part.
-    pub never: Vec<i64>,
     /// Needs at least two days to compare.
     pub halves: Option<Halves>,
 }
 
 /// How many rising and falling numbers to list.
 const TREND_TOP: usize = 3;
+/// A winner past the day's upper quartile by this many interquartile ranges
+/// is an outlier: Tukey's "far out" fence.
+const FENCE_IQRS: i64 = 3;
+/// The interquartile range is taken as at least this. On a day where nearly
+/// everyone piled onto 1, the quartiles meet and the fence would sit right on
+/// top of them, flagging a perfectly ordinary win on 2.
+const MIN_SPREAD: i64 = 10;
+
+/// The value at fraction `num / den` of the way through the day's picks,
+/// counting every pick, not every distinct value. `tallies` is sorted by value.
+fn quantile(tallies: &[Tally], total: i64, num: i64, den: i64) -> i64 {
+    // Nearest rank: the pick at position ceil(total * num / den), from 1.
+    let rank = ((total * num + den - 1) / den).max(1);
+    let mut seen = 0;
+    for t in tallies {
+        seen += t.count;
+        if seen >= rank {
+            return t.value;
+        }
+    }
+    tallies.last().map_or(0, |t| t.value)
+}
+
+/// Whether a day's winner lies beyond the far fence of that day's own picks.
+/// The day's picks are the yardstick rather than the other days' winners: a
+/// day has dozens of picks to measure against, a week has seven winners.
+fn is_outlier(tallies: &[Tally], winner: i64) -> bool {
+    let total: i64 = tallies.iter().map(|t| t.count).sum();
+    let q1 = quantile(tallies, total, 1, 4);
+    let q3 = quantile(tallies, total, 3, 4);
+    let spread = (q3 - q1).max(MIN_SPREAD);
+    // In i128, since the picks reach up to i64::MAX and the fence above them.
+    i128::from(winner) > i128::from(q3) + i128::from(spread) * i128::from(FENCE_IQRS)
+}
 
 /// Groups rows (sorted by date, then value, as the database returns them)
 /// into one tally list per day.
@@ -365,9 +394,10 @@ fn sum(lists: &[&Vec<Tally>]) -> Vec<Tally> {
         .collect()
 }
 
+/// In i128 underneath: a few winners up near i64::MAX would overflow the sum.
 fn avg(xs: impl Iterator<Item = i64>) -> Option<i64> {
-    let (total, n) = xs.fold((0, 0), |(t, n), x| (t + x, n + 1));
-    (n > 0).then(|| total * 100 / n)
+    let (total, n) = xs.fold((0i128, 0i128), |(t, n), x| (t + i128::from(x), n + 1));
+    (n > 0).then(|| i64::try_from(total * 100 / n).unwrap_or(i64::MAX))
 }
 
 pub fn trend(rows: &[DayTally]) -> Trend {
@@ -377,10 +407,11 @@ pub fn trend(rows: &[DayTally]) -> Trend {
     let lines: Vec<DayLine> = days
         .iter()
         .zip(&stats)
-        .map(|((date, _), s)| DayLine {
+        .map(|((date, tallies), s)| DayLine {
             date: date.clone(),
             players: s.total,
             winner: s.winner,
+            winner_outlier: s.winner.is_some_and(|w| is_outlier(tallies, w)),
             lowest_free: s.lowest_unpicked,
         })
         .collect();
@@ -444,22 +475,6 @@ pub fn trend(rows: &[DayTally]) -> Trend {
     most.sort_by(|a, b| b.count.cmp(&a.count).then(a.value.cmp(&b.value)));
     most.truncate(TOP);
 
-    // Walk up from 1 and collect the holes. `totals` is sorted by value, so
-    // the numbers that were picked are stepped through alongside the count,
-    // rather than searched for once per candidate.
-    let mut never = Vec::with_capacity(TOP);
-    let mut picked = totals.iter().peekable();
-    let mut value = 1;
-    while never.len() < TOP {
-        match picked.peek() {
-            Some(t) if t.value == value => {
-                picked.next();
-            }
-            _ => never.push(value),
-        }
-        value += 1;
-    }
-
     let halves = (days.len() >= 2).then(|| {
         let (a, b) = lines.split_at(mid);
         let span = |part: &[DayLine]| {
@@ -476,8 +491,8 @@ pub fn trend(rows: &[DayTally]) -> Trend {
                 avg(b.iter().map(|d| d.players)).unwrap_or(0),
             ),
             winner: (
-                avg(a.iter().filter_map(|d| d.winner)),
-                avg(b.iter().filter_map(|d| d.winner)),
+                avg(a.iter().filter(|d| !d.winner_outlier).filter_map(|d| d.winner)),
+                avg(b.iter().filter(|d| !d.winner_outlier).filter_map(|d| d.winner)),
             ),
             lowest_free: (
                 avg(a.iter().map(|d| d.lowest_free)).unwrap_or(0),
@@ -493,7 +508,6 @@ pub fn trend(rows: &[DayTally]) -> Trend {
         rising,
         falling,
         most,
-        never,
         halves,
     }
 }
@@ -586,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn finds_the_winner_the_first_hole_and_the_extremes() {
+    fn finds_the_winner_the_first_hole_and_the_favourites() {
         // 1 and 2 collided, 3 is unique, nobody took 4, 7 is unique too.
         let tallies = t(&[(1, 4), (2, 2), (3, 1), (5, 3), (7, 1)]);
         let s = analyse(&tallies);
@@ -595,7 +609,6 @@ mod tests {
         assert_eq!(s.winner, Some(3));
         assert_eq!(s.lowest_unpicked, 4);
         assert_eq!(s.most, t(&[(1, 4), (5, 3), (2, 2), (3, 1), (7, 1)]));
-        assert_eq!(s.least, t(&[(3, 1), (7, 1), (2, 2), (5, 3), (1, 4)]));
     }
 
     #[test]
@@ -613,13 +626,11 @@ mod tests {
     }
 
     #[test]
-    fn the_lists_stop_at_five() {
+    fn the_list_stops_at_five() {
         let tallies: Vec<Tally> = (1..=9).map(|v| Tally { value: v, count: v }).collect();
         let s = analyse(&tallies);
         assert_eq!(s.most.len(), 5);
         assert_eq!(s.most[0].value, 9);
-        assert_eq!(s.least.len(), 5);
-        assert_eq!(s.least[0].value, 1);
     }
 
     #[test]
@@ -773,15 +784,44 @@ mod tests {
         assert_eq!(tr.rising[0].value, 2);
 
         // 2 took 7 of the 19 picks, 1 took 6; ties below them go to the lower
-        // number. Nobody ever took 4, and 6 upwards is untouched too.
+        // number.
         assert_eq!(tr.most, t(&[(2, 7), (1, 6), (3, 3), (5, 3)]));
-        assert_eq!(tr.never, [4, 6, 7, 8, 9]);
 
         let h = tr.halves.unwrap();
         assert_eq!(h.older, ("2026-09-01".to_string(), "2026-09-02".to_string()));
         assert_eq!(h.newer, ("2026-09-03".to_string(), "2026-09-04".to_string()));
         assert_eq!(h.players, (350, 600));
         assert_eq!(h.winner, (Some(250), Some(100)));
+        // Lowest free: 3 and 2 in the older half, 3 and 1 in the newer.
+        assert_eq!(h.lowest_free, (250, 200));
+    }
+
+    #[test]
+    fn a_winner_far_above_the_crowd_is_left_out_of_the_average() {
+        // Every number up to 30 taken twice, and one player alone on i64::MAX.
+        let mut wild: Vec<(i64, i64)> = (1..=30).map(|v| (v, 2)).collect();
+        wild.push((i64::MAX, 1));
+        let mut rows = day("2026-10-01", &[(1, 2), (2, 1)]);
+        rows.extend(day("2026-10-02", &[(1, 1), (2, 2)]));
+        rows.extend(day("2026-10-03", &[(1, 2), (3, 1)]));
+        rows.extend(day("2026-10-04", &wild));
+        let tr = trend(&rows);
+
+        assert_eq!(tr.days[3].winner, Some(i64::MAX), "it still won");
+        assert!(tr.days[3].winner_outlier);
+        assert!(tr.days[..3].iter().all(|d| !d.winner_outlier));
+        // The newer half averages 3 alone rather than overflowing.
+        assert_eq!(tr.halves.unwrap().winner, (Some(150), Some(300)));
+    }
+
+    #[test]
+    fn an_ordinary_high_winner_is_not_an_outlier() {
+        // Most of the crowd on 1..=25, and the winner on 40 just above them.
+        let mut pairs: Vec<(i64, i64)> = (1..=25).map(|v| (v, 2)).collect();
+        pairs.push((40, 1));
+        assert!(!is_outlier(&t(&pairs), 40));
+        // Nearly everyone on 1: the quartiles meet, and 2 still is no outlier.
+        assert!(!is_outlier(&t(&[(1, 9), (2, 1)]), 2));
     }
 
     #[test]

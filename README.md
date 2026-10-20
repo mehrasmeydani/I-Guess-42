@@ -384,8 +384,7 @@ or month (`2026-08`), and a date picker jumps straight to that day's page.
 
 Every closed round has a page at `/day/YYYY-MM-DD`, linked from the results
 table and the home page. It shows the winning number, the lowest number nobody
-picked, the headcount, a column chart, and the most and least picked
-numbers. The chart has one column per number over the range where 95% of the
+picked, the headcount, a column chart, and the most picked numbers. The chart has one column per number over the range where 95% of the
 picks fall; every higher pick is listed right under it with its count. The
 full list of numbers is one click away underneath.
 

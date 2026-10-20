@@ -1430,9 +1430,7 @@ no HTML, so all of it is tested directly.
 - **winner**: the first tally with a count of 1. The tallies are sorted, so
   the first unique value is the lowest one, the same rule as `WINNER_CTE`.
 - **lowest_unpicked**: walk up from 1 and stop at the first gap.
-- **most** / **least**: sorted by count, ties to the lower number, cut to
-  five. "Least picked" only sees values somebody picked, so a zero never
-  appears in it.
+- **most**: sorted by count, ties to the lower number, cut to five.
 
 ### The chart
 
@@ -1473,20 +1471,22 @@ How many days a number won is in its hover text.
 `trend` takes per-day rows (`db::range_tallies`, oldest first) and works out:
 
 - a `DayLine` per day (players, winner, lowest free number), by running
-  `analyse` on each day;
+  `analyse` on each day. A winner is flagged as an **outlier** when it lies
+  past Tukey's far fence of that day's own picks: more than three
+  interquartile ranges above the upper quartile, the range taken as at least
+  10. That catches a day where every lower number collided and one player
+  alone on `i64::MAX` won;
 - **totals**, every pick added up per value, and **wins**, how many days each
   value won;
 - **halves**: the range split into an older and a newer half (an odd middle
   day goes to the newer one), with average players, winning number and
-  lowest free number for each. Averages are integer hundredths, printed by
-  `hundredths`;
+  lowest free number for each. Outlier winners are left out of the winning
+  number average. Averages are integer hundredths, summed in `i128` so huge
+  winners cannot overflow, and printed by `hundredths`;
 - **rising** / **falling**: each value's share of all picks in the older half
   against the newer half, in tenths of a percent (`permille`). Values picked
   only once in the whole range are skipped as noise;
-- **most**: the values with the most picks over the whole range, and
-  **never**: the lowest values nobody picked on any day of it. Every one of
-  those would have won every round in the range, which is the useful half of
-  the pair.
+- **most**: the values with the most picks over the whole range.
 
 Shares and day counts are looked up in `HashMap`s. A year of rounds holds tens
 of thousands of distinct values, and scanning lists for each one made the
