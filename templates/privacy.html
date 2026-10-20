@@ -6,22 +6,22 @@
 {% block content %}
 <section class="sec prose" style="--b: 0">
   <h1 class="page-title">privacy</h1>
-  <p>i guess low keeps only what it needs to run the game. this page says what that is, why, for how long, and who else sees any of it. who runs the site is in the <a href="/imprint">impressum</a>.</p>
+  <p>what we keep, why, for how long, and who sees it. operator: <a href="/imprint">impressum</a>.</p>
 
   <h2>what we keep, why, and for how long</h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="what we keep">
-  <table class="grid">
+  <table class="grid privacy-table">
     <thead><tr><th scope="col">what</th><th scope="col">why, and on what basis</th><th scope="col">kept for</th></tr></thead>
     <tbody>
-      <tr><td>your account: username, when you joined, the ways you sign in</td><td>to run the account you asked for (Art. 6(1)(b) GDPR)</td><td>until you delete it</td></tr>
-      <tr><td>if you sign in with an email: the address and a hash of your password, never the password</td><td>to let you sign in and reset it (Art. 6(1)(b))</td><td>until you delete it or remove that login</td></tr>
-      <tr><td>if you sign in with 42: your login, display name and campus</td><td>to decide which rounds you can play (Art. 6(1)(b))</td><td>refreshed at each sign-in; until you delete your account</td></tr>
-      <tr><td>your guesses, one per round, and when you made them</td><td>to play the game; they are secret until the round closes, then part of its results (Art. 6(1)(b))</td><td>for good, so past results stay true; a deleted account's rounds stay under <b>deleted-</b> and a number</td></tr>
-      <tr><td>a keyed hash of the network you signed up and guessed from, never the address</td><td>to spot one person playing many accounts (Art. 6(1)(f), our interest in a fair game). the key changes every month, so a hash cannot be matched after its month</td><td>with the account or guess it belongs to</td></tr>
-      <tr><td>sign-in sessions</td><td>to keep you signed in (Art. 6(1)(b))</td><td>30 days, or until you sign out</td></tr>
-      <tr><td>emailed links (confirm, reset)</td><td>to prove the address is yours (Art. 6(1)(b))</td><td>24 hours (confirm) or 1 hour (reset), then deleted</td></tr>
-      <tr><td>a count of mails sent</td><td>to stay within the mail service's limits (Art. 6(1)(f))</td><td>2 days</td></tr>
-      <tr><td>server logs: errors, sign-ins and bans by account number</td><td>to keep the site running and safe (Art. 6(1)(f))</td><td>overwritten as they fill: at most 30 MB, usually a few days</td></tr>
+      <tr><td data-label="what">your account: username, when you joined, the ways you sign in</td><td data-label="why">to run the account you asked for (Art. 6(1)(b) GDPR)</td><td data-label="kept">until you delete it</td></tr>
+      <tr><td data-label="what">if you sign in with an email: the address and a hash of your password, never the password</td><td data-label="why">to let you sign in and reset it (Art. 6(1)(b))</td><td data-label="kept">until you delete it or remove that login</td></tr>
+      <tr><td data-label="what">if you sign in with 42: your login, display name and campus</td><td data-label="why">to decide which rounds you can play (Art. 6(1)(b))</td><td data-label="kept">refreshed at each sign-in; until you delete your account</td></tr>
+      <tr><td data-label="what">your guesses, one per round, and when you made them</td><td data-label="why">to play the game; they are secret until the round closes, then part of its results (Art. 6(1)(b))</td><td data-label="kept">for good, so past results stay true; a deleted account's rounds stay under <b>deleted-</b> and a number</td></tr>
+      <tr><td data-label="what">a keyed hash of the network you signed up and guessed from, never the address</td><td data-label="why">to spot one person playing many accounts (Art. 6(1)(f), our interest in a fair game). the key changes every month, so a hash cannot be matched after its month</td><td data-label="kept">with the account or guess it belongs to</td></tr>
+      <tr><td data-label="what">sign-in sessions</td><td data-label="why">to keep you signed in (Art. 6(1)(b))</td><td data-label="kept">30 days, or until you sign out</td></tr>
+      <tr><td data-label="what">emailed links (confirm, reset)</td><td data-label="why">to prove the address is yours (Art. 6(1)(b))</td><td data-label="kept">24 hours (confirm) or 1 hour (reset), then deleted</td></tr>
+      <tr><td data-label="what">a count of mails sent</td><td data-label="why">to stay within the mail service's limits (Art. 6(1)(f))</td><td data-label="kept">2 days</td></tr>
+      <tr><td data-label="what">server logs: errors, sign-ins and bans by account number</td><td data-label="why">to keep the site running and safe (Art. 6(1)(f))</td><td data-label="kept">overwritten as they fill: at most 30 MB, usually a few days</td></tr>
     </tbody>
   </table>
   </div>

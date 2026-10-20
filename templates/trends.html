@@ -13,7 +13,7 @@
       <a class="{% if range == "all" %}on{% endif %}" {% if range == "all" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=all">all</a>
     </span>
   </h2>
-  <p class="scope"><span class="chip">[{{ data_source }}]</span> {{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}, {{ picks }} picks</p>
+  <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; {{ rounds }} rounds &middot; {{ picks }} picks</p>
   {% if rounds > 0 %}<p class="takeaway"><span>{{ answer }}</span></p>{% endif %}
   {% if test_mode %}
     <details class="testdetails">
@@ -25,7 +25,7 @@
 
 {% if rounds == 0 %}
   <section class="sec" style="--b: 1">
-    <p class="dim">no round has closed in this range yet. once rounds close, this page shows where the winning numbers land, which numbers the crowd piles onto, and how that moves from week to week. the next round closes {{ first_close }}.</p>
+    <p class="dim">no rounds yet. nothing to trend. first round closes {{ first_close }}.</p>
   </section>
 {% else %}
 
@@ -34,7 +34,7 @@
   {% if changes.is_empty() %}
     <p class="dim">one round is not a trend. pick a longer range.</p>
   {% else %}
-    <p class="explain">the range split into two halves of equal length: the older half, {{ older_range }}, against the newer half, {{ newer_range }}. each row is a daily average.</p>
+    <p class="explain">older half: {{ older_range }} &middot; newer half: {{ newer_range }}. daily averages.</p>
     <table class="grid diff">
       <tbody>
         {% for c in changes %}

@@ -19,7 +19,7 @@
 </nav>
 
 <section class="sec" style="--b: 0">
-  <p class="scope"><span class="chip">[{{ data_source }}]</span> this round</p>
+  <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; this round</p>
   <p class="takeaway">
     {% match round.winner %}
       {% when Some with (w) %}<b class="win">{{ w.value_label }}</b>
@@ -31,7 +31,7 @@
     {% when Some with (w) %}<p class="dim">won by {{ w.login }}.{% match my_pick %}{% when Some with (p) %} your pick: <b class="mine-text">{{ p }}</b>.{% when None %}{% endmatch %}</p>
     {% when None %}{% match my_pick %}{% when Some with (p) %}<p class="dim">your pick: <b class="mine-text">{{ p }}</b>.</p>{% when None %}{% endmatch %}
   {% endmatch %}
-  {% if !names_visible %}<p class="dim mask-note">names are shown to signed-in players. you see a stable label for each player instead.</p>{% endif %}
+  {% if !names_visible %}<p class="dim mask-note">sign in to see names. signed-out players get a stable label.</p>{% endif %}
 </section>
 
 <section class="sec" style="--b: 1">

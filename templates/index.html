@@ -20,10 +20,10 @@
             {% match r.winner %}
               {% when Some with (w) %}
                 <p class="announce-num"><b class="win">{{ w.value_label }}</b></p>
-                <p class="announce-who">{{ w.login }} had it, alone &middot; {{ r.total }} played</p>
+                <p class="announce-who">{{ w.login }} had it alone &middot; {{ r.total }} played</p>
               {% when None %}
                 <p class="announce-num"><b class="lose">&times;</b></p>
-                <p class="announce-who">nobody won &middot; no number was picked just once &middot; {{ r.total }} played</p>
+                <p class="announce-who">nobody won &middot; {{ r.total }} played</p>
             {% endmatch %}
             <p class="announce-links">
               <a href="{{ pool.base() }}/day/{{ r.date_key }}">the whole round &rarr;</a>
@@ -40,7 +40,7 @@
    long is left, the box, how to think about it, the rules, and only then
    the ways off the page. #}
 <section class="sec hero" style="--b: 0" aria-labelledby="round-h">
-  <p class="premise">pick the lowest number nobody else picks. one guess a day.</p>
+  <p class="premise">lowest unique number wins.</p>
 
   <div class="roundstatus" role="group" aria-labelledby="round-h">
     <p class="state-line">
@@ -62,7 +62,7 @@
       <span class="you">
         {% match my_guess_label %}
           {% when Some with (_g) %}<b>you're in</b>
-          {% when None %}{% if signed_in && !can_play %}confirm your email to play{% else %}not playing yet &middot; pick a number below{% endif %}
+          {% when None %}{% if signed_in && !can_play %}confirm your email to play{% else %}pick yours below{% endif %}
         {% endmatch %}
       </span>
     </p>
@@ -114,8 +114,7 @@
                  placeholder="e.g. 7" aria-describedby="guess-hint" required>
           <button type="submit" class="primary">lock it in</button>
         </form>
-        <p class="hint" id="guess-hint">everyone wants a low number, so the low ones get crowded &mdash; the winner is often a little higher than you'd think.
-          {% if signed_in %}final once you confirm.{% else %}you'll sign in next to lock it in.{% endif %}</p>
+        <p class="hint" id="guess-hint">low gets crowded. think a little higher. {% if signed_in %}final when you confirm.{% else %}sign in to lock it in.{% endif %}</p>
       {% endif %}
   {% endmatch %}
 </section>
@@ -125,8 +124,7 @@
   <ol class="rules">
     <li><b>01</b> pick a whole number above 0. one guess a day.</li>
     <li><b>02</b> every number is revealed at {{ close_time }} vienna.</li>
-    <li><b>03</b> the lowest number that exactly one person picked wins.</li>
-    <li><b>03b</b> a tie wins nothing: if someone else picks your number, neither of you can win with it.</li>
+    <li><b>03</b> lowest unique number wins. shared numbers are out.</li>
   </ol>
   {# Coalition points, said once and quietly: playing is worth something and
      winning is worth a lot more, but the game is the number, not the payout. #}

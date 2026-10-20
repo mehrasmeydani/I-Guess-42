@@ -76,8 +76,8 @@ async fn a_day_page_says_who_won_and_why_in_a_line_and_in_words() {
     let (_, day) = a_played_day(&state).await;
     let html = day_page(&state, Some("ann"), &day).await;
     assert!(html.contains("won · 5 players · 1 and 2 were all taken"), "the takeaway, not saying 3 twice");
-    assert!(html.contains("5 players picked 3 different numbers; 2 of them by more than one player."));
-    assert!(html.contains("3 was the lowest number picked by exactly one player."));
+    assert!(html.contains("5 players · 3 numbers · 2 shared numbers · most: 1 (2×) · winner: 3."));
+    assert!(html.contains("winner: 3."));
     // Taken numbers struck through; the winner is not.
     assert!(html.contains("<s>1</s>") && html.contains("<s>2</s>"));
     assert!(!html.contains("<s>3</s>"));
@@ -85,7 +85,7 @@ async fn a_day_page_says_who_won_and_why_in_a_line_and_in_words() {
     assert!(html.contains("view as a table (3 numbers)"));
     assert!(html.contains("hide the table"));
     assert!(html.contains("<caption class=\"sr\">every number picked in round"));
-    assert!(html.contains("[historical]"), "a live site's closed rounds are historical");
+    assert!(html.contains(r#"<span class="chip">historical</span> &middot; this round"#), "a live site's closed rounds are historical");
     // Its own preview picture and description.
     assert!(html.contains(&format!(r#"content="http://localhost:3000/g/day/{day}/og.png""#)));
     assert!(html.contains(r#"<meta property="og:description" content="3 won · 5 players · 1 and 2 were all taken">"#));
@@ -167,7 +167,7 @@ async fn results_list_the_rounds_first_then_the_top_ten() {
     assert_eq!(shown.matches("<tr title=").count(), 10);
     assert!(html.contains("show all 12 winners"));
     assert!(html.contains("show the top 10 only"));
-    assert!(html.contains("closed rounds &middot; all-time"));
+    assert!(html.contains("&middot; all-time"));
     assert!(html.contains(r#"aria-current="true" href="/g/results">7</a>"#));
 }
 
@@ -176,7 +176,7 @@ async fn before_any_round_closes_results_look_ahead_and_filters_wait() {
     let (_t, state) = app(&[]).await;
     let html = results_page(&state, None).await;
     assert!(html.contains("no round has closed yet."));
-    assert!(html.contains("the first results land when this round closes"));
+    assert!(html.contains("first round closes"));
     assert!(html.contains(r#"id="q" name="q" type="search""#));
     assert_eq!(html.matches(" disabled>").count() + html.matches(" disabled ").count(), 4, "search, date and both buttons");
     let trends = body(
@@ -185,8 +185,8 @@ async fn before_any_round_closes_results_look_ahead_and_filters_wait() {
             .unwrap(),
     )
     .await;
-    assert!(trends.contains("once rounds close, this page shows where the winning numbers land"));
-    assert!(trends.contains("the next round closes"));
+    assert!(trends.contains("no rounds yet. nothing to trend."));
+    assert!(trends.contains("first round closes"));
 }
 
 #[tokio::test]
@@ -199,7 +199,7 @@ async fn masked_names_are_stable_labels_with_a_word_on_why() {
     assert!(label.starts_with("player #") && label.len() == 12, "{label}");
     assert!(signed_out.contains(&label));
     assert!(!signed_out.contains(">cat<"));
-    assert!(signed_out.contains("names are shown to signed-in players"));
+    assert!(signed_out.contains("sign in to see names"));
     // The same label on the day page and on the next visit.
     assert!(day_page(&state, None, &day).await.contains(&label));
     assert_eq!(crate::templates::anon_label(cat), label);
@@ -207,7 +207,7 @@ async fn masked_names_are_stable_labels_with_a_word_on_why() {
     // Signed in: the name, and no note.
     let signed_in = results_page(&state, Some("ann")).await;
     assert!(signed_in.contains("cat"));
-    assert!(!signed_in.contains("names are shown to signed-in players"));
+    assert!(!signed_in.contains("sign in to see names"));
 }
 
 #[tokio::test]
@@ -224,13 +224,13 @@ async fn trends_open_with_an_answer_and_keep_the_timing_out_of_sight() {
         }
     };
     let html = page("7").await;
-    assert!(html.contains("over the last 7 days ("), "{html}");
+    assert!(html.contains("7d · "), "{html}");
     // Won with 9, then 3: the middle of the two, taken as the upper.
-    assert!(html.contains("the middle winning number was 9"));
+    assert!(html.contains("median win 9"));
     assert!(html.contains(r#"aria-current="true" href="/g/trends?days=7">7d</a>"#));
     assert!(!html.contains("analysing"), "no staged progress");
     assert!(html.contains("test details"), "timing only in the test-only details");
-    assert!(page("all").await.contains("over every round so far"));
+    assert!(page("all").await.contains("all · "));
 
     // A live site does not show it at all.
     let mut cfg = config(&[]);

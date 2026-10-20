@@ -560,9 +560,9 @@ pub fn trends_answer(range: &str, trend: &Trend) -> String {
         return String::new();
     };
     let span = match range {
-        "7" => "over the last 7 days",
-        "30" => "over the last 30 days",
-        _ => "over every round so far",
+        "7" => "7d",
+        "30" => "30d",
+        _ => "all",
     };
     let winners: Vec<i64> = trend
         .days
@@ -571,25 +571,22 @@ pub fn trends_answer(range: &str, trend: &Trend) -> String {
         .filter_map(|d| d.winner)
         .collect();
     let won = match winners.len() {
-        0 => "nobody won a round".to_string(),
+        0 => "no winners".to_string(),
         n => {
             let mut sorted = winners.clone();
             sorted.sort_unstable();
-            format!("the middle winning number was {}", group_digits(sorted[n / 2]))
+            format!("median win {}", group_digits(sorted[n / 2]))
         }
     };
     let crowd = trend
         .most
         .first()
-        .map(|m| format!(", and {} was the most picked", group_digits(m.value)))
-        .unwrap_or_default();
-    let rounds = trend.days.len();
-    format!(
-        "{span} ({} to {}, {rounds} {}), {won}{crowd}.",
-        first.date,
-        last.date,
-        if rounds == 1 { "round" } else { "rounds" }
-    )
+        .map(|m| format!(" · most picked {}", group_digits(m.value)))
+        .unwrap_or_else(|| " · no picks".to_string());
+    fn short(date: &str) -> &str {
+        date.get(5..).unwrap_or(date)
+    }
+    format!("{span} · {}–{} · {won}{crowd}.", short(&first.date), short(&last.date))
 }
 
 impl TrendsTemplate {

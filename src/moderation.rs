@@ -281,7 +281,7 @@ mod tests {
         // A test instance says so instead of showing anyone's details.
         cfg.environment = Some("test".into());
         let html = page_of(cfg, true).await;
-        assert!(html.contains("operator details are not shown on this test instance"));
+        assert!(html.contains("operator details aren&#x27;t shown on the test site") || html.contains("operator details aren't shown on the test site"));
         assert!(!html.contains("Jane Doe"));
         assert_eq!(html.matches("<h1").count(), 1);
     }

@@ -558,21 +558,20 @@ fn takeaway_line(winner: Option<i64>, players: i64, collided: &[i64]) -> String 
 /// The day's chart in words (R11.3).
 fn chart_summary(tallies: &[stats::Tally], winner: Option<i64>, players: i64) -> String {
     let distinct = tallies.len();
-    let taken = tallies.iter().filter(|t| t.count > 1).count();
+    let shared = tallies.iter().filter(|t| t.count > 1).count();
     let most = tallies.iter().max_by_key(|t| (t.count, -t.value));
-    let mut s = format!(
-        "{players} {} picked {distinct} different {}; {taken} of them by more than one player.",
+    let most = most
+        .filter(|t| t.count > 1)
+        .map(|t| format!("most: {} ({}×)", group_digits(t.value), t.count))
+        .unwrap_or_else(|| "no repeats".to_string());
+    let winner = winner
+        .map(|w| format!("winner: {}", group_digits(w)))
+        .unwrap_or_else(|| "no winner".to_string());
+    format!(
+        "{players} {} · {distinct} {} · {shared} shared numbers · {most} · {winner}.",
         if players == 1 { "player" } else { "players" },
         if distinct == 1 { "number" } else { "numbers" },
-    );
-    if let Some(m) = most.filter(|m| m.count > 1) {
-        s.push_str(&format!(" the most picked was {} ({}×).", group_digits(m.value), m.count));
-    }
-    match winner {
-        Some(w) => s.push_str(&format!(" {} was the lowest number picked by exactly one player.", group_digits(w))),
-        None => s.push_str(" no number was picked by exactly one player, so nobody won."),
-    }
-    s
+    )
 }
 
 /// Where the numbers on a page come from (R9.1). A test instance says test,
@@ -1910,17 +1909,17 @@ mod round_page_tests {
         let at = |needle: &str| html.find(needle).unwrap_or_else(|| panic!("missing {needle:?}"));
         // premise, status, input + action, hint, rules, then the rest.
         let order = [
-            at("pick the lowest number nobody else picks. one guess a day."),
+            at("lowest unique number wins."),
             at(r#"class="roundstatus""#),
             at(r#"id="guess""#),
-            at("the low ones get crowded"),
-            at("<b>03b</b>"),
+            at("low gets crowded"),
+            at("shared numbers are out"),
         ];
         assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
 
         assert!(html.contains("closes in"));
         assert!(html.contains("closes 12:42 vienna"));
-        assert!(html.contains("not playing yet &middot; pick a number below"));
+        assert!(html.contains("pick yours below"));
         assert!(!html.contains(">guest<"));
         // Server time for the countdown, and no live region on it.
         assert!(html.contains("data-closes-at=\""));
@@ -1936,7 +1935,7 @@ mod round_page_tests {
         // One primary action, and the header's sign-in is a plain link.
         assert_eq!(html.matches("class=\"primary\"").count(), 1);
         assert!(html.contains(r#"<a class="signin" href="/login">sign in</a>"#));
-        assert!(html.contains("you'll sign in next to lock it in"));
+        assert!(html.contains("sign in to lock it in"));
     }
 
     #[tokio::test]
@@ -2178,6 +2177,6 @@ mod round_page_tests {
         )
         .await;
         assert!(html.contains(r#"action="/guess""#));
-        assert!(html.contains("final once you confirm"));
+        assert!(html.contains("final when you confirm"));
     }
 }

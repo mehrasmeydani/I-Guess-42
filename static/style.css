@@ -7,9 +7,9 @@
  *   measure (72ch) and spacing, not through a second font.
  * - Sizes come from one scale: 13 / 16 / 20 / 28 / 48 px (--fs-1 ... --fs-5).
  * - Spacing is a multiple of 8 px (half steps of 4 for the tightest gaps).
- * - Green is the accent: primary actions and the winning number, nothing
- *   else. Status is grey. Red means taken, down or wrong. Amber means "this
- *   is a test instance".
+ * - Blue is the action colour: buttons, sign-in and keyboard focus, as on
+ *   the live site. Green marks the brand, an open round and a win. Red means
+ *   taken, down or wrong. Amber means "this is a test instance".
  * - One divider: 1 px #2a2a2a. A section header carries at most one rule. */
 
 :root {
@@ -22,6 +22,7 @@
   --red: #e74856;
   --green: #16c60c;
   --blue: #3b78ff;
+  --blue-hover: #5b8dff;
   /* Greys for surfaces and their edges: a card sits on --panel, framed by
      --edge; fields and buttons inside it by --edge-strong. */
   --panel: #121212;
@@ -76,6 +77,10 @@ body {
 p, ol, pre, table, h2 { margin: 0; }
 
 a { color: var(--hi); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
 a:hover { background: var(--hi); color: var(--bg); text-decoration: none; }
 
 b, .b { color: var(--hi); font-weight: 700; }
@@ -132,7 +137,17 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .status .who { color: var(--fg); }
 /* Signing in from the header is a plain link: the round page's own button
    is the one primary action. */
-.status .signin { color: var(--hi); }
+.status .signin {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 2px 8px;
+  border: 1px solid var(--blue);
+  color: var(--blue);
+  text-decoration: none;
+  transition: background 120ms, color 120ms;
+}
+.status .signin:hover { background: var(--blue); color: var(--bg); }
 
 main { flex: 1; padding-block: 8px 64px; }
 
@@ -243,7 +258,7 @@ input[type="text"] {
 input::placeholder { color: #6f6f6f; }
 input[type="text"]:hover { border-color: var(--dim); }
 /* Every field takes the one focus ring (R17.4). */
-input[type="text"]:focus-visible { border-color: var(--hi); }
+input[type="text"]:focus-visible { border-color: var(--blue); }
 
 button,
 .btn {
@@ -264,7 +279,7 @@ button:active,
 .btn:active { translate: 0 1px; }
 button:disabled,
 button[disabled] { opacity: 0.5; cursor: not-allowed; translate: none; }
-.btn.play { background: var(--green); border-color: var(--green); color: var(--bg); }
+.btn.play { background: var(--blue); border-color: var(--blue); color: var(--bg); }
 
 /* The way to yesterday's numbers, under the guess box: present, but never
    louder than locking a number in. */
@@ -291,7 +306,7 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; translate: none; }
   transition: border-color 120ms, box-shadow 120ms;
 }
 .authform input:hover { border-color: var(--dim); }
-.authform input:focus-visible { border-color: var(--hi); }
+.authform input:focus-visible { border-color: var(--blue); }
 .authform input[aria-invalid="true"] { border-color: var(--red); }
 .authform input:disabled { color: var(--dim); border-color: var(--edge); }
 .authform .hint { margin: 2px 0 0; font-size: var(--fs-1); }
@@ -302,11 +317,11 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; translate: none; }
 
 /* The one thing to press on a form, in the colour that means "you're in". */
 button.primary,
-.btn.primary { background: var(--green); border-color: var(--green); color: var(--bg); }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: var(--bg); }
 button.primary:hover,
 button.primary:focus-visible,
 .btn.primary:hover,
-.btn.primary:focus-visible { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+.btn.primary:focus-visible { background: var(--blue-hover); border-color: var(--blue-hover); color: var(--bg); }
 .btn.wide { display: block; text-align: center; }
 
 /* The sign-in pages: one card in the middle of the page, everything in it
@@ -820,6 +835,11 @@ p, li { text-wrap: pretty; }
 .prose ul { padding-left: 2ch; }
 .prose li { margin: 0 0 8px; }
 .prose table { margin: 0 0 16px; }
+.privacy-table { table-layout: fixed; }
+.privacy-table th, .privacy-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+.privacy-table th:first-child { width: 31%; }
+.privacy-table th:nth-child(2) { width: 43%; }
+.privacy-table th:last-child { width: 26%; }
 
 /* A day's own navigation: the day before, the day, the day after. */
 .daynav { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; margin: 32px 0 0; padding-bottom: 16px; border-bottom: var(--rule); }
@@ -865,7 +885,7 @@ details.expand[open] summary .when-open { display: inline; }
   height: 12px;
   background: repeating-linear-gradient(90deg, var(--edge-strong) 0 8px, transparent 8px 10px);
 }
-.progress-fill { background: repeating-linear-gradient(90deg, var(--fg) 0 8px, transparent 8px 10px); }
+.progress-fill { background: repeating-linear-gradient(90deg, var(--green) 0 8px, transparent 8px 10px); }
 
 /* Form errors: a summary that takes focus, and a line under each field. */
 .error-summary { margin: 0 0 16px; padding: 12px 16px; border-left: 4px solid var(--red); background: var(--panel); color: var(--hi); }
@@ -948,6 +968,10 @@ details.expand[open] summary .when-open { display: inline; }
   .split.duo { grid-template-columns: 1fr 1fr; gap: 0 20px; }
   .duo .ranked b { font-size: var(--fs-3); }
   .sealed { display: block; }
+  .privacy-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  .privacy-table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--rule-color); }
+  .privacy-table td { display: grid; grid-template-columns: 7ch minmax(0, 1fr); gap: 12px; padding: 6px 0; border: 0; }
+  .privacy-table td::before { content: attr(data-label); color: var(--dim); }
   .kv { grid-template-columns: 1fr; gap: 0; }
   .kv dd { margin-bottom: 8px; }
   .guessform button { flex: 1 1 100%; }

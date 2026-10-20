@@ -6,7 +6,7 @@
 
 {% block content %}
 <section class="sec" style="--b: 0">
-  <p class="scope"><span class="chip">[{{ data_source }}]</span> closed rounds &middot; all-time</p>
+  <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; all-time</p>
   {% match latest %}
     {% when Some with (r) %}
       <p class="takeaway">
@@ -16,11 +16,11 @@
         {% endmatch %}
         <span>{{ crate::templates::after_number(takeaway.as_deref().unwrap_or("")) }}</span>
       </p>
-      <p class="dim">the last round, {{ r.date_key }}{% match r.winner %}{% when Some with (w) %}, won by {{ w.login }}{% when None %}{% endmatch %}. <a href="{{ pool.base() }}/day/{{ r.date_key }}">see every pick &rarr;</a></p>
-      {% if !names_visible %}<p class="dim mask-note">names are shown to signed-in players. you see a stable label for each player instead.</p>{% endif %}
+      <p class="dim">last round &middot; {{ r.date_key }}{% match r.winner %}{% when Some with (w) %} &middot; {{ w.login }} won{% when None %} &middot; no winner{% endmatch %} &middot; <a href="{{ pool.base() }}/day/{{ r.date_key }}">every pick &rarr;</a></p>
+      {% if !names_visible %}<p class="dim mask-note">sign in to see names. signed-out players get a stable label.</p>{% endif %}
     {% when None %}
       <p class="takeaway"><span>no round has closed yet.</span></p>
-      <p class="dim">the first results land when this round closes, {{ first_close }}. <a href="{{ pool.base() }}/">pick a number &rarr;</a></p>
+      <p class="dim">first round closes {{ first_close }}. <a href="{{ pool.base() }}/">make a guess &rarr;</a></p>
   {% endmatch %}
 </section>
 
