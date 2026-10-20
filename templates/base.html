@@ -56,7 +56,7 @@
             <button class="linkish out" type="submit" aria-label="log out {{ u.login }}">log out</button>
           </form>
         {% when None %}
-          <a class="signin" href="/login">log in to play</a>
+          {% block signin_link %}<a class="signin" href="/login">log in to play</a>{% endblock %}
       {% endmatch %}
     </div>
   </header>

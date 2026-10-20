@@ -3,12 +3,14 @@
 {% block h1 %}{{ title }}{% endblock %}
 
 {% block content %}
-<section class="sec" style="--b: 0">
-  <h2 class="rule"><span>{{ title }}</span></h2>
-  {% for line in lines %}<p class="message">{{ line }}</p>{% endfor %}
-  {% match link %}
-    {% when Some with ((href, label)) %}<p><a class="btn" href="{{ href }}">{{ label }} &rarr;</a></p>
-    {% when None %}
-  {% endmatch %}
+<section class="sec auth" style="--b: 0">
+  <div class="auth-card">
+    <h2 class="auth-title">{{ title }}</h2>
+    {% for line in lines %}<p class="auth-sub">{{ line }}</p>{% endfor %}
+    {% match link %}
+      {% when Some with ((href, label)) %}<a class="btn primary wide" href="{{ href }}">{{ label }}</a>
+      {% when None %}
+    {% endmatch %}
+  </div>
 </section>
 {% endblock %}

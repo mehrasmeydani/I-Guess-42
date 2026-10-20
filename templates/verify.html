@@ -2,15 +2,20 @@
 {% block title %}Confirm your email &middot; i guess low{% endblock %}
 {% block h1 %}confirm your email{% endblock %}
 
+{# Already where that button leads. #}
+{% block signin_link %}{% endblock %}
+
 {% block content %}
 {# A button rather than confirming on sight: mail scanners open links to
    check them, and would use the link up before its owner got to it. #}
-<section class="sec" style="--b: 0">
-  <h2 class="rule"><span>confirm your email</span></h2>
-  <p class="message">one click and you're in.</p>
-  <form method="post" action="/verify" class="confirmform">
-    <input type="hidden" name="token" value="{{ token }}">
-    <button type="submit">confirm and sign in &rarr;</button>
-  </form>
+<section class="sec auth" style="--b: 0">
+  <div class="auth-card">
+    <h2 class="auth-title">confirm your email</h2>
+    <p class="auth-sub">one click and you're in.</p>
+    <form class="authform" method="post" action="/verify">
+      <input type="hidden" name="token" value="{{ token }}">
+      <button type="submit" class="primary">confirm and sign in</button>
+    </form>
+  </div>
 </section>
 {% endblock %}

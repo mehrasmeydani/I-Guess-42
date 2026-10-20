@@ -19,6 +19,11 @@
   --red: #e74856;
   --green: #16c60c;
   --blue: #3b78ff;
+  /* Greys for surfaces and their edges: a card sits on --panel, framed by
+     --edge; fields and buttons inside it by --edge-strong. */
+  --panel: #121212;
+  --edge: #262626;
+  --edge-strong: #3a3a3a;
   --font: "Cascadia Mono", "Cascadia Code", Consolas, "Ubuntu Mono", "DejaVu Sans Mono",
     Menlo, monospace;
   --rule: 2px solid var(--line);
@@ -237,33 +242,86 @@ button:active,
 /* Sign-in and account forms: one field per row, labels above. Smaller type
    than the guess box, which is the only input that gets to shout. */
 .authform { display: grid; gap: 6px; max-width: 440px; margin-top: 14px; }
-.authform label { color: var(--dim); margin-top: 10px; }
+.authform label { color: var(--fg); font-size: 0.9rem; margin-top: 12px; }
 .authform input {
   min-width: 0;
-  padding: 10px 12px;
+  height: 44px;
+  padding: 0 12px;
   background: var(--bg);
-  border: 2px solid var(--blue);
+  border: 1px solid var(--edge-strong);
   border-radius: 0;
   color: var(--hi);
-  font: 400 16px/1.4 var(--font);
+  font: 400 16px/1 var(--font);
   caret-color: var(--green);
+  transition: border-color 120ms, box-shadow 120ms;
 }
-.authform input:focus { outline: none; border-color: var(--green); }
-.authform .hint { margin: 0; }
-.authform button { margin-top: 16px; justify-self: start; }
-button.danger { background: transparent; color: var(--red); border-color: var(--red); }
-button.danger:hover,
-button.danger:focus-visible { background: var(--red); border-color: var(--red); color: var(--bg); }
-.logins td { vertical-align: middle; }
-.logins form, .logins .btn { margin: 0; }
-.logins .btn, .logins button { padding: 4px 12px; }
+.authform input:hover { border-color: var(--dim); }
+.authform input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.authform input:disabled { color: var(--dim); border-color: var(--edge); }
+.authform .hint { margin: 2px 0 0; font-size: 0.85rem; }
+.authform button { margin-top: 18px; justify-self: start; }
+.label-row { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; }
+.label-row label { margin-top: 0; }
+.label-row a { color: var(--dim); font-size: 0.85rem; }
 
-.prose ul { padding-left: 1.2em; max-width: 72ch; }
-.prose li { margin: 8px 0; }
-.prose p { max-width: 72ch; }
+/* The one thing to press on a form, in the colour that means "you're in". */
+button.primary,
+.btn.primary { background: var(--green); border-color: var(--green); color: var(--bg); }
+button.primary:hover,
+button.primary:focus-visible,
+.btn.primary:hover,
+.btn.primary:focus-visible { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+.btn.wide { display: block; text-align: center; }
 
-.ways { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
-.ways li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+/* The sign-in pages: one card in the middle of the page, everything in it
+   the same width, so the eye goes down a single column. */
+.auth { display: flex; flex-direction: column; align-items: center; margin-top: 56px; }
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 32px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+}
+.auth-title { margin: 0; color: var(--hi); font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+.auth-sub { margin: 8px 0 24px; color: var(--dim); }
+.auth-sub + .auth-sub { margin-top: -16px; }
+.auth .notice { margin: 0 0 20px; }
+.auth .authform { max-width: none; margin: 0; }
+.auth .authform button { justify-self: stretch; }
+.auth .authform label:first-of-type { margin-top: 0; }
+.auth-fine { margin: 16px 0 0; color: var(--dim); font-size: 0.85rem; }
+.auth-foot { margin: 20px 0 0; color: var(--dim); text-align: center; }
+
+.providers { display: grid; gap: 10px; }
+.provider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 46px;
+  background: var(--bg);
+  border: 1px solid var(--edge-strong);
+  color: var(--hi);
+  font-weight: 700;
+  text-decoration: none;
+  transition: border-color 120ms, background 120ms;
+}
+.provider:hover,
+.provider:focus-visible { background: var(--edge); border-color: var(--hi); color: var(--hi); }
+.provider-mark { width: 18px; height: 18px; flex: none; }
+.mark-42 {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  background: var(--hi);
+  color: var(--bg);
+  font-size: 11px;
+  line-height: 1;
+}
+.divider { display: flex; align-items: center; gap: 12px; margin: 24px 0 20px; color: var(--dim); font-size: 0.85rem; }
+.divider::before,
+.divider::after { content: ""; flex: 1; border-top: 1px solid var(--edge); }
 
 .btn.ghost,
 button.ghost { background: transparent; color: var(--fg); border-color: var(--dim); }
@@ -775,6 +833,8 @@ p, li { text-wrap: pretty; }
   .top { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
   .top nav { grid-column: 1 / -1; grid-row: 2; margin: 0 -10px; }
   .top nav.pools { grid-row: 3; justify-self: start; margin: 0; }
+  .auth { margin-top: 28px; }
+  .auth-card { padding: 24px 20px; }
   .status { margin-left: 0; gap: 10px; }
   .podium li { padding: 10px 8px 10px 0; }
   .podium li + li { padding-left: 10px; }
