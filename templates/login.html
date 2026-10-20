@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Sign in &middot; i guess low{% endblock %}
+{% block h1 %}sign in{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>sign in</span></h2>
+  {% include "_notice.html" %}
+  <ul class="ways">
+    <li><a class="btn play" href="/login/42">42 intra &rarr;</a>
+      <span class="dim">42 Vienna students play both rounds</span></li>
+    {% if github %}<li><a class="btn" href="/login/github">GitHub &rarr;</a></li>{% endif %}
+    {% if google %}<li><a class="btn" href="/login/google">Google &rarr;</a></li>{% endif %}
+  </ul>
+</section>
+
+{% if email_signup %}
+<section class="sec" style="--b: 1">
+  <h2 class="rule"><span>or with your email</span></h2>
+  <form class="authform" method="post" action="/login/email">
+    <label for="email">email</label>
+    <input id="email" name="email" type="email" autocomplete="email" required value="{{ email }}">
+    <label for="password">password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">sign in &rarr;</button>
+  </form>
+  <p class="dim"><a href="/forgot">forgot your password?</a> &middot; new here? <a href="/signup">create an account</a></p>
+</section>
+{% endif %}
+{% endblock %}

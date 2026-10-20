@@ -1,13 +1,19 @@
 mod app;
 mod auth;
 mod config;
+mod credentials;
 mod db;
 mod demo;
 mod handlers;
+mod limits;
+mod mail;
 mod points;
 mod round;
+mod signin;
 mod stats;
 mod templates;
+#[cfg(test)]
+mod testkit;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -94,7 +100,14 @@ async fn main() -> Result<()> {
         .route("/g/trends", get(handlers::global_trends))
         .route("/g/guess", post(handlers::global_submit_guess))
         .route("/g/guess/confirm", post(handlers::global_confirm_guess))
-        .route("/login", get(handlers::login))
+        .route("/login", get(signin::login_page_handler))
+        .route("/login/42", get(handlers::login))
+        .route("/login/email", post(signin::login_email))
+        .route("/signup", get(signin::signup_page_handler).post(signin::signup))
+        .route("/verify", get(signin::verify_page).post(signin::verify))
+        .route("/verify/resend", post(signin::resend_verification))
+        .route("/forgot", get(signin::forgot_page).post(signin::forgot))
+        .route("/reset", get(signin::reset_page_handler).post(signin::reset))
         .route("/auth/callback", get(handlers::callback))
         .route("/logout", post(handlers::logout))
         .route("/healthz", get(handlers::healthz))
@@ -137,8 +150,12 @@ async fn main() -> Result<()> {
         }
     }
 
-    axum::serve(listener, router)
-        .await
+    // With the peer address attached, for ClientIp when no proxy says otherwise.
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
         .context("running the server")?;
     Ok(())
 }

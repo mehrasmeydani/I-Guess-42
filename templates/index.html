@@ -75,6 +75,9 @@
         <h2 class="rule"><span>play</span></h2>
         {% if pool.is_global() %}
           <p class="dim">verify your email address to play &mdash; open the link we sent you.</p>
+          <form method="post" action="/verify/resend" class="inline">
+            <button type="submit" class="ghost">send another link</button>
+          </form>
         {% else %}
           <p class="dim">this round is for 42 Vienna students &mdash; sign in with 42 to play it, or play the <a href="/g">global round</a>.</p>
         {% endif %}
@@ -101,7 +104,7 @@
       {% endif %}
     {% when None %}
       <h2 class="rule"><span>play</span></h2>
-      <a class="btn play" href="/login">log in to play &rarr;</a>
+      <a class="btn play" href="{% if pool.is_global() %}/login{% else %}/login/42{% endif %}">log in to play &rarr;</a>
   {% endmatch %}
 
   {% match last_round %}

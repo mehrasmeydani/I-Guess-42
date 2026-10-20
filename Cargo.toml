@@ -35,6 +35,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 anyhow = "1"
+# Password hashing (argon2id), and SHA-256 / HMAC for the tokens in emailed
+# links and the hashed IP addresses: never stored in the clear.
+argon2 = { version = "0.5", features = ["std"] }
+sha2 = "0.10"
+hmac = "0.12"
 
 [dev-dependencies]
 # Already in the tree via reqwest; used to feed sample /v2/me bodies to tests.

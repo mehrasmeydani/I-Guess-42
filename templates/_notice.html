@@ -1,0 +1,5 @@
+{% match notice %}
+  {% when Some with (n) %}
+    <p class="notice {{ n.kind }}" {% if n.kind == "error" %}role="alert"{% else %}role="status"{% endif %}><b>{{ n.kind }}</b> {{ n.text }}</p>
+  {% when None %}
+{% endmatch %}

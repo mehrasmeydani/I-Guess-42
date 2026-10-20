@@ -234,6 +234,26 @@ button:active,
 .morelink { margin: 34px 0 0; }
 .guessform button { font-size: 1.1rem; }
 
+/* Sign-in and account forms: one field per row, labels above. Smaller type
+   than the guess box, which is the only input that gets to shout. */
+.authform { display: grid; gap: 6px; max-width: 440px; margin-top: 14px; }
+.authform label { color: var(--dim); margin-top: 10px; }
+.authform input {
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 2px solid var(--blue);
+  border-radius: 0;
+  color: var(--hi);
+  font: 400 16px/1.4 var(--font);
+  caret-color: var(--green);
+}
+.authform input:focus { outline: none; border-color: var(--green); }
+.authform .hint { margin: 0; }
+.authform button { margin-top: 16px; justify-self: start; }
+.ways { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.ways li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+
 .btn.ghost,
 button.ghost { background: transparent; color: var(--fg); border-color: var(--dim); }
 .btn.ghost:hover,

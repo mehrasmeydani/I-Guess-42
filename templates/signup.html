@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Create an account &middot; i guess low{% endblock %}
+{% block h1 %}create an account{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>create an account</span></h2>
+  {% include "_notice.html" %}
+  {% if enabled %}
+  <form class="authform" method="post" action="/signup">
+    <label for="email">email</label>
+    <input id="email" name="email" type="email" autocomplete="email" required value="{{ email }}">
+    <label for="username">username</label>
+    <input id="username" name="username" type="text" autocomplete="username" required
+           minlength="3" maxlength="20" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" value="{{ username }}"
+           aria-describedby="username-hint" spellcheck="false">
+    <p class="hint" id="username-hint">3&ndash;20 characters: letters, digits, - and _. shown next to your wins.</p>
+    <label for="password">password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" required
+           minlength="10" maxlength="128" aria-describedby="password-hint">
+    <p class="hint" id="password-hint">at least 10 characters. a few words strung together are easy to remember and hard to guess.</p>
+    {% match turnstile_site_key %}
+      {% when Some with (key) %}
+        <div class="cf-turnstile" data-sitekey="{{ key }}" data-theme="dark"></div>
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+      {% when None %}
+    {% endmatch %}
+    <button type="submit">create account &rarr;</button>
+  </form>
+  <p class="dim">we send one mail to confirm the address, and after that only when you ask for a new password.
+    see <a href="/privacy">privacy</a>. already have an account? <a href="/login">sign in</a></p>
+  {% else %}
+  <p class="dim">signing up with an email isn't available here yet. <a href="/login">sign in another way</a></p>
+  {% endif %}
+</section>
+{% endblock %}

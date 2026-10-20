@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Forgot your password &middot; i guess low{% endblock %}
+{% block h1 %}forgot your password{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>forgot your password</span></h2>
+  {% include "_notice.html" %}
+  <p class="message">type the email you signed up with. if it has an account, we send it a link to pick a new password.</p>
+  <form class="authform" method="post" action="/forgot">
+    <label for="email">email</label>
+    <input id="email" name="email" type="email" autocomplete="email" required>
+    <button type="submit">send the link &rarr;</button>
+  </form>
+</section>
+{% endblock %}

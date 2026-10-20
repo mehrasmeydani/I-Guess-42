@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} &middot; i guess low{% endblock %}
+{% block h1 %}{{ title }}{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>{{ title }}</span></h2>
+  {% for line in lines %}<p class="message">{{ line }}</p>{% endfor %}
+  {% match link %}
+    {% when Some with ((href, label)) %}<p><a class="btn" href="{{ href }}">{{ label }} &rarr;</a></p>
+    {% when None %}
+  {% endmatch %}
+</section>
+{% endblock %}

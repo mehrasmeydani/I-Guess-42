@@ -26,7 +26,7 @@ const PODIUM: usize = 3;
 /// enough to find your way around without turning the page into /results.
 const DAY_HISTORY: i64 = 14;
 
-async fn current_viewer(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
+pub(crate) async fn current_viewer(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
     let Some(token) = auth::session_token(jar) else {
         return Ok(None);
     };
@@ -62,6 +62,11 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
         "login_required" => Notice::error("Sign in with 42 before guessing."),
         "not_42" => Notice::error("This round is for 42 Vienna students: sign in with 42 to play it."),
         "signin" => Notice::error("Sign in before guessing."),
+        "verified" => Notice::ok("Email confirmed. You're in: pick a number."),
+        "password_set" => Notice::ok("New password saved, and every other session signed out."),
+        "resent" => Notice::ok("Sent another link. It works for 24 hours."),
+        "resend_wait" => Notice::error("We sent a few links already. Give it an hour."),
+        "mail_failed" => Notice::error("The mail didn't go out. Try again later."),
         "unverified" => Notice::error(
             "Verify your email address to play: open the link we sent you.",
         ),
@@ -953,6 +958,7 @@ pub async fn admin_clear(
 
 // -------------------------------------------------------------------- auth
 
+/// Starts signing in with 42.
 pub async fn login(State(state): State<AppState>) -> Result<Response, AppError> {
     let state_token = auth::random_token();
     db::store_oauth_state(&state.db, &state_token).await?;
@@ -1158,75 +1164,15 @@ mod tests {
     // a real session cookie, and look at what comes back.
 
     mod live {
-        use std::sync::Arc;
-
         use axum::extract::{Form, Query, State};
-        use axum::http::header::LOCATION;
-        use axum::response::Response;
         use axum_extra::extract::cookie::{Cookie, CookieJar};
 
         use crate::app::AppState;
         use crate::auth;
-        use crate::config::Config;
-        use crate::db::{self, Pool, test_support::{temp_db, TempDb}};
+        use crate::db::{self, Pool};
         use crate::handlers::{self, GuessForm, ImpersonateForm, ResultsQuery};
         use crate::round::Round;
-
-        fn config(admins: &[&str]) -> Config {
-            Config {
-                client_id: String::new(),
-                client_secret: String::new(),
-                redirect_uri: String::new(),
-                database_url: String::new(),
-                bind_addr: String::new(),
-                secure_cookies: false,
-                admin_logins: admins.iter().map(|a| a.to_string()).collect(),
-                allowed_campus_ids: vec![53],
-                points_api_key: None,
-                points_api_url: String::new(),
-            }
-        }
-
-        async fn app(admins: &[&str]) -> (TempDb, AppState) {
-            let t = temp_db().await;
-            let state = AppState::new(t.db.clone(), Arc::new(config(admins)), reqwest::Client::new());
-            (t, state)
-        }
-
-        fn jar(token: &str) -> CookieJar {
-            CookieJar::new().add(Cookie::new(auth::SESSION_COOKIE, token.to_string()))
-        }
-
-        /// A 42 student with a session. Their account id and intra id differ
-        /// on purpose, so a mix-up between the two cannot pass unnoticed.
-        async fn student(db: &db::Db, intra_id: i64, login: &str, token: &str) {
-            db::upsert_user(db, intra_id, login, login, None).await.unwrap();
-            let account = db::account_for_intra(db, intra_id, login).await.unwrap();
-            assert_ne!(account.id, intra_id);
-            db::create_session(db, token, account.id, 30).await.unwrap();
-        }
-
-        /// Signed in, but with no 42 account behind it.
-        async fn stranger(db: &db::Db, username: &str, token: &str) {
-            let (id,): (i64,) = sqlx::query_as(
-                "INSERT INTO accounts (username, created_at, last_seen_at)
-                 VALUES (?1, 'x', 'x') RETURNING id",
-            )
-            .bind(username)
-            .fetch_one(db)
-            .await
-            .unwrap();
-            db::create_session(db, token, id, 30).await.unwrap();
-        }
-
-        fn location(resp: &Response) -> &str {
-            resp.headers().get(LOCATION).and_then(|v| v.to_str().ok()).unwrap_or("")
-        }
-
-        async fn body(resp: Response) -> String {
-            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-            String::from_utf8(bytes.to_vec()).unwrap()
-        }
+        use crate::testkit::{app, body, jar, location, stranger, student};
 
         fn guess(state: &AppState, value: &str) -> Form<GuessForm> {
             Form(GuessForm {

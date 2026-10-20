@@ -261,6 +261,250 @@ async fn free_username(tx: &mut sqlx::SqliteConnection, wanted: &str) -> Result<
     Ok(candidate)
 }
 
+// --------------------------------------------------------------- sign-in
+
+/// True if nobody goes by `name` yet: no account has it, and it is not the
+/// login of any 42 player, so a stranger cannot take a student's name before
+/// they first come to play the global pool.
+pub async fn username_available(db: &Db, name: &str) -> Result<bool> {
+    let (taken,): (i64,) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM accounts WHERE username = ?1)
+              + (SELECT COUNT(*) FROM users WHERE login = ?1 COLLATE NOCASE)",
+    )
+    .bind(name)
+    .fetch_one(db)
+    .await?;
+    Ok(taken == 0)
+}
+
+/// What came of trying to create an account.
+#[derive(Debug)]
+pub enum NewAccount {
+    Created(Account),
+    /// That email already signs in somewhere. The caller must not say so to
+    /// the visitor; see `mail::exists`.
+    EmailTaken,
+    UsernameTaken,
+}
+
+/// A new account that signs in with `email` and a password, not yet
+/// verified. The caller has checked the username's shape and the password.
+pub async fn create_password_account(
+    db: &Db,
+    email: &str,
+    username: &str,
+    hash: &str,
+    ip_hash: Option<&str>,
+) -> Result<NewAccount> {
+    let mut tx = db.begin().await?;
+    let now = ts(Utc::now());
+
+    let (email_taken,): (i64,) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM passwords WHERE email = ?1)
+              + (SELECT COUNT(*) FROM identities WHERE provider = 'email' AND subject = ?1)",
+    )
+    .bind(email)
+    .fetch_one(&mut *tx)
+    .await?;
+    if email_taken > 0 {
+        return Ok(NewAccount::EmailTaken);
+    }
+    let (name_taken,): (i64,) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM accounts WHERE username = ?1)
+              + (SELECT COUNT(*) FROM users WHERE login = ?1 COLLATE NOCASE)",
+    )
+    .bind(username)
+    .fetch_one(&mut *tx)
+    .await?;
+    if name_taken > 0 {
+        return Ok(NewAccount::UsernameTaken);
+    }
+
+    let (id,): (i64,) = sqlx::query_as(
+        "INSERT INTO accounts (username, created_at, last_seen_at, signup_ip_hash)
+         VALUES (?1, ?2, ?2, ?3) RETURNING id",
+    )
+    .bind(username)
+    .bind(&now)
+    .bind(ip_hash)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO identities (provider, subject, account_id, email, created_at)
+         VALUES ('email', ?1, ?2, ?1, ?3)",
+    )
+    .bind(email)
+    .bind(id)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO passwords (account_id, email, hash, created_at, changed_at)
+         VALUES (?1, ?2, ?3, ?4, ?4)",
+    )
+    .bind(id)
+    .bind(email)
+    .bind(hash)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(NewAccount::Created(Account {
+        id,
+        username: username.to_string(),
+        intra_id: None,
+        verified: false,
+    }))
+}
+
+/// The account and password hash behind an email, if it may sign in. Banned
+/// and deleted accounts are not found, so they get the same answer as a
+/// wrong password.
+pub async fn password_login(db: &Db, email: &str) -> Result<Option<(i64, String)>> {
+    let row = sqlx::query_as(
+        "SELECT p.account_id, p.hash FROM passwords p
+         JOIN accounts a ON a.id = p.account_id
+         WHERE p.email = ?1 AND a.banned_at IS NULL AND a.deleted_at IS NULL",
+    )
+    .bind(email)
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
+}
+
+/// The email an account signs in with by password, and whether it is verified.
+pub async fn password_email(db: &Db, account_id: i64) -> Result<Option<(String, bool)>> {
+    let row = sqlx::query_as(
+        "SELECT email, verified_at IS NOT NULL FROM passwords WHERE account_id = ?1",
+    )
+    .bind(account_id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
+}
+
+/// Remembers the hash of an emailed link's token.
+pub async fn store_link_token(
+    db: &Db,
+    account_id: i64,
+    purpose: &str,
+    token_hash: &str,
+    lifetime: chrono::Duration,
+) -> Result<()> {
+    let now = Utc::now();
+    sqlx::query(
+        "INSERT INTO email_tokens (token_hash, account_id, purpose, created_at, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(token_hash)
+    .bind(account_id)
+    .bind(purpose)
+    .bind(ts(now))
+    .bind(ts(now + lifetime))
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// The account a link is for, if it is unused, unexpired and for `purpose`,
+/// without using it up. For showing the form a reset link leads to.
+pub async fn peek_link_token(db: &Db, purpose: &str, token_hash: &str) -> Result<Option<i64>> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT account_id FROM email_tokens
+         WHERE token_hash = ?1 AND purpose = ?2 AND used_at IS NULL AND expires_at > ?3",
+    )
+    .bind(token_hash)
+    .bind(purpose)
+    .bind(ts(Utc::now()))
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|r| r.0))
+}
+
+/// Uses a link up and says whose it was. One statement, so the same link
+/// opened twice at once still works only once.
+pub async fn use_link_token(db: &Db, purpose: &str, token_hash: &str) -> Result<Option<i64>> {
+    let now = ts(Utc::now());
+    let row: Option<(i64,)> = sqlx::query_as(
+        "UPDATE email_tokens SET used_at = ?3
+         WHERE token_hash = ?1 AND purpose = ?2 AND used_at IS NULL AND expires_at > ?3
+         RETURNING account_id",
+    )
+    .bind(token_hash)
+    .bind(purpose)
+    .bind(&now)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|r| r.0))
+}
+
+/// The account's email is confirmed, and with it the account.
+pub async fn mark_email_verified(db: &Db, account_id: i64) -> Result<()> {
+    let now = ts(Utc::now());
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE passwords SET verified_at = COALESCE(verified_at, ?1) WHERE account_id = ?2")
+        .bind(&now)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE accounts SET verified_at = COALESCE(verified_at, ?1) WHERE id = ?2")
+        .bind(&now)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// A new password, and every session of the account ended: whoever knew the
+/// old one is signed out with it.
+pub async fn set_password(db: &Db, account_id: i64, hash: &str) -> Result<()> {
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE passwords SET hash = ?1, changed_at = ?2 WHERE account_id = ?3")
+        .bind(hash)
+        .bind(ts(Utc::now()))
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM account_sessions WHERE account_id = ?1")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    // Any other reset link still lying in an inbox stops working too.
+    sqlx::query("UPDATE email_tokens SET used_at = ?1 WHERE account_id = ?2 AND purpose = 'reset' AND used_at IS NULL")
+        .bind(ts(Utc::now()))
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn account_username(db: &Db, account_id: i64) -> Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT username FROM accounts WHERE id = ?1")
+        .bind(account_id)
+        .fetch_optional(db)
+        .await?;
+    Ok(row.map(|r| r.0))
+}
+
+pub async fn mails_sent_since(db: &Db, since: &str) -> Result<i64> {
+    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM mail_log WHERE sent_at >= ?1")
+        .bind(since)
+        .fetch_one(db)
+        .await?;
+    Ok(n)
+}
+
+pub async fn log_mail(db: &Db, purpose: &str) -> Result<()> {
+    sqlx::query("INSERT INTO mail_log (purpose, sent_at) VALUES (?1, ?2)")
+        .bind(purpose)
+        .bind(ts(Utc::now()))
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 // ------------------------------------------------------------- sessions
 
 pub async fn create_session(db: &Db, token: &str, account_id: i64, ttl_days: i64) -> Result<()> {
@@ -337,7 +581,8 @@ pub async fn delete_session(db: &Db, token: &str) -> Result<()> {
     Ok(())
 }
 
-/// Drop sessions and OAuth states that have aged out.
+/// Drop sessions, OAuth states and emailed links that have aged out, and
+/// the mail log past the days it is counted for.
 pub async fn purge_expired(db: &Db) -> Result<()> {
     let now = ts(Utc::now());
     sqlx::query("DELETE FROM account_sessions WHERE expires_at <= ?1")
@@ -346,6 +591,14 @@ pub async fn purge_expired(db: &Db) -> Result<()> {
         .await?;
     sqlx::query("DELETE FROM oauth_states WHERE expires_at <= ?1")
         .bind(&now)
+        .execute(db)
+        .await?;
+    sqlx::query("DELETE FROM email_tokens WHERE expires_at <= ?1")
+        .bind(&now)
+        .execute(db)
+        .await?;
+    sqlx::query("DELETE FROM mail_log WHERE sent_at <= ?1")
+        .bind(ts(Utc::now() - chrono::Duration::days(2)))
         .execute(db)
         .await?;
     Ok(())

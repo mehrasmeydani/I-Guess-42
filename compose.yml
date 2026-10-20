@@ -17,6 +17,10 @@ services:
       DATABASE_URL: sqlite:///app/data/game.db
       SECURE_COOKIES: "true"
       FT_REDIRECT_URI: https://${SITE_DOMAIN:?set SITE_DOMAIN in .env}/auth/callback
+      PUBLIC_URL: https://${SITE_DOMAIN:?set SITE_DOMAIN in .env}
+      # Caddy is the only way in, and it appends the address it saw to
+      # X-Forwarded-For; the app reads that one (see ClientIp).
+      TRUST_PROXY: "true"
     volumes:
       - game_data:/app/data
     expose:

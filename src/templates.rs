@@ -558,6 +558,82 @@ pub struct ErrorTemplate {
     pub message: String,
 }
 
+/// The sign-in page: every way in that this instance offers.
+#[derive(Template)]
+#[template(path = "login.html")]
+pub struct LoginTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub notice: Option<Notice>,
+    /// Typed into the email field last time, so a wrong password does not
+    /// cost retyping it.
+    pub email: String,
+    pub email_signup: bool,
+    pub github: bool,
+    pub google: bool,
+}
+
+#[derive(Template)]
+#[template(path = "signup.html")]
+pub struct SignupTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub notice: Option<Notice>,
+    pub enabled: bool,
+    pub email: String,
+    pub username: String,
+    pub turnstile_site_key: Option<String>,
+}
+
+/// A page that only says something: "check your inbox", "that link expired".
+#[derive(Template)]
+#[template(path = "message.html")]
+pub struct MessageTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub title: &'static str,
+    pub lines: Vec<String>,
+    /// Where to go next, and what the button says.
+    pub link: Option<(&'static str, &'static str)>,
+}
+
+#[derive(Template)]
+#[template(path = "forgot.html")]
+pub struct ForgotTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub notice: Option<Notice>,
+}
+
+#[derive(Template)]
+#[template(path = "reset.html")]
+pub struct ResetTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub notice: Option<Notice>,
+    pub token: String,
+}
+
+#[derive(Template)]
+#[template(path = "verify.html")]
+pub struct VerifyTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub token: String,
+}
+
 /// Render a template, or fall back to a bare 500 if the template itself is broken.
 pub fn render<T: Template>(template: &T) -> Response {
     match template.render() {
