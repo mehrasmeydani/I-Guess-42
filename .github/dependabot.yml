@@ -27,6 +27,24 @@ updates:
     commit-message:
       prefix: deps
 
+  # The Dockerfile pins both base images by digest so that Debian republishing
+  # them cannot throw away the build cache in the middle of a release. This is
+  # what moves those pins, on purpose and in a pull request of its own.
+  - package-ecosystem: docker
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Vienna
+    open-pull-requests-limit: 3
+    groups:
+      docker:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+
   # CI pins actions/checkout, dtolnay/rust-toolchain, Swatinem/rust-cache,
   # docker/setup-buildx-action, docker/build-push-action and rustsec/audit-check.
   # Left alone they go stale silently, which is how a workflow starts failing

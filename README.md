@@ -271,9 +271,12 @@ How long the build takes:
 
 - **~30 seconds** for a normal release — one that touches only `version.txt`,
   `src/`, `templates/` and `static/`. The dependency layer is reused.
-- **two to three minutes** when `Cargo.toml` or `Cargo.lock` changed, which
-  invalidates that layer and recompiles all 281 crates. Dependency updates and
-  MSRV bumps land in this bucket.
+- **three to four minutes** when `Cargo.toml`, `Cargo.lock` or a base image
+  in the `Dockerfile` changed, which invalidates that layer and recompiles all
+  281 crates. Dependency updates, base image updates and MSRV bumps land in
+  this bucket. The base images are pinned by digest for exactly this reason:
+  as bare tags they moved whenever Debian republished them, and an unrelated
+  release paid the full rebuild.
 
 ### 4. Verify
 

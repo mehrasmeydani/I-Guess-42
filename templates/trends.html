@@ -109,7 +109,7 @@
           <td><a href="/day/{{ d.date }}">{{ d.date }}</a></td>
           <td class="barcell"><span class="minibar" style="--w: {{ d.players_pct }}%"></span><b>{{ d.players }}</b></td>
           {% match d.winner_label %}
-            {% when Some with (w) %}<td class="barcell win{% if d.winner_outlier %} outlier{% endif %}"{% if d.winner_outlier %} title="far above the rest of the day's picks; left out of the averages"{% endif %}><span class="minibar" style="--w: {{ d.winner_pct }}%"></span><b>{{ w }}</b>{% if d.winner_outlier %} <span class="dim">outlier</span>{% endif %}</td>
+            {% when Some with (w) %}<td class="barcell win{% if d.winner_outlier %} outlier{% endif %}"{% if d.winner_outlier %} title="far above the rest of the day's picks; left out of the averages"{% endif %}>{% if !d.winner_outlier %}<span class="minibar" style="--w: {{ d.winner_pct }}%"></span>{% endif %}<b>{{ w }}</b>{% if d.winner_outlier %} <span class="dim">outlier</span>{% endif %}</td>
             {% when None %}<td class="barcell dim">nobody won</td>
           {% endmatch %}
         </tr>
