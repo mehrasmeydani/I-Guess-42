@@ -402,8 +402,9 @@ impl TrendsTemplate {
             .max()
             .unwrap_or(1)
             .max(1);
-        // Rounded up, so any non-zero value shows at least a sliver; capped,
-        // since an outlier is past the top. In i128, as winners reach i64::MAX.
+        // Rounded up, so any non-zero value shows at least a sliver. In i128,
+        // as winners reach i64::MAX; an outlier has no bar, but a big winner
+        // that is not one is still measured.
         let share = |v: i64, of: i64| {
             let (v, of) = (i128::from(v), i128::from(of));
             ((v * 100 + of - 1) / of).min(100) as i64
@@ -534,7 +535,55 @@ pub fn render<T: Template>(template: &T) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::group_digits;
+    use super::{group_digits, TrendsTemplate};
+    use crate::stats::{trend, DayTally};
+    use askama::Template;
+
+    #[test]
+    fn an_outlier_winner_is_listed_without_a_bar() {
+        // A normal day won on 2, and a day where 1..=30 all collided and one
+        // player alone on 2 147 483 648 won. A bar for that would be off any
+        // scale the other days share, so it gets none.
+        let mut rows: Vec<DayTally> = [(1, 2), (2, 1)]
+            .into_iter()
+            .map(|(value, count)| DayTally {
+                round_date: "2026-10-07".into(),
+                value,
+                count,
+            })
+            .collect();
+        rows.extend((1..=30).map(|value| DayTally {
+            round_date: "2026-10-08".into(),
+            value,
+            count: 2,
+        }));
+        rows.push(DayTally {
+            round_date: "2026-10-08".into(),
+            value: 2_147_483_648,
+            count: 1,
+        });
+        let html = TrendsTemplate::build(None, false, false, "7", &trend(&rows))
+            .render()
+            .unwrap();
+
+        let row = |date: &str| {
+            let from = html.find(&format!(">{date}<")).expect("a row for the day");
+            let row = &html[from..];
+            row[..row.find("</tr>").unwrap()].to_string()
+        };
+        let wild = row("2026-10-08");
+        assert!(wild.contains("outlier"));
+        assert_eq!(
+            wild.matches("minibar").count(),
+            1,
+            "only the players bar: {wild}"
+        );
+        assert_eq!(
+            row("2026-10-07").matches("minibar").count(),
+            2,
+            "a normal day keeps both"
+        );
+    }
 
     #[test]
     fn groups_digits_in_threes() {
