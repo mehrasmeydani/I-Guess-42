@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::app::{error_page, AppError, AppState};
 use crate::auth;
-use crate::db::{self, User};
+use crate::db::{self, Viewer};
 use crate::round::Round;
 use crate::stats;
 use crate::templates::{
@@ -26,11 +26,11 @@ const PODIUM: usize = 3;
 /// enough to find your way around without turning the page into /results.
 const DAY_HISTORY: i64 = 14;
 
-async fn current_user(state: &AppState, jar: &CookieJar) -> Result<Option<User>, AppError> {
+async fn current_viewer(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
     let Some(token) = auth::session_token(jar) else {
         return Ok(None);
     };
-    Ok(db::user_for_session(&state.db, &token).await?)
+    Ok(db::viewer_for_session(&state.db, &token).await?)
 }
 
 /// Flash messages travel as a fixed code in the query string, so nothing a
@@ -60,25 +60,24 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
             "That is past the ceiling of 9 223 372 036 854 775 807. Aim lower — that is the point.",
         ),
         "login_required" => Notice::error("Sign in with 42 before guessing."),
+        "not_42" => Notice::error("This round is for 42 Vienna students: sign in with 42 to play it."),
         _ => return None,
     })
 }
 
 /// Whether this visitor may be shown who played. A login and a real name are
 /// a 42 student's personal data, so they leave the server only for a visitor
-/// who signed in through intra; everyone else gets `templates::MASK`.
+/// who plays as a 42 student; everyone else gets `templates::MASK`.
 ///
-/// Signing in and being a 42 student are the same thing today, because intra
-/// OAuth is the only way in. They would stop being the same if plain accounts
-/// ever land (#6), and this is the one line that then has to be re-answered
-/// instead of six templates.
-fn names_visible(user: Option<&db::User>) -> bool {
-    user.is_some()
+/// Being signed in is not enough: an account need not be a 42 one, and a
+/// stranger who made an account must not be able to read the 42 pool's names.
+fn names_visible(viewer: Option<&Viewer>) -> bool {
+    viewer.is_some_and(|v| v.intra.is_some())
 }
 
 #[derive(Deserialize)]
 pub struct IndexQuery {
-    msg: Option<String>,
+    pub msg: Option<String>,
 }
 
 pub async fn index(
@@ -90,9 +89,10 @@ pub async fn index(
     let round = Round::current(now);
     let round_key = round.key();
 
-    let user = current_user(&state, &jar).await?;
-    let my_guess_label = match &user {
-        Some(u) => db::my_guess(&state.db, &round_key, u.id)
+    let viewer = current_viewer(&state, &jar).await?;
+    let player = viewer.as_ref().and_then(|v| v.intra.as_ref());
+    let my_guess_label = match player {
+        Some(p) => db::my_guess(&state.db, &round_key, p.id)
             .await?
             .map(group_digits),
         None => None,
@@ -104,7 +104,7 @@ pub async fn index(
         &round.previous_date().format("%Y-%m-%d").to_string(),
     )
     .await?
-    .map(|r| RoundView::new(r, names_visible(user.as_ref())));
+    .map(|r| RoundView::new(r, names_visible(viewer.as_ref())));
 
     // For half an hour after 12:42 the round that just closed is announced
     // over the page: it is the one moment the game has, and without this it
@@ -116,13 +116,13 @@ pub async fn index(
 
     // The points line is for players, not for the shop window: it says what
     // this round is worth to *you*, so it waits until there is a you.
-    let points_announced = user.is_some() && state.cfg.points_announced();
+    let points_announced = player.is_some() && state.cfg.points_announced();
 
     let seconds_left = round.seconds_left(now);
     let (progress_pct, progress_bar) = stats::progress_bar(seconds_left);
     let guess_count = db::guess_count(&state.db, &round_key).await?;
     Ok(templates::render(&IndexTemplate {
-        user: user.map(UserView::from),
+        user: viewer.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         round_key,
@@ -142,11 +142,11 @@ pub async fn index(
 #[derive(Deserialize)]
 pub struct ResultsQuery {
     /// Search: a winner's login, a winning number, or a date or month prefix.
-    q: Option<String>,
+    pub q: Option<String>,
     /// "7" (default), "30" or "all": how many recent rounds to list.
-    show: Option<String>,
+    pub show: Option<String>,
     /// From the date picker: jump straight to that day's page.
-    date: Option<String>,
+    pub date: Option<String>,
 }
 
 /// Whether a closed round matches a search. The query is matched against the
@@ -184,9 +184,9 @@ pub async fn results(
     }
 
     let round_key = Round::current(state.now()).key();
-    let user = current_user(&state, &jar).await?;
+    let viewer = current_viewer(&state, &jar).await?;
 
-    let named = names_visible(user.as_ref());
+    let named = names_visible(viewer.as_ref());
 
     let all = db::closed_rounds(&state.db, &round_key, HISTORY_LIMIT).await?;
     let total_rounds = all.len();
@@ -232,7 +232,7 @@ pub async fn results(
     let rest = leaders.split_off(leaders.len().min(PODIUM));
 
     Ok(templates::render(&ResultsTemplate {
-        user: user.map(UserView::from),
+        user: viewer.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         latest,
@@ -273,8 +273,8 @@ pub async fn day(
     let tallies = db::round_tallies(&state.db, &date).await?;
     let stats = stats::analyse(&tallies);
     let chart = stats::day_chart(&tallies, &stats);
-    let user = current_user(&state, &jar).await?;
-    let named = names_visible(user.as_ref());
+    let viewer = current_viewer(&state, &jar).await?;
+    let named = names_visible(viewer.as_ref());
 
     // The neighbouring rounds, so one day leads to the next without a detour
     // through /results. Backwards by the listful, forwards one step, which is
@@ -288,7 +288,7 @@ pub async fn day(
     let total_rounds = db::closed_round_count(&state.db, &open_round).await?;
 
     Ok(templates::render(&DayTemplate {
-        user: user.map(UserView::from),
+        user: viewer.map(UserView::from),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         round: RoundView::new(summary, named),
@@ -330,7 +330,7 @@ pub async fn trends(
         None => String::new(), // sorts before every date
     };
 
-    let user = current_user(&state, &jar).await?;
+    let viewer = current_viewer(&state, &jar).await?;
 
     // Timed from the query to the finished view model, and shown on the page:
     // an honest number for how heavy the analysis is.
@@ -338,7 +338,7 @@ pub async fn trends(
     let rows = db::range_tallies(&state.db, &from, &open_round).await?;
     let trend = stats::trend(&rows);
     let mut page = TrendsTemplate::build(
-        user.map(UserView::from),
+        viewer.map(UserView::from),
         state.cfg.test_mode(),
         auth::admin_return_token(&jar).is_some(),
         range,
@@ -352,10 +352,10 @@ pub async fn trends(
 
 #[derive(Deserialize)]
 pub struct GuessForm {
-    guess: String,
+    pub guess: String,
     /// The round the form was rendered for, so we can tell the player when
     /// their number landed in a different one than they were looking at.
-    round: String,
+    pub round: String,
 }
 
 /// Accepts digits with the separators people naturally type.
@@ -387,8 +387,11 @@ pub async fn submit_guess(
     jar: CookieJar,
     Form(form): Form<GuessForm>,
 ) -> Result<Response, AppError> {
-    let Some(user) = current_user(&state, &jar).await? else {
+    let Some(viewer) = current_viewer(&state, &jar).await? else {
         return Ok(Redirect::to("/?msg=login_required").into_response());
+    };
+    let Some(player) = viewer.intra.clone() else {
+        return Ok(Redirect::to("/?msg=not_42").into_response());
     };
 
     let value = match parse_guess(&form.guess) {
@@ -399,7 +402,7 @@ pub async fn submit_guess(
     let round = Round::current(state.now());
     let round_key = round.key();
 
-    if db::my_guess(&state.db, &round_key, user.id)
+    if db::my_guess(&state.db, &round_key, player.id)
         .await?
         .is_some()
     {
@@ -407,7 +410,7 @@ pub async fn submit_guess(
     }
 
     Ok(templates::render(&ConfirmTemplate {
-        user: Some(UserView::from(user)),
+        user: Some(UserView::from(viewer)),
         test_mode: state.cfg.test_mode(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         value_label: group_digits(value),
@@ -425,8 +428,11 @@ pub async fn confirm_guess(
     jar: CookieJar,
     Form(form): Form<GuessForm>,
 ) -> Result<Response, AppError> {
-    let Some(user) = current_user(&state, &jar).await? else {
+    let Some(viewer) = current_viewer(&state, &jar).await? else {
         return Ok(Redirect::to("/?msg=login_required").into_response());
+    };
+    let Some(player) = viewer.intra.clone() else {
+        return Ok(Redirect::to("/?msg=not_42").into_response());
     };
 
     let value = match parse_guess(&form.guess) {
@@ -441,7 +447,7 @@ pub async fn confirm_guess(
         return Ok(Redirect::to("/?msg=rolled").into_response());
     }
 
-    let msg = if db::insert_guess(&state.db, &round_key, user.id, value, true).await? {
+    let msg = if db::insert_guess(&state.db, &round_key, player.id, value, true).await? {
         "saved"
     } else {
         // Lost a race with another tab; the first guess stands.
@@ -457,15 +463,23 @@ pub async fn confirm_guess(
 // every route answers 404 when it is not, so a live deployment gives no sign
 // that any of this exists.
 
-/// `Ok(Some(user))` for a signed-in admin on a test instance, `Ok(None)`
-/// otherwise - callers turn that into a 404.
-async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<Option<User>, AppError> {
+/// `Ok(Some(viewer))` for a signed-in admin on a test instance, `Ok(None)`
+/// otherwise - callers turn that into a 404. ADMIN_LOGINS are 42 logins, so
+/// only an account that plays as a 42 student can be one.
+pub(crate) async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
     if !state.cfg.test_mode() {
         return Ok(None);
     }
-    Ok(current_user(state, jar)
+    Ok(current_viewer(state, jar)
         .await?
-        .filter(|u| state.cfg.is_admin(&u.login)))
+        .filter(|v| is_admin(state, v)))
+}
+
+fn is_admin(state: &AppState, viewer: &Viewer) -> bool {
+    viewer
+        .intra
+        .as_ref()
+        .is_some_and(|u| state.cfg.is_admin(&u.login))
 }
 
 fn admin_gone() -> Response {
@@ -473,7 +487,7 @@ fn admin_gone() -> Response {
 }
 
 pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
-    let Some(user) = require_admin(&state, &jar).await? else {
+    let Some(viewer) = require_admin(&state, &jar).await? else {
         return Ok(admin_gone());
     };
 
@@ -492,7 +506,7 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
     .map(|r| RoundView::new(r, true));
 
     Ok(templates::render(&AdminTemplate {
-        user: Some(UserView::from(user)),
+        user: Some(UserView::from(viewer)),
         test_mode: true,
         impersonating: auth::admin_return_token(&jar).is_some(),
         real_now: Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
@@ -603,7 +617,7 @@ pub async fn admin_fake_guess(
 
 #[derive(Deserialize)]
 pub struct ImpersonateForm {
-    login: String,
+    pub login: String,
 }
 
 /// Signs the admin in as a demo account so they can play through the real
@@ -631,8 +645,9 @@ pub async fn admin_impersonate(
         None => db::create_test_user(&state.db, &login).await?,
     };
 
+    let account = db::account_for_intra(&state.db, player.id, &player.login).await?;
     let token = auth::random_token();
-    db::create_session(&state.db, &token, player.id, auth::SESSION_TTL_DAYS).await?;
+    db::create_session(&state.db, &token, account.id, auth::SESSION_TTL_DAYS).await?;
 
     // Park the admin's own session so they can come back. Keep whichever one
     // is already parked, so impersonating twice does not lose the way home.
@@ -661,9 +676,9 @@ pub async fn admin_return(
     };
 
     // Only restore a session that is still valid and still belongs to an admin.
-    let restores_admin = db::user_for_session(&state.db, &parked)
+    let restores_admin = db::viewer_for_session(&state.db, &parked)
         .await?
-        .is_some_and(|u| state.cfg.is_admin(&u.login));
+        .is_some_and(|v| is_admin(&state, &v));
 
     let jar = jar.remove(auth::clearing_admin_return_cookie());
     if !restores_admin {
@@ -797,8 +812,9 @@ pub async fn callback(
     )
     .await?;
 
+    let account = db::account_for_intra(&state.db, me.id, &me.login).await?;
     let session = auth::random_token();
-    db::create_session(&state.db, &session, me.id, auth::SESSION_TTL_DAYS).await?;
+    db::create_session(&state.db, &session, account.id, auth::SESSION_TTL_DAYS).await?;
 
     let jar = jar.add(auth::session_cookie(session, state.cfg.secure_cookies));
     Ok((jar, Redirect::to("/")).into_response())
@@ -875,17 +891,27 @@ mod tests {
     }
 
     #[test]
-    fn names_are_shown_to_a_signed_in_visitor_and_masked_for_everyone_else() {
-        use crate::db::{LeaderboardRow, User};
+    fn names_are_shown_to_42_students_and_masked_for_everyone_else() {
+        use crate::db::{Account, LeaderboardRow, User, Viewer};
         use crate::templates::{LeaderView, RoundView, MASK};
 
-        let me = User {
-            id: 1,
-            login: "megardes".to_string(),
-            display_name: "Meg Ardes".to_string(),
-            image_url: None,
+        let student = Viewer {
+            account: Account { id: 1, username: "megardes".to_string(), intra_id: Some(7) },
+            intra: Some(User {
+                id: 7,
+                login: "megardes".to_string(),
+                display_name: "Meg Ardes".to_string(),
+                image_url: None,
+            }),
         };
-        assert!(names_visible(Some(&me)));
+        // Signed in, but not through 42: a stranger with an account must not
+        // be able to read the 42 pool's logins.
+        let stranger = Viewer {
+            account: Account { id: 2, username: "stranger".to_string(), intra_id: None },
+            intra: None,
+        };
+        assert!(names_visible(Some(&student)));
+        assert!(!names_visible(Some(&stranger)));
         assert!(!names_visible(None));
 
         let r = round("2026-08-14", Some(("megardes", 1_337)));
@@ -909,6 +935,276 @@ mod tests {
         assert_eq!(hidden.login, MASK);
         assert_eq!(hidden.display_name, MASK);
         assert_eq!(hidden.wins, 12);
+    }
+
+    // ------------------------------------------------ through the handlers
+    //
+    // These call the real handlers against a real database, signed in through
+    // a real session cookie, and look at what comes back.
+
+    mod live {
+        use std::sync::Arc;
+
+        use axum::extract::{Form, Query, State};
+        use axum::http::header::LOCATION;
+        use axum::response::Response;
+        use axum_extra::extract::cookie::{Cookie, CookieJar};
+
+        use crate::app::AppState;
+        use crate::auth;
+        use crate::config::Config;
+        use crate::db::{self, test_support::{temp_db, TempDb}};
+        use crate::handlers::{self, GuessForm, ImpersonateForm, ResultsQuery};
+        use crate::round::Round;
+
+        fn config(admins: &[&str]) -> Config {
+            Config {
+                client_id: String::new(),
+                client_secret: String::new(),
+                redirect_uri: String::new(),
+                database_url: String::new(),
+                bind_addr: String::new(),
+                secure_cookies: false,
+                admin_logins: admins.iter().map(|a| a.to_string()).collect(),
+                allowed_campus_ids: vec![53],
+                points_api_key: None,
+                points_api_url: String::new(),
+            }
+        }
+
+        async fn app(admins: &[&str]) -> (TempDb, AppState) {
+            let t = temp_db().await;
+            let state = AppState::new(t.db.clone(), Arc::new(config(admins)), reqwest::Client::new());
+            (t, state)
+        }
+
+        fn jar(token: &str) -> CookieJar {
+            CookieJar::new().add(Cookie::new(auth::SESSION_COOKIE, token.to_string()))
+        }
+
+        /// A 42 student with a session. Their account id and intra id differ
+        /// on purpose, so a mix-up between the two cannot pass unnoticed.
+        async fn student(db: &db::Db, intra_id: i64, login: &str, token: &str) {
+            db::upsert_user(db, intra_id, login, login, None).await.unwrap();
+            let account = db::account_for_intra(db, intra_id, login).await.unwrap();
+            assert_ne!(account.id, intra_id);
+            db::create_session(db, token, account.id, 30).await.unwrap();
+        }
+
+        /// Signed in, but with no 42 account behind it.
+        async fn stranger(db: &db::Db, username: &str, token: &str) {
+            let (id,): (i64,) = sqlx::query_as(
+                "INSERT INTO accounts (username, created_at, last_seen_at)
+                 VALUES (?1, 'x', 'x') RETURNING id",
+            )
+            .bind(username)
+            .fetch_one(db)
+            .await
+            .unwrap();
+            db::create_session(db, token, id, 30).await.unwrap();
+        }
+
+        fn location(resp: &Response) -> &str {
+            resp.headers().get(LOCATION).and_then(|v| v.to_str().ok()).unwrap_or("")
+        }
+
+        async fn body(resp: Response) -> String {
+            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            String::from_utf8(bytes.to_vec()).unwrap()
+        }
+
+        fn guess(state: &AppState, value: &str) -> Form<GuessForm> {
+            Form(GuessForm {
+                guess: value.to_string(),
+                round: Round::current(state.now()).key(),
+            })
+        }
+
+        async fn guesses(db: &db::Db) -> Vec<(i64, i64)> {
+            sqlx::query_as("SELECT user_id, value FROM guesses ORDER BY user_id")
+                .fetch_all(db)
+                .await
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn a_42_students_guess_is_stored_under_their_intra_id() {
+            let (t, state) = app(&[]).await;
+            // Pad the accounts table so account ids and intra ids cannot line up.
+            stranger(&t.db, "padding", "p").await;
+            student(&t.db, 1001, "megardes", "tok").await;
+
+            let resp = handlers::confirm_guess(State(state.clone()), jar("tok"), guess(&state, "7"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/?msg=saved");
+            assert_eq!(guesses(&t.db).await, [(1001, 7)]);
+        }
+
+        #[tokio::test]
+        async fn an_account_without_42_cannot_guess_in_the_42_pool() {
+            let (t, state) = app(&[]).await;
+            stranger(&t.db, "stranger", "tok").await;
+
+            let resp = handlers::submit_guess(State(state.clone()), jar("tok"), guess(&state, "7"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/?msg=not_42");
+            let resp = handlers::confirm_guess(State(state.clone()), jar("tok"), guess(&state, "7"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/?msg=not_42");
+            assert!(guesses(&t.db).await.is_empty(), "nothing may be written");
+
+            // Signed out is still told to sign in, as before.
+            let resp = handlers::confirm_guess(State(state.clone()), CookieJar::new(), guess(&state, "7"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/?msg=login_required");
+        }
+
+        #[tokio::test]
+        async fn the_front_page_offers_the_form_only_to_42_students() {
+            let (t, state) = app(&[]).await;
+            student(&t.db, 1001, "megardes", "s").await;
+            stranger(&t.db, "stranger", "x").await;
+            let page = |token: Option<&'static str>| {
+                let state = state.clone();
+                async move {
+                    let jar = token.map(jar).unwrap_or_default();
+                    body(handlers::index(State(state), jar, Query(handlers::IndexQuery { msg: None }))
+                        .await
+                        .unwrap())
+                    .await
+                }
+            };
+
+            let html = page(Some("s")).await;
+            assert!(html.contains(r#"action="/guess""#), "a student gets the form");
+            assert!(html.contains(">megardes<"));
+
+            let html = page(Some("x")).await;
+            assert!(!html.contains(r#"action="/guess""#), "a stranger gets no form");
+            assert!(html.contains("this round is for 42 Vienna students"));
+            assert!(html.contains(">stranger<"), "but is shown as signed in");
+
+            let html = page(None).await;
+            assert!(!html.contains(r#"action="/guess""#));
+            assert!(html.contains("log in to play"));
+        }
+
+        #[tokio::test]
+        async fn results_hide_42_names_from_an_account_without_42() {
+            let (t, state) = app(&[]).await;
+            student(&t.db, 1001, "megardes", "s").await;
+            stranger(&t.db, "stranger", "x").await;
+            // A closed round that megardes won.
+            let yesterday = Round::current(state.now()).previous_date().format("%Y-%m-%d").to_string();
+            db::insert_guess(&t.db, &yesterday, 1001, 3, true).await.unwrap();
+
+            let page = |token: &'static str, q: &str| {
+                let state = state.clone();
+                let q = Some(q.to_string());
+                async move {
+                    body(handlers::results(
+                        State(state),
+                        jar(token),
+                        Query(ResultsQuery { q, show: None, date: None }),
+                    )
+                    .await
+                    .unwrap())
+                    .await
+                }
+            };
+            assert!(page("s", "").await.contains("megardes"), "a student sees who won");
+            let html = page("x", "").await;
+            assert!(!html.contains("megardes"), "a stranger must not");
+            assert!(html.contains(crate::templates::MASK));
+            // Nor find out by searching for the login.
+            assert!(page("x", "megardes").await.contains("no round matches"));
+            assert!(!page("s", "megardes").await.contains("no round matches"));
+        }
+
+        #[tokio::test]
+        async fn a_username_that_matches_an_admin_login_is_not_an_admin() {
+            let (t, state) = app(&["megardes"]).await;
+            // Someone without 42 who calls themselves megardes.
+            stranger(&t.db, "megardes", "fake").await;
+            assert!(handlers::require_admin(&state, &jar("fake")).await.unwrap().is_none());
+
+            // The real one, signing in through 42, is.
+            student(&t.db, 1001, "megardes", "real").await;
+            let v = handlers::require_admin(&state, &jar("real")).await.unwrap().unwrap();
+            assert_eq!(v.intra.unwrap().id, 1001);
+            assert_eq!(v.account.username, "megardes-42", "the name was taken first");
+        }
+
+        #[tokio::test]
+        async fn an_admin_can_become_a_stand_in_and_come_back() {
+            let (t, state) = app(&["megardes"]).await;
+            student(&t.db, 1001, "megardes", "mine").await;
+
+            let resp = handlers::admin_impersonate(
+                State(state.clone()),
+                jar("mine"),
+                Form(ImpersonateForm { login: "alice".into() }),
+            )
+            .await
+            .unwrap();
+            // The response carries the new session and parks the old one.
+            let cookies: Vec<Cookie> = resp
+                .headers()
+                .get_all(axum::http::header::SET_COOKIE)
+                .iter()
+                .map(|v| Cookie::parse(v.to_str().unwrap().to_string()).unwrap())
+                .collect();
+            let get = |name: &str| cookies.iter().find(|c| c.name() == name).unwrap().value().to_string();
+            let demo = get(auth::SESSION_COOKIE);
+            assert_eq!(get(auth::ADMIN_RETURN_COOKIE), "mine");
+
+            let v = db::viewer_for_session(&t.db, &demo).await.unwrap().unwrap();
+            let alice = v.intra.unwrap();
+            assert_eq!(alice.login, "alice");
+            assert!(alice.id < 0, "a stand-in, never a real account");
+
+            // A stand-in plays the 42 pool on a test instance.
+            let resp = handlers::confirm_guess(State(state.clone()), jar(&demo), guess(&state, "5"))
+                .await
+                .unwrap();
+            assert_eq!(location(&resp), "/?msg=saved");
+            assert_eq!(guesses(&t.db).await, [(alice.id, 5)]);
+
+            let back = jar(&demo).add(Cookie::new(auth::ADMIN_RETURN_COOKIE, "mine"));
+            let resp = handlers::admin_return(State(state.clone()), back).await.unwrap();
+            assert_eq!(location(&resp), "/admin");
+            assert!(db::viewer_for_session(&t.db, &demo).await.unwrap().is_none(), "demo session dropped");
+            assert!(db::viewer_for_session(&t.db, "mine").await.unwrap().is_some());
+        }
+
+        #[tokio::test]
+        async fn a_real_42_account_cannot_be_impersonated() {
+            let (t, state) = app(&["megardes"]).await;
+            student(&t.db, 1001, "megardes", "mine").await;
+            student(&t.db, 1002, "classmate", "theirs").await;
+
+            let resp = handlers::admin_impersonate(
+                State(state.clone()),
+                jar("mine"),
+                Form(ImpersonateForm { login: "classmate".into() }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(location(&resp), "/admin?msg=not_demo");
+            assert_eq!(
+                sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM account_sessions")
+                    .fetch_one(&t.db)
+                    .await
+                    .unwrap()
+                    .0,
+                2,
+                "no new session"
+            );
+        }
     }
 
     #[test]

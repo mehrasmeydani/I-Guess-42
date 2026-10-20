@@ -1,6 +1,6 @@
 # Spec: open to everyone — global pool, logins, points and betting
 
-Status: **draft, not built yet**. This is the plan the next releases follow.
+Status: **Phase 1 built** (on the `global` branch, not deployed); phases 2–4 not started. This is the plan the next releases follow.
 Where it disagrees with the code, the code describes what runs today and this
 file describes what is meant to run next.
 
@@ -134,69 +134,20 @@ input.
 
 Migrations are append-only, numbered after the current `0004`.
 
-### 0005_accounts.sql (Phase 1)
+### 0005_accounts.sql (Phase 1, built)
 
-```sql
--- Everyone who can sign in, with ids of our own. A 42 student's account is
--- linked to their `users` row through intra_id; everyone else has NULL there.
-CREATE TABLE accounts (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
-    intra_id      INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL,
-    created_at    TEXT    NOT NULL,
-    last_seen_at  TEXT    NOT NULL,
-    banned_at     TEXT,                -- set by a moderator; see section 12
-    ban_reason    TEXT,
-    deleted_at    TEXT                 -- self-deleted; row kept so ledger sums stay right
-);
+See `migrations/0005_accounts.sql`. Built as planned, with two refinements:
 
--- One row per way of signing in. (provider, subject) is what the provider
--- calls this person: the intra id, the GitHub user id, Google's `sub`, or the
--- lowercased email for password logins.
-CREATE TABLE identities (
-    provider    TEXT    NOT NULL CHECK (provider IN ('42', 'github', 'google', 'email')),
-    subject     TEXT    NOT NULL,
-    account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    email       TEXT,                   -- as reported by the provider, for display only
-    created_at  TEXT    NOT NULL,
-    PRIMARY KEY (provider, subject)
-);
-CREATE INDEX idx_identities_account ON identities(account_id);
+- `accounts.intra_id` is `ON DELETE CASCADE`, not `SET NULL`. The only `users`
+  rows ever deleted are stand-ins (demo bots, test players), and their
+  accounts and sessions should go with them. Deleting a *global* account
+  (6.10) still clears `intra_id` by hand and leaves `users` alone.
+- Generated `bot-###` players get no account unless someone was signed in as
+  one. Every 42 user and hand-made stand-in gets one.
 
--- Sessions now belong to accounts. Same opaque-token design as before.
-CREATE TABLE account_sessions (
-    token      TEXT    PRIMARY KEY,
-    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    created_at TEXT    NOT NULL,
-    expires_at TEXT    NOT NULL
-);
-CREATE INDEX idx_account_sessions_expires ON account_sessions(expires_at);
-
--- Every existing 42 user (and every test/demo stand-in) gets an account, so
--- nothing changes for them. Usernames are their 42 logins, which are unique.
-INSERT INTO accounts (username, intra_id, created_at, last_seen_at)
-SELECT login, id, created_at, last_seen_at FROM users;
-
-INSERT INTO identities (provider, subject, account_id, created_at)
-SELECT '42', CAST(u.id AS TEXT), a.id, u.created_at
-FROM users u JOIN accounts a ON a.intra_id = u.id;
-
--- Live sessions move across, so nobody is signed out by the release.
-INSERT INTO account_sessions (token, account_id, created_at, expires_at)
-SELECT s.token, a.id, s.created_at, s.expires_at
-FROM sessions s JOIN accounts a ON a.intra_id = s.user_id;
-
-DROP TABLE sessions;
-```
-
-`oauth_states` gains two columns: which provider the flow is for, and
-(when linking) which account started it.
-
-```sql
-ALTER TABLE oauth_states ADD COLUMN provider TEXT NOT NULL DEFAULT '42';
-ALTER TABLE oauth_states ADD COLUMN link_account_id INTEGER;  -- NULL = sign in, set = link
-ALTER TABLE oauth_states ADD COLUMN pkce_verifier TEXT;       -- Google and GitHub
-```
+Sessions are copied with their tokens, then `sessions` is dropped. The
+`oauth_states` columns `provider`, `link_account_id` and `pkce_verifier` are
+added now and used from Phase 2.
 
 ### 0006_passwords.sql (Phase 2)
 
@@ -963,7 +914,7 @@ The work lives on a long-lived `global` branch cut from `dev`, so `dev` and
 is done, `global` merges into `dev`, and `dev` goes to `main` through the
 usual release flow in the README.
 
-### Phase 1 — accounts underneath (no visible change)
+### Phase 1 — accounts underneath (no visible change) — **done**
 
 - Migration `0005_accounts.sql` (accounts, identities, account_sessions,
   oauth_states columns), plus the data copy of existing users and sessions.
@@ -972,8 +923,9 @@ usual release flow in the README.
 - 42 sign-in writes the account and identity (6.3).
 - `names_visible` changes to the rule in 7.3 (no visible effect yet, since
   only 42 students can sign in).
-- `db.rs` query functions get a `Pool` argument (only `Pool::Vienna` exists so
-  far).
+- ~~`db.rs` query functions get a `Pool` argument~~ moved to Phase 2: with only
+  one pool it would be an argument nothing varies, so it arrives together
+  with the global tables it exists to choose between.
 - **Done when**: every existing test passes, the site behaves identically, and
   a copy of the live database migrates with everyone still signed in.
   (Not deployed on its own; see above.)
@@ -983,6 +935,8 @@ usual release flow in the README.
 - Migrations `0006` and `0007`.
 - `/login` chooser, GitHub, Google, email + password with verify/forgot/reset,
   Resend, Turnstile, rate limits, `/account` (linking, username, delete).
+- A `Pool` argument for the `db.rs` query functions (`Vienna` or `Global`),
+  choosing the table and id column.
 - `/g` pages for the global pool, **without points yet**: guesses are free and
   the winner is shown like in the 42 pool.
 - Pool switcher, `/privacy`, `/imprint`, `/mod` with ban/unban, IP clustering

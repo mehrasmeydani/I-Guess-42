@@ -51,6 +51,7 @@ impl AppState {
 
 /// Any error that escapes a handler. Logged in full, shown to the visitor as
 /// a generic page so internal detail never reaches the browser.
+#[derive(Debug)]
 pub struct AppError(anyhow::Error);
 
 impl<E> From<E> for AppError

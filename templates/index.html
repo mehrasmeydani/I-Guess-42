@@ -45,11 +45,14 @@
     <p><b>{{ guess_count }}</b><span>{% if guess_count == 1 %}person{% else %}people{% endif %} guessed this round</span></p>
     <p><b>12:42</b><span>closes, vienna time</span></p>
     {% match user %}
-      {% when Some with (_u) %}
-        {% match my_guess_label %}
-          {% when Some with (_g) %}<p class="you in"><b>you're in</b><span>your number is locked</span></p>
-          {% when None %}<p class="you"><b>not yet</b><span>you haven't guessed today</span></p>
-        {% endmatch %}
+      {% when Some with (u) %}
+        {% if u.is_42 %}
+          {% match my_guess_label %}
+            {% when Some with (_g) %}<p class="you in"><b>you're in</b><span>your number is locked</span></p>
+            {% when None %}<p class="you"><b>not yet</b><span>you haven't guessed today</span></p>
+          {% endmatch %}
+        {% else %}<p class="you"><b>42 only</b><span>this round is for 42 students</span></p>
+        {% endif %}
       {% when None %}<p class="you"><b>guest</b><span>log in to play</span></p>
     {% endmatch %}
   </div>
@@ -63,7 +66,13 @@
   {% endmatch %}
 
   {% match user %}
-    {% when Some with (_u) %}
+    {% when Some with (u) %}
+      {# Signed in is not the same as playing here: an account that is not a
+         42 one sees the round but gets no form. /guess refuses it as well. #}
+      {% if !u.is_42 %}
+        <h2 class="rule"><span>play</span></h2>
+        <p class="dim">this round is for 42 Vienna students &mdash; sign in with 42 to play it.</p>
+      {% else %}
       {% match my_guess_label %}
         {% when Some with (g) %}
           <h2 class="rule"><span>your number</span></h2>
@@ -83,6 +92,7 @@
           </form>
           <p class="dim" id="guess-hint">final once you confirm</p>
       {% endmatch %}
+      {% endif %}
     {% when None %}
       <h2 class="rule"><span>play</span></h2>
       <a class="btn play" href="/login">log in to play &rarr;</a>

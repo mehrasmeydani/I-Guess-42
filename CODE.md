@@ -156,20 +156,20 @@ and a URL parse error can all be `?`-ed in the same function.
 ### `Option`
 
 Rust has no null. "Might not exist" is `Option<T>`, and the compiler forces you
-to handle the missing case. This project uses it for the signed-in user
-(`Option<User>`), a round's winner (`Option<WinnerView>`), a user's avatar
+to handle the missing case. This project uses it for the signed-in visitor
+(`Option<Viewer>`), a round's winner (`Option<WinnerView>`), a user's avatar
 (`Option<String>`), and a player's guess (`Option<i64>`).
 
 The `let ... else` form appears repeatedly:
 
 ```rust
-let Some(user) = current_user(&state, &jar).await? else {
+let Some(viewer) = current_viewer(&state, &jar).await? else {
     return Ok(Redirect::to("/?msg=login_required").into_response());
 };
 ```
 
-Read it as: bind `user` if there is one, otherwise run the block, which must
-diverge (return, break, panic). After it, `user` is a plain `User`.
+Read it as: bind `viewer` if there is one, otherwise run the block, which must
+diverge (return, break, panic). After it, `viewer` is a plain `Viewer`.
 
 ### Ownership, briefly
 
@@ -1056,7 +1056,7 @@ Each flag defends against something specific:
 - **`Max-Age`** — 30 days. Without it the cookie dies when the browser closes.
 
 The cookie holds only the random token. Everything else lives server-side in
-the `sessions` table, which is what makes sign-out able to actually revoke a
+the `account_sessions` table, which is what makes sign-out able to actually revoke a
 session rather than merely asking the browser to forget it.
 
 ```rust
@@ -1080,16 +1080,32 @@ One function per route, plus the shared helpers.
 ### Finding the visitor
 
 ```rust
-async fn current_user(state: &AppState, jar: &CookieJar) -> Result<Option<User>, AppError> {
+async fn current_viewer(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
     let Some(token) = auth::session_token(jar) else {
         return Ok(None);
     };
-    Ok(db::user_for_session(&state.db, &token).await?)
+    Ok(db::viewer_for_session(&state.db, &token).await?)
 }
 ```
 
 Called at the top of nearly every handler. `Ok(None)` means "nobody is signed
 in", which is not an error — every page works logged out.
+
+A `Viewer` is two things: the **account** that signed in, and the **42 player**
+it plays as, if any:
+
+```rust
+pub struct Viewer {
+    pub account: Account,     // always there
+    pub intra: Option<User>,  // the `users` row, for 42 students
+}
+```
+
+Today every account is a 42 one, but the 42 pool never assumes it. Guessing
+needs `viewer.intra` (no 42 player → `/?msg=not_42`), the guess is stored under
+the **intra id, never the account id**, and `names_visible` asks for
+`intra.is_some()` rather than "is signed in", so a stranger with an account
+cannot read 42 students' logins.
 
 This is a plain function rather than a custom extractor. An extractor would be
 more idiomatic axum; a function is less machinery and easier to read, and the
@@ -1273,8 +1289,9 @@ if !state.cfg.campus_allowed(me.primary_campus_id()) {
 
 db::upsert_user(&state.db, me.id, &me.login, me.display_name(), me.image_url()).await?;
 
+let account = db::account_for_intra(&state.db, me.id, &me.login).await?;
 let session = auth::random_token();
-db::create_session(&state.db, &session, me.id, auth::SESSION_TTL_DAYS).await?;
+db::create_session(&state.db, &session, account.id, auth::SESSION_TTL_DAYS).await?;
 
 let jar = jar.add(auth::session_cookie(session, state.cfg.secure_cookies));
 Ok((jar, Redirect::to("/")).into_response())
@@ -1291,6 +1308,12 @@ when 42 provides it, so a confused visitor knows why.
 
 `upsert_user` means the login refreshes the display name and avatar every time,
 so a changed intra profile propagates without extra machinery.
+
+`account_for_intra` finds the account linked to that intra id, or makes one on
+the first sign-in, named after the login. If someone without 42 already has
+that name it becomes `login-42`; the 42 pool keeps showing the login either
+way, because it reads `users`, not `accounts`. The session belongs to the
+account.
 
 The access token is used twice and then dropped. It is never stored — the app
 has no further use for the 42 API, so keeping it would be pure liability.
@@ -1317,17 +1340,19 @@ that goes through the normal query layer would test less.
 ### The admin handlers
 
 ```rust
-async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<Option<User>, AppError> {
+async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
     if !state.cfg.test_mode() {
         return Ok(None);
     }
-    Ok(current_user(state, jar).await?
-        .filter(|u| state.cfg.is_admin(&u.login)))
+    Ok(current_viewer(state, jar).await?
+        .filter(|v| is_admin(state, v)))
 }
 ```
 
-Two gates: the instance must be in test mode, and the signed-in user must be
-listed. `Option::filter` turns "signed in but not an admin" into `None`.
+Two gates: the instance must be in test mode, and the signed-in visitor's
+**42 login** must be listed. `is_admin` checks `viewer.intra`, never the
+account's username: usernames will be choosable, and anyone could pick
+`megardes`. `Option::filter` turns "signed in but not an admin" into `None`.
 
 Every admin handler starts the same way, and a `None` becomes a **404, not a
 403**:
@@ -1905,7 +1930,8 @@ ones.
 
 ## `migrations/` — the schema
 
-One file, `0001_init.sql`, embedded into the binary at build time.
+Numbered files, embedded into the binary at build time and applied in order
+at startup. It starts with `0001_init.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS users (
@@ -1958,6 +1984,38 @@ The `DEFAULT 1` is what makes this safe on a live database — every row already
 there was a real entry, and SQLite backfills them without a rewrite. This is
 also why it is a **new file** rather than an edit to `0001`: that migration has
 already run on any deployed database and will never run again.
+
+`0005_accounts.sql` adds sign-in accounts without touching the 42 pool:
+
+```sql
+CREATE TABLE accounts (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    username  TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+    intra_id  INTEGER UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    ...
+);
+```
+
+Plus `identities` (one row per way of signing in) and `account_sessions`,
+which replaces `sessions`. It is written to run once on a live database:
+
+- every 42 user and hand-made stand-in gets an account named after their login,
+  with the `created_at`/`last_seen_at` of their `users` row;
+- generated `bot-###` players only get one if someone was signed in as them;
+- every session is copied **with its token**, so the deploy signs nobody out;
+- only then is `sessions` dropped.
+
+`users`, `guesses` and `payouts` are not altered, which is why every 42-pool
+query is unchanged. `intra_id` cascades because the only `users` rows ever
+deleted are stand-ins, and their accounts should go with them.
+
+The test `the_accounts_migration_keeps_everyone_signed_in_and_the_42_pool_unchanged`
+builds a database at 0004, fills it, migrates it and compares. To check a real
+database the same way (a copy is made, the file itself is never written):
+
+```bash
+MIGRATE_CHECK_DB=/path/to/game.db cargo test migrating_a_copy -- --ignored --nocapture
+```
 
 There is deliberately **no `winners` table**. Winners are derived from
 `guesses`, so there is no scheduled job, nothing to run at 12:42, and no way

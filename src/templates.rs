@@ -2,7 +2,7 @@ use askama::Template;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 
-use crate::db::{GuessRow, LeaderboardRow, RoundSummary, User};
+use crate::db::{GuessRow, LeaderboardRow, RoundSummary, User, Viewer};
 use crate::round;
 use crate::stats::{self, Chart, Tally, Trend};
 
@@ -57,6 +57,8 @@ pub fn group_digits(n: i64) -> String {
 pub struct UserView {
     pub login: String,
     pub display_name: String,
+    /// Plays the 42 pool: a 42 student, or a stand-in on a test instance.
+    pub is_42: bool,
 }
 
 impl From<User> for UserView {
@@ -64,6 +66,22 @@ impl From<User> for UserView {
         Self {
             login: u.login,
             display_name: u.display_name,
+            is_42: true,
+        }
+    }
+}
+
+/// A 42 student goes by their login, as everywhere else on the site; anyone
+/// else by their username.
+impl From<Viewer> for UserView {
+    fn from(v: Viewer) -> Self {
+        match v.intra {
+            Some(u) => Self::from(u),
+            None => Self {
+                login: v.account.username.clone(),
+                display_name: v.account.username,
+                is_42: false,
+            },
         }
     }
 }

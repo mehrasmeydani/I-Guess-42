@@ -23,6 +23,25 @@ pub struct User {
     pub image_url: Option<String>,
 }
 
+/// Someone who can sign in. Everyone has one, whichever way they came in; a
+/// 42 student's also points at their `users` row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Account {
+    pub id: i64,
+    pub username: String,
+    /// The `users` row this account plays the 42 pool as. Set for 42 students
+    /// and the stand-ins of a test instance, `None` for everyone else.
+    pub intra_id: Option<i64>,
+}
+
+/// Whoever a session belongs to: their account, and their 42 player if they
+/// have one. The 42 pool only ever looks at `intra`.
+#[derive(Debug, Clone)]
+pub struct Viewer {
+    pub account: Account,
+    pub intra: Option<User>,
+}
+
 /// One closed round, with its winner if the round produced one.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct RoundSummary {
@@ -116,15 +135,95 @@ pub async fn upsert_user(
     Ok(())
 }
 
+// ------------------------------------------------------------- accounts
+
+/// The account that plays as 42 user `intra_id`, created on first sign-in.
+/// Named after the login, unless a non-42 account took that name first, in
+/// which case it gets `login-42`, `login-42-2`, and so on. Real 42 users (not
+/// stand-ins, whose ids are negative) also get a `42` identity row.
+pub async fn account_for_intra(db: &Db, intra_id: i64, login: &str) -> Result<Account> {
+    let mut tx = db.begin().await?;
+    let now = ts(Utc::now());
+
+    let existing: Option<(i64, String)> =
+        sqlx::query_as("SELECT id, username FROM accounts WHERE intra_id = ?1")
+            .bind(intra_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let (id, username) = match existing {
+        Some(found) => {
+            sqlx::query("UPDATE accounts SET last_seen_at = ?1 WHERE id = ?2")
+                .bind(&now)
+                .bind(found.0)
+                .execute(&mut *tx)
+                .await?;
+            found
+        }
+        None => {
+            let username = free_username(&mut tx, login).await?;
+            let (id,): (i64,) = sqlx::query_as(
+                "INSERT INTO accounts (username, intra_id, created_at, last_seen_at)
+                 VALUES (?1, ?2, ?3, ?3) RETURNING id",
+            )
+            .bind(&username)
+            .bind(intra_id)
+            .bind(&now)
+            .fetch_one(&mut *tx)
+            .await?;
+            (id, username)
+        }
+    };
+
+    if intra_id > 0 {
+        sqlx::query(
+            "INSERT INTO identities (provider, subject, account_id, created_at)
+             VALUES ('42', ?1, ?2, ?3)
+             ON CONFLICT(provider, subject) DO NOTHING",
+        )
+        .bind(intra_id.to_string())
+        .bind(id)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(Account {
+        id,
+        username,
+        intra_id: Some(intra_id),
+    })
+}
+
+/// `wanted` if no account has it yet, else the first free `wanted-42`,
+/// `wanted-42-2`, ... Usernames compare case-insensitively.
+async fn free_username(tx: &mut sqlx::SqliteConnection, wanted: &str) -> Result<String> {
+    let mut candidate = wanted.to_string();
+    for n in 1.. {
+        let taken: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM accounts WHERE username = ?1")
+            .bind(&candidate)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if taken.is_none() {
+            break;
+        }
+        candidate = match n {
+            1 => format!("{wanted}-42"),
+            _ => format!("{wanted}-42-{n}"),
+        };
+    }
+    Ok(candidate)
+}
+
 // ------------------------------------------------------------- sessions
 
-pub async fn create_session(db: &Db, token: &str, user_id: i64, ttl_days: i64) -> Result<()> {
+pub async fn create_session(db: &Db, token: &str, account_id: i64, ttl_days: i64) -> Result<()> {
     let now = Utc::now();
     sqlx::query(
-        "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO account_sessions (token, account_id, created_at, expires_at)
+         VALUES (?1, ?2, ?3, ?4)",
     )
     .bind(token)
-    .bind(user_id)
+    .bind(account_id)
     .bind(ts(now))
     .bind(ts(now + chrono::Duration::days(ttl_days)))
     .execute(db)
@@ -132,21 +231,56 @@ pub async fn create_session(db: &Db, token: &str, user_id: i64, ttl_days: i64) -
     Ok(())
 }
 
-pub async fn user_for_session(db: &Db, token: &str) -> Result<Option<User>> {
-    let user = sqlx::query_as::<_, User>(
-        "SELECT u.id, u.login, u.display_name, u.image_url
-         FROM sessions s JOIN users u ON u.id = s.user_id
-         WHERE s.token = ?1 AND s.expires_at > ?2",
+#[derive(sqlx::FromRow)]
+struct SessionRow {
+    account_id: i64,
+    username: String,
+    intra_id: Option<i64>,
+    login: Option<String>,
+    display_name: Option<String>,
+    image_url: Option<String>,
+}
+
+/// Who an unexpired session belongs to. A banned or deleted account counts as
+/// signed out, so ending someone's access never depends on finding every
+/// session they have.
+pub async fn viewer_for_session(db: &Db, token: &str) -> Result<Option<Viewer>> {
+    let row = sqlx::query_as::<_, SessionRow>(
+        "SELECT a.id AS account_id, a.username, a.intra_id,
+                u.login, u.display_name, u.image_url
+         FROM account_sessions s
+         JOIN accounts a ON a.id = s.account_id
+         LEFT JOIN users u ON u.id = a.intra_id
+         WHERE s.token = ?1 AND s.expires_at > ?2
+           AND a.banned_at IS NULL AND a.deleted_at IS NULL",
     )
     .bind(token)
     .bind(ts(Utc::now()))
     .fetch_optional(db)
     .await?;
-    Ok(user)
+    Ok(row.map(|r| {
+        let intra = match (r.intra_id, r.login, r.display_name) {
+            (Some(id), Some(login), Some(display_name)) => Some(User {
+                id,
+                login,
+                display_name,
+                image_url: r.image_url,
+            }),
+            _ => None,
+        };
+        Viewer {
+            account: Account {
+                id: r.account_id,
+                username: r.username,
+                intra_id: r.intra_id,
+            },
+            intra,
+        }
+    }))
 }
 
 pub async fn delete_session(db: &Db, token: &str) -> Result<()> {
-    sqlx::query("DELETE FROM sessions WHERE token = ?1")
+    sqlx::query("DELETE FROM account_sessions WHERE token = ?1")
         .bind(token)
         .execute(db)
         .await?;
@@ -156,7 +290,7 @@ pub async fn delete_session(db: &Db, token: &str) -> Result<()> {
 /// Drop sessions and OAuth states that have aged out.
 pub async fn purge_expired(db: &Db) -> Result<()> {
     let now = ts(Utc::now());
-    sqlx::query("DELETE FROM sessions WHERE expires_at <= ?1")
+    sqlx::query("DELETE FROM account_sessions WHERE expires_at <= ?1")
         .bind(&now)
         .execute(db)
         .await?;
@@ -653,7 +787,7 @@ pub async fn record_payout(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod test_support {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -661,9 +795,9 @@ mod tests {
 
     /// A throwaway on-disk database. `:memory:` would give every pooled
     /// connection its own empty database, so a real file it is.
-    struct TempDb {
-        path: std::path::PathBuf,
-        db: Db,
+    pub struct TempDb {
+        pub path: std::path::PathBuf,
+        pub db: Db,
     }
 
     impl Drop for TempDb {
@@ -676,7 +810,17 @@ mod tests {
         }
     }
 
-    async fn temp_db() -> TempDb {
+    pub async fn temp_db() -> TempDb {
+        let mut t = temp_db_path();
+        t.db = connect(&format!("sqlite://{}", t.path.display()))
+            .await
+            .unwrap();
+        t
+    }
+
+    /// A fresh path, cleaned up on drop, with nothing opened on it yet; `db`
+    /// is a lazy placeholder until a test connects for real.
+    pub fn temp_db_path() -> TempDb {
         let path = std::env::temp_dir().join(format!(
             "i_guess_42_test_{}_{}.db",
             std::process::id(),
@@ -687,11 +831,15 @@ mod tests {
             p.push(suffix);
             let _ = std::fs::remove_file(p);
         }
-        let db = connect(&format!("sqlite://{}", path.display()))
-            .await
-            .unwrap();
+        let db = SqlitePoolOptions::new().connect_lazy("sqlite::memory:").unwrap();
         TempDb { path, db }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use super::*;
 
     /// Register each player and record their guess for `round`.
     async fn seed(db: &Db, round: &str, guesses: &[(i64, i64)]) {
@@ -989,20 +1137,52 @@ mod tests {
         assert!(!consume_oauth_state(&t.db, "never-issued").await.unwrap());
     }
 
+    /// A signed-in 42 player: their `users` row, their account and a session.
+    async fn signed_in(db: &Db, intra_id: i64, login: &str, token: &str) -> Account {
+        upsert_user(db, intra_id, login, &format!("{login} name"), None)
+            .await
+            .unwrap();
+        let account = account_for_intra(db, intra_id, login).await.unwrap();
+        create_session(db, token, account.id, 30).await.unwrap();
+        account
+    }
+
+    /// An account with no 42 player behind it, the kind other sign-in methods
+    /// will create.
+    async fn plain_account(db: &Db, username: &str) -> i64 {
+        let (id,): (i64,) = sqlx::query_as(
+            "INSERT INTO accounts (username, created_at, last_seen_at)
+             VALUES (?1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z') RETURNING id",
+        )
+        .bind(username)
+        .fetch_one(db)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn count(db: &Db, sql: &str) -> i64 {
+        let (n,): (i64,) = sqlx::query_as(sql).fetch_one(db).await.unwrap();
+        n
+    }
+
     #[tokio::test]
     async fn a_session_resolves_to_its_user_until_it_is_deleted() {
         let t = temp_db().await;
         upsert_user(&t.db, 7, "megardes", "Mehras", Some("https://cdn/x.jpg"))
             .await
             .unwrap();
-        create_session(&t.db, "tok", 7, 30).await.unwrap();
+        let account = account_for_intra(&t.db, 7, "megardes").await.unwrap();
+        create_session(&t.db, "tok", account.id, 30).await.unwrap();
 
-        let u = user_for_session(&t.db, "tok").await.unwrap().unwrap();
-        assert_eq!(u.login, "megardes");
+        let v = viewer_for_session(&t.db, "tok").await.unwrap().unwrap();
+        assert_eq!(v.account, account);
+        let u = v.intra.expect("a 42 account plays as its 42 user");
+        assert_eq!((u.id, u.login.as_str()), (7, "megardes"));
         assert_eq!(u.image_url.as_deref(), Some("https://cdn/x.jpg"));
 
         delete_session(&t.db, "tok").await.unwrap();
-        assert!(user_for_session(&t.db, "tok").await.unwrap().is_none());
+        assert!(viewer_for_session(&t.db, "tok").await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -1011,15 +1191,361 @@ mod tests {
         upsert_user(&t.db, 7, "megardes", "Mehras", None)
             .await
             .unwrap();
-        create_session(&t.db, "stale", 7, -1).await.unwrap(); // expired yesterday
+        let account = account_for_intra(&t.db, 7, "megardes").await.unwrap();
+        create_session(&t.db, "stale", account.id, -1).await.unwrap(); // expired yesterday
+        create_session(&t.db, "fresh", account.id, 30).await.unwrap();
 
-        assert!(user_for_session(&t.db, "stale").await.unwrap().is_none());
+        assert!(viewer_for_session(&t.db, "stale").await.unwrap().is_none());
         purge_expired(&t.db).await.unwrap();
-        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
-            .fetch_one(&t.db)
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM account_sessions").await, 1);
+        assert!(viewer_for_session(&t.db, "fresh").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn signing_in_again_reuses_the_same_account() {
+        let t = temp_db().await;
+        let first = signed_in(&t.db, 7, "megardes", "a").await;
+        let again = signed_in(&t.db, 7, "megardes", "b").await;
+        assert_eq!(first, again);
+        assert_eq!(first.username, "megardes");
+        assert_eq!(first.intra_id, Some(7));
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 1);
+        // One identity, however often they sign in.
+        assert_eq!(
+            count(&t.db, "SELECT COUNT(*) FROM identities WHERE provider = '42' AND subject = '7'").await,
+            1
+        );
+        // Both sessions lead to the same person.
+        for token in ["a", "b"] {
+            let v = viewer_for_session(&t.db, token).await.unwrap().unwrap();
+            assert_eq!(v.account.id, first.id);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stand_in_gets_an_account_but_no_42_identity() {
+        let t = temp_db().await;
+        let alice = create_test_user(&t.db, "alice").await.unwrap();
+        let account = account_for_intra(&t.db, alice.id, "alice").await.unwrap();
+        assert_eq!(account.intra_id, Some(alice.id));
+        // A negative id is not anyone's intra account, so nothing claims it is.
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM identities").await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_42_login_taken_by_another_account_gets_a_suffix() {
+        let t = temp_db().await;
+        // Someone without 42 already goes by these names, in any case.
+        plain_account(&t.db, "MeGardes").await;
+        plain_account(&t.db, "megardes-42").await;
+
+        let account = signed_in(&t.db, 7, "megardes", "tok").await;
+        assert_eq!(account.username, "megardes-42-2");
+        // The 42 pool still knows them by their login.
+        let v = viewer_for_session(&t.db, "tok").await.unwrap().unwrap();
+        assert_eq!(v.intra.unwrap().login, "megardes");
+    }
+
+    #[tokio::test]
+    async fn an_account_without_42_has_no_player_in_the_42_pool() {
+        let t = temp_db().await;
+        let id = plain_account(&t.db, "stranger").await;
+        create_session(&t.db, "tok", id, 30).await.unwrap();
+
+        let v = viewer_for_session(&t.db, "tok").await.unwrap().unwrap();
+        assert_eq!(v.account.username, "stranger");
+        assert_eq!(v.account.intra_id, None);
+        assert!(v.intra.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_banned_or_deleted_account_is_signed_out_everywhere() {
+        let t = temp_db().await;
+        let banned = signed_in(&t.db, 7, "megardes", "b1").await;
+        create_session(&t.db, "b2", banned.id, 30).await.unwrap();
+        let gone = signed_in(&t.db, 8, "other", "d1").await;
+
+        sqlx::query("UPDATE accounts SET banned_at = '2026-10-01T00:00:00Z' WHERE id = ?1")
+            .bind(banned.id)
+            .execute(&t.db)
             .await
             .unwrap();
-        assert_eq!(n, 0);
+        sqlx::query("UPDATE accounts SET deleted_at = '2026-10-01T00:00:00Z' WHERE id = ?1")
+            .bind(gone.id)
+            .execute(&t.db)
+            .await
+            .unwrap();
+
+        for token in ["b1", "b2", "d1"] {
+            assert!(viewer_for_session(&t.db, token).await.unwrap().is_none(), "{token}");
+        }
+    }
+
+    #[tokio::test]
+    async fn removing_the_demo_takes_impersonated_bots_accounts_with_it() {
+        let t = temp_db().await;
+        let guesses = vec![DemoGuess { round_date: "2026-09-05".into(), bot: 0, value: 3 }];
+        insert_demo(&t.db, &guesses).await.unwrap();
+        let bot = user_by_login(&t.db, "bot-001").await.unwrap().unwrap();
+        let account = account_for_intra(&t.db, bot.id, &bot.login).await.unwrap();
+        create_session(&t.db, "tok", account.id, 30).await.unwrap();
+        // A real player is left alone.
+        signed_in(&t.db, 7, "megardes", "mine").await;
+
+        remove_demo(&t.db).await.unwrap();
+        assert!(viewer_for_session(&t.db, "tok").await.unwrap().is_none());
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 1);
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM account_sessions").await, 1);
+        assert!(viewer_for_session(&t.db, "mine").await.unwrap().is_some());
+    }
+
+    // ------------------------------------------------- the accounts migration
+
+    /// A database as it was before accounts existed: migrations 0001-0004
+    /// only, run from a copy of those files so the test does not depend on
+    /// sqlx internals. `connect` then applies the rest, as a deploy would.
+    async fn database_before_accounts() -> (TempDb, Db) {
+        let t = temp_db_path();
+        let dir = t.path.with_extension("migrations");
+        std::fs::create_dir_all(&dir).unwrap();
+        for entry in std::fs::read_dir("migrations").unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            if name.as_str() < "0005" {
+                std::fs::copy(entry.path(), dir.join(&name)).unwrap();
+            }
+        }
+        let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", t.path.display()))
+            .unwrap()
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let old = SqlitePoolOptions::new().connect_with(opts).await.unwrap();
+        sqlx::migrate::Migrator::new(dir.as_path())
+            .await
+            .unwrap()
+            .run(&old)
+            .await
+            .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        (t, old)
+    }
+
+    #[tokio::test]
+    async fn the_accounts_migration_keeps_everyone_signed_in_and_the_42_pool_unchanged() {
+        let (mut t, old) = database_before_accounts().await;
+        let exec = |sql: &'static str| {
+            let old = old.clone();
+            async move { sqlx::query(sql).execute(&old).await.unwrap() }
+        };
+        exec("INSERT INTO users (id, login, display_name, image_url, created_at, last_seen_at) VALUES
+              (11, 'megardes', 'Mehras', 'https://cdn/m.jpg', '2026-09-01T10:00:00Z', '2026-10-01T10:00:00Z'),
+              (12, 'other',    'Other',  NULL,                '2026-09-02T10:00:00Z', '2026-10-02T10:00:00Z'),
+              (13, 'quiet',    'Quiet',  NULL,                '2026-09-03T10:00:00Z', '2026-09-03T10:00:00Z'),
+              (-1, 'alice',    'alice (test)', NULL,          '2026-09-04T10:00:00Z', '2026-09-04T10:00:00Z'),
+              (-2, 'bot-001',  'Bot 001', NULL,               '2026-09-05T10:00:00Z', '2026-09-05T10:00:00Z'),
+              (-3, 'bot-002',  'Bot 002', NULL,               '2026-09-05T10:00:00Z', '2026-09-05T10:00:00Z')").await;
+        exec("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES
+              ('m1', 11, '2026-10-01T10:00:00Z', '2099-01-01T00:00:00Z'),
+              ('m2', 11, '2026-10-02T10:00:00Z', '2099-01-01T00:00:00Z'),
+              ('o1', 12, '2026-10-01T10:00:00Z', '2099-01-01T00:00:00Z'),
+              ('old', 12, '2026-01-01T10:00:00Z', '2026-02-01T00:00:00Z'),
+              ('a1', -1, '2026-10-01T10:00:00Z', '2099-01-01T00:00:00Z'),
+              ('b1', -2, '2026-10-01T10:00:00Z', '2099-01-01T00:00:00Z')").await;
+        exec("INSERT INTO guesses (round_date, user_id, value, submitted_at, participates) VALUES
+              ('2026-09-05', 11, 1, 'x', 1), ('2026-09-05', 12, 1, 'x', 1), ('2026-09-05', 13, 2, 'x', 1),
+              ('2026-09-05', -1, 1, 'x', 0),
+              ('2026-09-06', 11, 4, 'x', 1), ('2026-09-06', -2, 3, 'x', 1), ('2026-09-06', -3, 3, 'x', 1),
+              ('2026-09-07', 12, 9, 'x', 1)").await;
+        exec("INSERT INTO payouts (round_date, user_id, outcome, message, paid_at, participants)
+              VALUES ('2026-09-05', 13, 'given', 'ok', 'x', 3)").await;
+        exec("INSERT INTO oauth_states (state, created_at, expires_at)
+              VALUES ('pending', '2026-10-01T10:00:00Z', '2099-01-01T00:00:00Z')").await;
+
+        // What the 42 pool says before the migration...
+        let open = "2026-09-07";
+        let before_rounds = closed_rounds(&old, open, 100).await.unwrap();
+        let before_board = leaderboard(&old, open, 100).await.unwrap();
+        let before_tallies = range_tallies(&old, "", open).await.unwrap();
+        old.close().await;
+
+        t.db = connect(&format!("sqlite://{}", t.path.display())).await.unwrap();
+        let db = &t.db;
+
+        // ...is exactly what it says after.
+        let fmt = |v: &dyn std::fmt::Debug| format!("{v:?}");
+        assert_eq!(fmt(&closed_rounds(db, open, 100).await.unwrap()), fmt(&before_rounds));
+        assert_eq!(fmt(&leaderboard(db, open, 100).await.unwrap()), fmt(&before_board));
+        assert_eq!(range_tallies(db, "", open).await.unwrap(), before_tallies);
+        assert_eq!(unpaid_round(db, open, "2026-09-05").await.unwrap(), None, "still settled");
+
+        // Every live session still signs in the same person, as their 42 user.
+        for (token, intra_id, login) in [
+            ("m1", 11, "megardes"),
+            ("m2", 11, "megardes"),
+            ("o1", 12, "other"),
+            ("a1", -1, "alice"),
+            ("b1", -2, "bot-001"),
+        ] {
+            let v = viewer_for_session(db, token).await.unwrap().unwrap_or_else(|| panic!("{token}"));
+            assert_eq!(v.account.intra_id, Some(intra_id), "{token}");
+            assert_eq!(v.account.username, login, "{token}");
+            assert_eq!(v.intra.unwrap().login, login, "{token}");
+        }
+        // Both of one person's sessions point at one account.
+        let m1 = viewer_for_session(db, "m1").await.unwrap().unwrap();
+        let m2 = viewer_for_session(db, "m2").await.unwrap().unwrap();
+        assert_eq!(m1.account.id, m2.account.id);
+        assert_eq!(m1.intra.unwrap().image_url.as_deref(), Some("https://cdn/m.jpg"));
+        // An expired one came across expired, and the sweep still removes it.
+        assert!(viewer_for_session(db, "old").await.unwrap().is_none());
+        purge_expired(db).await.unwrap();
+        assert_eq!(count(db, "SELECT COUNT(*) FROM account_sessions").await, 5);
+
+        // Accounts: every person and the hand-made stand-in, plus the one bot
+        // somebody was signed in as. The idle bot gets none.
+        let mut names: Vec<(String, Option<i64>)> =
+            sqlx::query_as("SELECT username, intra_id FROM accounts ORDER BY username")
+                .fetch_all(db)
+                .await
+                .unwrap();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                ("alice".to_string(), Some(-1)),
+                ("bot-001".to_string(), Some(-2)),
+                ("megardes".to_string(), Some(11)),
+                ("other".to_string(), Some(12)),
+                ("quiet".to_string(), Some(13)),
+            ]
+        );
+        // Dates come from the users rows, not from the day of the deploy.
+        let (created, seen): (String, String) =
+            sqlx::query_as("SELECT created_at, last_seen_at FROM accounts WHERE intra_id = 11")
+                .fetch_one(db)
+                .await
+                .unwrap();
+        assert_eq!((created.as_str(), seen.as_str()), ("2026-09-01T10:00:00Z", "2026-10-01T10:00:00Z"));
+
+        // A 42 identity for the three real students only.
+        let ids: Vec<(String,)> =
+            sqlx::query_as("SELECT subject FROM identities WHERE provider = '42' ORDER BY subject")
+                .fetch_all(db)
+                .await
+                .unwrap();
+        assert_eq!(ids, [("11".into(),), ("12".into(),), ("13".into(),)]);
+
+        // The old table is gone, and a sign-in started before the deploy can
+        // still finish.
+        assert_eq!(
+            count(db, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'sessions'").await,
+            0
+        );
+        let (provider,): (String,) =
+            sqlx::query_as("SELECT provider FROM oauth_states WHERE state = 'pending'")
+                .fetch_one(db)
+                .await
+                .unwrap();
+        assert_eq!(provider, "42");
+        assert!(consume_oauth_state(db, "pending").await.unwrap());
+
+        // The next sign-in of a migrated player finds their account rather
+        // than making a second one.
+        let again = account_for_intra(db, 13, "quiet").await.unwrap();
+        assert_eq!(again.username, "quiet");
+        assert_eq!(count(db, "SELECT COUNT(*) FROM accounts").await, 5);
+    }
+
+    /// Runs the migration against a copy of a real database, e.g. a backup
+    /// of the live one, and checks every session survives and the 42 pool
+    /// reads the same. The original is never touched.
+    ///
+    /// MIGRATE_CHECK_DB=/path/to/game.db cargo test migrating_a_copy -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "needs MIGRATE_CHECK_DB pointing at a real database"]
+    async fn migrating_a_copy_of_a_real_database() {
+        let source = std::env::var("MIGRATE_CHECK_DB").expect("set MIGRATE_CHECK_DB");
+        let t = temp_db_path();
+        // VACUUM INTO makes a consistent copy even of a database in WAL mode
+        // with a live writer, and leaves the source alone.
+        let src = SqliteConnectOptions::from_str(&format!("sqlite://{source}"))
+            .unwrap()
+            .read_only(true);
+        let src = SqlitePoolOptions::new().max_connections(1).connect_with(src).await.unwrap();
+        sqlx::query("VACUUM INTO ?1")
+            .bind(t.path.to_str().unwrap())
+            .execute(&src)
+            .await
+            .unwrap();
+        src.close().await;
+
+        let copy = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::from_str(&format!("sqlite://{}", t.path.display())).unwrap(),
+            )
+            .await
+            .unwrap();
+        let already: i64 = count(
+            &copy,
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'accounts'",
+        )
+        .await;
+        assert_eq!(already, 0, "that database is already past the accounts migration");
+        let version = count(&copy, "SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations").await;
+        assert_eq!(
+            version, 4,
+            "this check compares a database at migration 0004 (what v1.6 runs) with \
+             the same one after 0005; that one is at {version}"
+        );
+
+        let now = ts(Utc::now());
+        let sessions: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT token, user_id FROM sessions WHERE expires_at > ?1 ORDER BY token",
+        )
+        .bind(&now)
+        .fetch_all(&copy)
+        .await
+        .unwrap();
+        let users = count(&copy, "SELECT COUNT(*) FROM users").await;
+        let guesses = count(&copy, "SELECT COUNT(*) FROM guesses").await;
+        let payouts = count(&copy, "SELECT COUNT(*) FROM payouts").await;
+        let open = crate::round::Round::current(Utc::now()).key();
+        let before_rounds = format!("{:?}", closed_rounds(&copy, &open, i64::MAX).await.unwrap());
+        let before_board = format!("{:?}", leaderboard(&copy, &open, i64::MAX).await.unwrap());
+        let before_tallies = range_tallies(&copy, "", &open).await.unwrap();
+        copy.close().await;
+
+        let started = std::time::Instant::now();
+        let db = connect(&format!("sqlite://{}", t.path.display())).await.unwrap();
+        let took = started.elapsed();
+
+        for (token, user_id) in &sessions {
+            let v = viewer_for_session(&db, token)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("a live session for user {user_id} was lost"));
+            assert_eq!(v.account.intra_id, Some(*user_id));
+            assert_eq!(v.intra.map(|u| u.id), Some(*user_id));
+        }
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM users").await, users);
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM guesses").await, guesses);
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM payouts").await, payouts);
+        assert_eq!(format!("{:?}", closed_rounds(&db, &open, i64::MAX).await.unwrap()), before_rounds);
+        assert_eq!(format!("{:?}", leaderboard(&db, &open, i64::MAX).await.unwrap()), before_board);
+        assert_eq!(range_tallies(&db, "", &open).await.unwrap(), before_tallies);
+        // No real student is left without an account.
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) FROM users u WHERE u.id > 0
+                        AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.intra_id = u.id)").await,
+            0
+        );
+        println!(
+            "migrated in {took:?}: {users} users, {} accounts, {} live sessions kept, \
+             {guesses} guesses and {payouts} payouts unchanged",
+            count(&db, "SELECT COUNT(*) FROM accounts").await,
+            sessions.len(),
+        );
     }
 
     #[tokio::test]
