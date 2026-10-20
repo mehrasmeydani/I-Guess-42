@@ -3,7 +3,13 @@
 # needs a C toolchain. Askama templates and the migrations are both embedded
 # into the binary at compile time; `static/` is served at runtime and also
 # fingerprinted at compile time.
-FROM rust:1-slim-bookworm AS builder
+#
+# Both base images are pinned by digest. A bare tag is re-resolved on every
+# build, and the official images are republished whenever Debian ships a fix;
+# the moment one moves, every layer under it misses the cache, and a release
+# that only touched src/ recompiles all 281 crates. Dependabot proposes new
+# digests on `dev`, so that slow build happens when someone merges it.
+FROM rust:1-slim-bookworm@sha256:a24e292b4af7bdee351a31d3a6379972a5652f0ea22a1b6d6883324ac4f5097c AS builder
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential pkg-config \
@@ -31,7 +37,7 @@ COPY static ./static
 RUN touch src/main.rs && cargo build --release
 
 # ---- runtime --------------------------------------------------------------
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 
 # ca-certificates is required to reach https://api.intra.42.fr.
 RUN apt-get update \
