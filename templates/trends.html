@@ -69,29 +69,14 @@
   {% endif %}
 </section>
 
-{# The crowd's favourites, and the low numbers it keeps leaving alone: any of
-   those would have won every round in this range. #}
+{# The crowd's favourites over the whole range. #}
 <section class="sec" style="--b: 5">
-  <h2 class="rule"><span>the numbers themselves</span><span class="tag">{{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}</span></h2>
-  <div class="split duo">
-    <div>
-      <p class="sub">most picked</p>
-      <ol class="ranked">
-        {% for t in most %}
-          <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
-        {% endfor %}
-      </ol>
-    </div>
-    <div>
-      <p class="sub">never picked, lowest first</p>
-      <ol class="ranked">
-        {% for n in never %}
-          <li><b>{{ n }}</b><span>free every day</span></li>
-        {% endfor %}
-      </ol>
-    </div>
-  </div>
-  <p class="dim">every number on the right would have won each of these rounds. the crowd never went there.</p>
+  <h2 class="rule"><span>most picked</span><span class="tag">{{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}</span></h2>
+  <ol class="ranked">
+    {% for t in most %}
+      <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
+    {% endfor %}
+  </ol>
 </section>
 
 <section class="sec" style="--b: 6">
@@ -117,17 +102,16 @@
 <section class="sec" style="--b: 7">
   <h2 class="rule"><span>day by day</span><span class="tag">newest first</span></h2>
   <table class="grid">
-    <thead><tr><th>date</th><th>players</th><th>winning number</th><th class="num">lowest free</th></tr></thead>
+    <thead><tr><th>date</th><th>players</th><th>winning number</th></tr></thead>
     <tbody>
       {% for d in days %}
         <tr>
           <td><a href="/day/{{ d.date }}">{{ d.date }}</a></td>
           <td class="barcell"><span class="minibar" style="--w: {{ d.players_pct }}%"></span><b>{{ d.players }}</b></td>
           {% match d.winner_label %}
-            {% when Some with (w) %}<td class="barcell win"><span class="minibar" style="--w: {{ d.winner_pct }}%"></span><b>{{ w }}</b></td>
+            {% when Some with (w) %}<td class="barcell win{% if d.winner_outlier %} outlier{% endif %}"{% if d.winner_outlier %} title="far above the rest of the day's picks; left out of the averages"{% endif %}><span class="minibar" style="--w: {{ d.winner_pct }}%"></span><b>{{ w }}</b>{% if d.winner_outlier %} <span class="dim">outlier</span>{% endif %}</td>
             {% when None %}<td class="barcell dim">nobody won</td>
           {% endmatch %}
-          <td class="num">{{ d.lowest_free_label }}</td>
         </tr>
       {% endfor %}
     </tbody>

@@ -26,24 +26,14 @@
   {% include "chart.html" %}
 </section>
 
-<div class="split duo">
-  <section class="sec" style="--b: 2">
-    <h2 class="rule"><span>most picked</span></h2>
-    <ol class="ranked">
-      {% for t in most %}
-        <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
-      {% endfor %}
-    </ol>
-  </section>
-  <section class="sec" style="--b: 2">
-    <h2 class="rule"><span>least picked</span></h2>
-    <ol class="ranked">
-      {% for t in least %}
-        <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
-      {% endfor %}
-    </ol>
-  </section>
-</div>
+<section class="sec" style="--b: 2">
+  <h2 class="rule"><span>most picked</span></h2>
+  <ol class="ranked">
+    {% for t in most %}
+      <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
+    {% endfor %}
+  </ol>
+</section>
 
 <section class="sec" style="--b: 3">
   <details>
