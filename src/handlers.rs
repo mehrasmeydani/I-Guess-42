@@ -47,7 +47,7 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
 /// being signed in is not enough, since an account need not be a 42 one.
 /// In the global pool everyone goes by a username they chose, and usernames
 /// are public (spec R9.2): shown to every visitor, signed in or not.
-fn names_visible(pool: Pool, viewer: Option<&Viewer>) -> bool {
+pub(crate) fn names_visible(pool: Pool, viewer: Option<&Viewer>) -> bool {
     match pool {
         Pool::Vienna => viewer.is_some_and(|v| v.intra.is_some()),
         Pool::Global => true,
@@ -68,7 +68,7 @@ fn player_in(pool: Pool, viewer: &Viewer) -> Option<i64> {
 /// of its pages - signed out, or signed in some other way - is sent to the
 /// same page of the global round, and is never told the 42 round exists.
 /// `None` when the visitor may stay.
-fn outside_42(pool: Pool, viewer: Option<&Viewer>, global_page: &str) -> Option<Response> {
+pub(crate) fn outside_42(pool: Pool, viewer: Option<&Viewer>, global_page: &str) -> Option<Response> {
     let sees_42 = viewer.is_some_and(|v| v.intra.is_some());
     (pool == Pool::Vienna && !sees_42).then(|| Redirect::to(global_page).into_response())
 }

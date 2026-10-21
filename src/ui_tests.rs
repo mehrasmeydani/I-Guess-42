@@ -209,6 +209,37 @@ async fn usernames_are_public_on_every_results_view() {
 }
 
 #[tokio::test]
+async fn the_leaderboard_ranks_points_first_then_wins() {
+    let (_t, state) = app(&[]).await;
+    a_played_day(&state).await;
+    crate::economy::collect(&state.db, db::viewer_for_session(&state.db, "ann").await.unwrap().unwrap().account.id, "2026-10-21").await.unwrap();
+    let board = |pool: Pool, token: Option<&str>| {
+        let state = state.clone();
+        let jar = token.map(jar).unwrap_or_default();
+        async move {
+            let q = Query(Default::default());
+            match pool {
+                Pool::Global => crate::points_pages::leaderboard(State(state), jar, q).await.unwrap(),
+                Pool::Vienna => crate::points_pages::vienna_leaderboard(State(state), jar, q).await.unwrap(),
+            }
+        }
+    };
+    let html = body(board(Pool::Global, None).await).await;
+    let (points, wins) = (html.find(">most points").expect("points"), html.find(">most wins").expect("wins"));
+    assert!(points < wins, "points first");
+    assert!(html[wins..].contains("<td>cat</td><td class=\"num b\">1</td>"), "cat won a day");
+    assert!(html.contains(r#"href="/g/leaderboard">leaders</a>"#), "a tab in the header");
+    assert!(html.contains(r#"class="on" aria-current="page" href="/g/leaderboard">leaders</a>"#));
+
+    // The 42 round: wins only, and only for 42 students.
+    student(&state.db, 1001, "megardes", "s").await;
+    let html = body(board(Pool::Vienna, Some("s")).await).await;
+    assert!(html.contains(">most wins") && !html.contains("most points"));
+    let away = board(Pool::Vienna, None).await;
+    assert_eq!(location(&away), "/g/leaderboard");
+}
+
+#[tokio::test]
 async fn trends_open_with_the_ranges_and_one_analysing_line() {
     let (_t, state) = app(&["megardes"]).await;
     a_played_day(&state).await;

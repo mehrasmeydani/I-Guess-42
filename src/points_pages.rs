@@ -1,5 +1,6 @@
 //! The pages about points in the global round: your own history at
-//! `/g/points`, and the leaderboard at `/g/leaderboard`.
+//! `/g/points`, and the leaderboards at `/g/leaderboard` (points, then
+//! wins) and `/leaderboard` (the 42 round: wins).
 
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -74,21 +75,46 @@ pub struct BoardQuery {
     pub show: Option<String>,
 }
 
-pub async fn leaderboard(
+/// `/g/leaderboard`: points first, then the most days won.
+pub async fn leaderboard(state: State<AppState>, jar: CookieJar, q: Query<BoardQuery>) -> Result<Response, AppError> {
+    leaderboard_in(Pool::Global, state, jar, q).await
+}
+
+/// `/leaderboard`: the 42 round has no points, so only the most days won.
+pub async fn vienna_leaderboard(state: State<AppState>, jar: CookieJar, q: Query<BoardQuery>) -> Result<Response, AppError> {
+    leaderboard_in(Pool::Vienna, state, jar, q).await
+}
+
+async fn leaderboard_in(
+    pool: Pool,
     State(state): State<AppState>,
     jar: CookieJar,
     Query(q): Query<BoardQuery>,
 ) -> Result<Response, AppError> {
     let viewer = current_viewer(&state, &jar).await?;
+    if let Some(away) = crate::handlers::outside_42(pool, viewer.as_ref(), "/g/leaderboard") {
+        return Ok(away);
+    }
     let week = q.show.as_deref() == Some("week");
-    let since = (chrono::Utc::now() - chrono::Duration::days(7))
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let rows = db::points_board(&state.db, week.then_some(since.as_str()), BOARD).await?;
+    let rows = if pool == Pool::Global {
+        let since = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        db::points_board(&state.db, week.then_some(since.as_str()), BOARD).await?
+    } else {
+        Vec::new()
+    };
+    let open = Round::current(state.now()).key();
+    let named = crate::handlers::names_visible(pool, viewer.as_ref());
+    let wins = db::leaderboard(&state.db, pool, &open, BOARD)
+        .await?
+        .into_iter()
+        .map(|r| templates::LeaderView::new(r, named))
+        .collect();
     Ok(templates::render(&BoardTemplate {
-        pool: Pool::Global,
+        pool,
         test_mode: state.cfg.test_env(),
         impersonating: false,
         week,
+        wins,
         rows: rows
             .into_iter()
             .map(|r| PointsBoardRow {

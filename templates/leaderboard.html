@@ -1,26 +1,51 @@
 {% extends "base.html" %}
-{% block title %}leaderboard &middot; i guess low{% endblock %}
-{% block h1 %}points leaderboard{% endblock %}
-{% block path %}/g/leaderboard{% endblock %}
+{% block title %}leaders &middot; i guess low{% endblock %}
+{% block h1 %}leaderboard{% endblock %}
+{% block path %}{{ pool.base() }}/leaderboard{% endblock %}
+{% block nav_leaders %}class="on" aria-current="page"{% endblock %}
+
+{% block here %}/leaderboard{% endblock %}
 
 {% block content %}
+{# Points first, then the most days won. The 42 round has no points: its
+   players get coalition points from 42, so it shows the wins only. #}
+{% if pool.is_global() %}
 <section class="sec" style="--b: 0" aria-labelledby="board-h">
-  <h2 class="section-title" id="board-h">points
+  <h2 class="section-title" id="board-h">most points
     <span class="ranges" aria-label="what to rank by">
       <a class="{% if !week %}on{% endif %}" {% if !week %}aria-current="true"{% endif %} href="/g/leaderboard">all-time</a>
       <a class="{% if week %}on{% endif %}" {% if week %}aria-current="true"{% endif %} href="/g/leaderboard?show=week">this week</a>
     </span>
   </h2>
-  <p class="dim">{% if week %}points won from playing over the last seven days: pots minus stakes. daily and welcome points don't count here.{% else %}everyone's balance. points are just for fun.{% endif %}</p>
+  <p class="hint">{% if week %}won from playing over the last seven days: pots and bets, less stakes &middot; daily and welcome points don't count{% else %}everyone's balance &middot; points are just for fun{% endif %}</p>
   {% if rows.is_empty() %}
     <p class="dim">nobody yet</p>
   {% else %}
-    <div class="table-wrap" tabindex="0" role="region" aria-label="points leaderboard">
-    <table class="grid">
+    <div class="table-wrap" tabindex="0" role="region" aria-label="most points">
+    <table class="grid leaders-table">
       <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="num">points</th></tr></thead>
       <tbody>
         {% for r in rows %}
           <tr><td class="num dim">{{ "{:02}"|format(loop.index) }}</td><td>{{ r.name }}</td><td class="num b">{{ r.points }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="sec" style="--b: 1" aria-labelledby="wins-h">
+  <h2 class="section-title" id="wins-h">most wins <span class="dim scope-inline">days won, all-time</span></h2>
+  {% if wins.is_empty() %}
+    <p class="dim">no winners yet</p>
+  {% else %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="most wins">
+    <table class="grid leaders-table">
+      <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="num">days won</th></tr></thead>
+      <tbody>
+        {% for l in wins %}
+          <tr title="{{ l.display_name }}"><td class="num dim">{{ "{:02}"|format(loop.index) }}</td><td>{{ l.login }}</td><td class="num b">{{ l.wins }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

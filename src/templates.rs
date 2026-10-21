@@ -659,7 +659,10 @@ pub struct BoardTemplate {
     pub impersonating: bool,
     /// Gains over the last week, rather than balances.
     pub week: bool,
+    /// Points, highest first: the global round only.
     pub rows: Vec<PointsBoardRow>,
+    /// The most days won, all-time.
+    pub wins: Vec<LeaderView>,
 }
 
 /// One day on the trends timeline.

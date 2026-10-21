@@ -931,6 +931,9 @@ details.expand[open] summary .when-open { display: inline; }
 .testdetails { margin-top: 16px; color: var(--dim); font-size: var(--fs-1); }
 .testdetails summary { color: var(--dim); font-weight: 400; }
 
+/* Rankings: the place hugs its number, the name takes the room. */
+.leaders-table th:first-child, .leaders-table td:first-child { width: 1%; padding-right: 16px; white-space: nowrap; }
+
 /* Wide tables scroll inside their own box, never the page (R18.5). */
 .table-wrap { max-width: 100%; overflow-x: auto; }
 
@@ -990,6 +993,8 @@ details.expand[open] summary .when-open { display: inline; }
   }
   .top nav.mainnav a { display: flex; align-items: center; justify-content: center; min-height: 48px; margin: 0; padding: 0; }
   .top nav.mainnav a.on { margin: 0; padding: 0; }
+  /* Five tabs on the narrowest phones: a size down so each word fits. */
+  @media (max-width: 360px) { .top nav.mainnav a { font-size: var(--fs-1); } }
   body { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
   .announce-card { bottom: calc(64px + env(safe-area-inset-bottom)); }
   .status { margin-left: auto; }

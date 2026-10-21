@@ -126,6 +126,7 @@ async fn main() -> Result<()> {
         .route("/g/bets/quote", get(bets::quote))
         .route("/g/bet", post(bets::place))
         .route("/g/leaderboard", get(points_pages::leaderboard))
+        .route("/leaderboard", get(points_pages::vienna_leaderboard))
         .route("/me", get(handlers::me))
         .route("/g/guess", post(handlers::global_submit_guess))
         .route("/g/streak", post(handlers::claim_streak))
