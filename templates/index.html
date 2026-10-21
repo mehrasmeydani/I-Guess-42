@@ -16,7 +16,7 @@
         <div class="announce" data-left="{{ left }}">
           <input type="checkbox" id="announce-done" class="announce-x sr" aria-label="dismiss the result" data-round="{{ r.date_key }}">
           <div class="announce-card" role="status">
-            <p class="announce-when">round {{ r.date_key }} just closed</p>
+            <p class="announce-when">round {{ crate::templates::eu(r.date_key) }} just closed</p>
             {% match r.winner %}
               {% when Some with (w) %}
                 <p class="announce-num"><b class="win">{{ w.value_label }}</b></p>
@@ -44,7 +44,7 @@
 
   <div class="roundstatus" role="group" aria-labelledby="round-h">
     <p class="state-line">
-      <span class="pill" id="round-h">round {{ round_key }} &middot; <span class="state">[open]</span></span>
+      <span class="pill" id="round-h">round {{ crate::templates::eu(round_key) }} &middot; <span class="state">[open]</span></span>
       <span class="closes-at">closes {{ close_time }} vienna</span>
       {# Two games, one site - but only 42 students ever learn there are two,
          and they switch here, where they play. #}

@@ -61,13 +61,16 @@ async fn a_day_page_walks_the_calendar_and_leads_back_to_today() {
     let (_, day) = a_played_day(&state).await;
     let before = days_ago(&state, 2);
     let html = day_page(&state, Some("ann"), &day).await;
-    assert!(html.contains(&format!(r#"href="/g/day/{before}" rel="prev">&larr; {before}</a>"#)));
+    // Linked by ISO date, shown the European way.
+    let (eu_day, eu_before) = (crate::templates::eu(&day), crate::templates::eu(&before));
+    assert!(html.contains(&format!(r#"href="/g/day/{before}" rel="prev">&larr; {eu_before}</a>"#)));
     assert!(!html.contains(r#"rel="next""#), "the newest closed round has no next");
     assert!(html.contains(r#"<a href="/g/">play today &rarr;</a>"#));
     let html = day_page(&state, Some("ann"), &before).await;
-    assert!(html.contains(&format!(r#"href="/g/day/{day}" rel="next">{day} &rarr;</a>"#)));
+    assert!(html.contains(&format!(r#"href="/g/day/{day}" rel="next">{eu_day} &rarr;</a>"#)));
     assert!(!html.contains(r#"rel="prev""#), "the first round has no previous");
-    assert!(html.contains(&format!("<title>round {before} &middot; i guess low</title>")));
+    assert!(html.contains(&format!("<title>round {eu_before} &middot; i guess low</title>")));
+    assert!(!html.contains(&format!(">{before}<")), "no ISO date shown as text");
 }
 
 #[tokio::test]
@@ -206,7 +209,7 @@ async fn usernames_are_public_on_every_results_view() {
 }
 
 #[tokio::test]
-async fn trends_open_with_an_answer_and_keep_the_timing_out_of_sight() {
+async fn trends_open_with_an_answer_and_show_no_timing() {
     // A test instance: the only place the timing appears at all.
     let (_t, state) = app(&["megardes"]).await;
     a_played_day(&state).await;
@@ -223,7 +226,7 @@ async fn trends_open_with_an_answer_and_keep_the_timing_out_of_sight() {
     assert!(html.contains("2 rounds · median winner 9 · most crowded: 1"), "{html}");
     assert!(html.contains(r#"aria-current="true" href="/g/trends?days=7">7d</a>"#));
     assert!(!html.contains("analysing"), "no staged progress");
-    assert!(html.contains("test details"), "timing only in the test-only details");
+    assert!(!html.contains("test details") && !html.contains(" ms"), "no timing, even on a test instance");
     assert!(page("all").await.contains("median winner 9"));
 
     // A live site does not show it at all.
@@ -417,4 +420,28 @@ async fn a_new_sso_account_picks_its_username_once_and_goes_on() {
     for evil in ["https://evil.example", "//evil.example", "/account/delete"] {
         assert_eq!(location(&save("kai", evil).await), "/g?msg=welcome", "{evil}");
     }
+}
+
+#[tokio::test]
+async fn a_day_is_found_by_its_european_date() {
+    let (_t, state) = app(&[]).await;
+    let (_, day) = a_played_day(&state).await;
+    let eu = crate::templates::eu(&day);
+    let go = |date: &str| {
+        let state = state.clone();
+        let q = Query(ResultsQuery { q: None, show: None, date: Some(date.to_string()) });
+        async move { handlers::global_results(State(state), CookieJar::new(), q).await.unwrap() }
+    };
+    assert_eq!(location(&go(&eu).await), format!("/g/day/{day}"));
+    assert_eq!(location(&go(&day).await), format!("/g/day/{day}"), "ISO still works");
+    assert_eq!(location(&go("31.02.2026").await), "", "not a date: no redirect");
+    // And a search by European date or month finds it.
+    let search = |q: &str| {
+        let state = state.clone();
+        let q = Query(ResultsQuery { q: Some(q.to_string()), show: None, date: None });
+        async move { body(handlers::global_results(State(state), CookieJar::new(), q).await.unwrap()).await }
+    };
+    assert!(search(&eu).await.contains(&format!(r#"href="/g/day/{day}">{eu}</a>"#)));
+    let month = &eu[3..];
+    assert!(search(month).await.contains(&format!(r#"href="/g/day/{day}""#)));
 }

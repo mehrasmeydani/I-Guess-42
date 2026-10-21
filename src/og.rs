@@ -109,8 +109,9 @@ pub fn round_image(date: &str, tallies: &[Tally], winner: Option<i64>, players: 
     let low_w = text_width("low", s);
     c.rect(pad + w - s, pad - s, low_w + s, 7 * s + 2 * s, GREEN);
     c.text(pad + w, pad, s, "low", BG);
-    let date_w = text_width(date, 5);
-    c.text(W - pad - date_w, pad + 4, 5, date, DIM);
+    let shown = crate::templates::eu(date);
+    let date_w = text_width(&shown, 5);
+    c.text(W - pad - date_w, pad + 4, 5, &shown, DIM);
 
     // The columns: every number up to a little past the winner, or the
     // first thirty picked, whichever is more telling.
@@ -153,6 +154,7 @@ fn glyph(ch: char) -> Option<[u8; 7]> {
     Some(match ch {
         ' ' => [0; 7],
         '-' => [0, 0, 0, 0b11111, 0, 0, 0],
+        '.' => [0, 0, 0, 0, 0, 0b01100, 0b01100],
         '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
         '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
         '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
@@ -202,7 +204,7 @@ mod tests {
 
     #[test]
     fn every_character_the_preview_writes_has_a_glyph() {
-        for s in ["i guess low", "2026-10-21", "1234567890 won  41 players", "nobody won  0 players"] {
+        for s in ["i guess low", "21.10.2026", "1234567890 won  41 players", "nobody won  0 players"] {
             for ch in s.chars() {
                 assert!(glyph(ch).is_some(), "{ch:?} in {s:?}");
             }

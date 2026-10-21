@@ -133,6 +133,39 @@ pub fn progress_cells(pct: &i64) -> Vec<bool> {
     (0..CELLS).map(|i| i < filled).collect()
 }
 
+/// A date the European way: "2026-10-21" is shown as "21.10.2026". Dates
+/// stay ISO everywhere else (URLs, the database, sorting); this is only
+/// how a page shows one. Anything that is not a date is shown as it is.
+pub fn eu(iso: &str) -> String {
+    match chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d") {
+        Ok(d) => d.format("%d.%m.%Y").to_string(),
+        Err(_) => iso.to_string(),
+    }
+}
+
+/// The same without the year, where the year is obvious: "21.10.".
+pub fn eu_short(iso: &str) -> String {
+    match chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d") {
+        Ok(d) => d.format("%d.%m.").to_string(),
+        Err(_) => iso.to_string(),
+    }
+}
+
+/// A search typed the European way, as the ISO prefix it means:
+/// "21.10.2026" is "2026-10-21", "10.2026" is "2026-10"; anything else is
+/// returned as it is.
+pub fn iso_prefix(q: &str) -> String {
+    let parts: Vec<&str> = q.split('.').map(str::trim).filter(|p| !p.is_empty()).collect();
+    let num = |p: &str, len: usize| p.len() <= len && p.chars().all(|c| c.is_ascii_digit());
+    match parts.as_slice() {
+        [d, m, y] if num(d, 2) && num(m, 2) && y.len() == 4 && num(y, 4) => {
+            format!("{y}-{:0>2}-{:0>2}", m, d)
+        }
+        [m, y] if num(m, 2) && y.len() == 4 && num(y, 4) => format!("{y}-{:0>2}", m),
+        _ => q.to_string(),
+    }
+}
+
 /// "1 250 pts".
 pub fn points_label(points: &i64) -> String {
     format!("{} pts", group_digits(*points))
@@ -612,9 +645,6 @@ pub struct TrendsTemplate {
     pub falling: Vec<MoverView>,
     /// The most picked numbers of the whole range.
     pub most: Vec<TallyView>,
-    /// How long reading and analysing the range took, e.g. "12.4 ms". Shown
-    /// only in a test instance's collapsed details (R9.9).
-    pub took: String,
     /// What the range answers, in a sentence (R13.1).
     pub answer: String,
     /// Where the numbers come from: test, seeded or historical.
@@ -665,7 +695,7 @@ impl TrendsTemplate {
         };
         let date_span = |(from, to): &(String, String)| {
             // The year is the same on both sides almost always; leave it out.
-            let short = |d: &str| d.get(5..).unwrap_or(d).to_string();
+            let short = |d: &str| eu_short(d);
             if from == to {
                 short(from)
             } else {
@@ -744,7 +774,6 @@ impl TrendsTemplate {
             rising: trend.rising.iter().map(mover).collect(),
             falling: trend.falling.iter().map(mover).collect(),
             most: trend.most.iter().map(Into::into).collect(),
-            took: String::new(),
             answer: trends_answer(range, trend),
             data_source: "test",
             first_close: String::new(),
@@ -1059,7 +1088,7 @@ mod tests {
             .unwrap();
 
         let row = |date: &str| {
-            let from = html.find(&format!(">{date}<")).expect("a row for the day");
+            let from = html.find(&format!(">{}<", super::eu(date))).expect("a row for the day");
             let row = &html[from..];
             row[..row.find("</tr>").unwrap()].to_string()
         };
@@ -1075,6 +1104,20 @@ mod tests {
             2,
             "a normal day keeps both"
         );
+    }
+
+    #[test]
+    fn dates_are_shown_the_european_way() {
+        use super::{eu, eu_short, iso_prefix};
+        assert_eq!(eu("2026-10-21"), "21.10.2026");
+        assert_eq!(eu("2026-01-05"), "05.01.2026");
+        assert_eq!(eu_short("2026-10-21"), "21.10.");
+        assert_eq!(eu("not a date"), "not a date");
+        assert_eq!(iso_prefix("21.10.2026"), "2026-10-21");
+        assert_eq!(iso_prefix("5.1.2026"), "2026-01-05");
+        assert_eq!(iso_prefix("10.2026"), "2026-10");
+        assert_eq!(iso_prefix("1337"), "1337");
+        assert_eq!(iso_prefix("megardes"), "megardes");
     }
 
     #[test]

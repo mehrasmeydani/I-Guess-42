@@ -241,7 +241,7 @@ fn round_matches(r: &db::RoundSummary, query: &str, names_visible: bool) -> bool
     if q.is_empty() {
         return true;
     }
-    if r.round_date.starts_with(&q) {
+    if r.round_date.starts_with(&q) || r.round_date.starts_with(&templates::iso_prefix(&q)) {
         return true;
     }
     if names_visible && r.winner_login.as_deref().is_some_and(|l| l.to_lowercase().contains(&q)) {
@@ -277,9 +277,12 @@ async fn results_in(
         return Ok(away);
     }
     if let Some(date) = query.date.as_deref().filter(|d| !d.is_empty()) {
-        // Only a well-formed date is echoed into a URL.
-        if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok() {
-            return Ok(Redirect::to(&format!("{}/day/{date}", pool.base())).into_response());
+        // Typed the European way (21.10.2026), or ISO from an old link. Only
+        // a well-formed date is echoed into a URL, and always as ISO.
+        let parsed = chrono::NaiveDate::parse_from_str(date.trim(), "%d.%m.%Y")
+            .or_else(|_| chrono::NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d"));
+        if let Ok(day) = parsed {
+            return Ok(Redirect::to(&format!("{}/day/{}", pool.base(), day.format("%Y-%m-%d"))).into_response());
         }
     }
 
@@ -652,10 +655,6 @@ async fn trends_in(
         None => String::new(), // sorts before every date
     };
 
-
-    // Timed from the query to the finished view model, and shown on the page:
-    // an honest number for how heavy the analysis is.
-    let started = std::time::Instant::now();
     let rows = db::range_tallies(&state.db, pool, &from, &open_round).await?;
     let trend = stats::trend(&rows);
     let mut page = TrendsTemplate::build(
@@ -666,7 +665,6 @@ async fn trends_in(
         range,
         &trend,
     );
-    page.took = format!("{:.1} ms", started.elapsed().as_secs_f64() * 1000.0);
     page.data_source = data_source(&state, pool).await?;
     page.first_close = round.deadline_human();
     Ok(templates::render(&page))

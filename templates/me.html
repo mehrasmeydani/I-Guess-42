@@ -29,7 +29,7 @@
       <thead><tr><th scope="col">date</th><th scope="col" class="num">your pick</th><th scope="col" class="num">winner</th><th scope="col">result</th></tr></thead>
       <tbody>
         {% for r in rounds %}
-          <tr><td><a href="{{ pool.base() }}/day/{{ r.date }}">{{ r.date }}</a></td><td class="num">{{ r.pick }}</td><td class="num">{% match r.winner %}{% when Some with (w) %}{{ w }}{% when None %}<span class="dim">nobody</span>{% endmatch %}</td><td>{% if r.won %}<b class="win">won</b>{% else %}<span class="dim">lost</span>{% endif %}</td></tr>
+          <tr><td><a href="{{ pool.base() }}/day/{{ r.date }}">{{ crate::templates::eu(r.date) }}</a></td><td class="num">{{ r.pick }}</td><td class="num">{% match r.winner %}{% when Some with (w) %}{{ w }}{% when None %}<span class="dim">nobody</span>{% endmatch %}</td><td>{% if r.won %}<b class="win">won</b>{% else %}<span class="dim">lost</span>{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -42,7 +42,7 @@
           <thead><tr><th scope="col">date</th><th scope="col" class="num">your pick</th><th scope="col" class="num">winner</th><th scope="col">result</th></tr></thead>
           <tbody>
             {% for r in older %}
-              <tr><td><a href="{{ pool.base() }}/day/{{ r.date }}">{{ r.date }}</a></td><td class="num">{{ r.pick }}</td><td class="num">{% match r.winner %}{% when Some with (w) %}{{ w }}{% when None %}<span class="dim">nobody</span>{% endmatch %}</td><td>{% if r.won %}<b class="win">won</b>{% else %}<span class="dim">lost</span>{% endif %}</td></tr>
+              <tr><td><a href="{{ pool.base() }}/day/{{ r.date }}">{{ crate::templates::eu(r.date) }}</a></td><td class="num">{{ r.pick }}</td><td class="num">{% match r.winner %}{% when Some with (w) %}{{ w }}{% when None %}<span class="dim">nobody</span>{% endmatch %}</td><td>{% if r.won %}<b class="win">won</b>{% else %}<span class="dim">lost</span>{% endif %}</td></tr>
             {% endfor %}
           </tbody>
         </table>

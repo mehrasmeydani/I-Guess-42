@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}round {{ round.date_key }} &middot; i guess low{% endblock %}
-{% block h1 %}round {{ round.date_key }}{% endblock %}
+{% block title %}round {{ crate::templates::eu(round.date_key) }} &middot; i guess low{% endblock %}
+{% block h1 %}round {{ crate::templates::eu(round.date_key) }}{% endblock %}
 {% block nav_results %}class="on" aria-current="page"{% endblock %}
 {% block path %}{{ pool.base() }}/day/{{ round.date_key }}{% endblock %}
-{% block og_title %}i guess low · round {{ round.date_key }}{% endblock %}
-{% block twitter_title %}i guess low · round {{ round.date_key }}{% endblock %}
+{% block og_title %}i guess low · round {{ crate::templates::eu(round.date_key) }}{% endblock %}
+{% block twitter_title %}i guess low · round {{ crate::templates::eu(round.date_key) }}{% endblock %}
 {% block og_description %}{{ takeaway }}{% endblock %}
 {% block twitter_description %}{{ takeaway }}{% endblock %}
 {% block og_image %}{{ pool.base() }}/day/{{ round.date_key }}/og.png{% endblock %}
@@ -13,14 +13,14 @@
 {% block content %}
 {# Walking the calendar: the day before, this day, the day after. #}
 <nav class="daynav" aria-label="rounds">
-  <span class="daynav-prev">{% match previous %}{% when Some with (d) %}<a href="{{ pool.base() }}/day/{{ d }}" rel="prev">&larr; {{ d }}</a>{% when None %}{% endmatch %}</span>
-  <span class="daynav-here">round {{ round.date_key }} <span class="chip">[closed]</span></span>
-  <span class="daynav-next">{% match newer %}{% when Some with (d) %}<a href="{{ pool.base() }}/day/{{ d }}" rel="next">{{ d }} &rarr;</a>{% when None %}{% endmatch %}</span>
+  <span class="daynav-prev">{% match previous %}{% when Some with (d) %}<a href="{{ pool.base() }}/day/{{ d }}" rel="prev">&larr; {{ crate::templates::eu(d) }}</a>{% when None %}{% endmatch %}</span>
+  <span class="daynav-here">round {{ crate::templates::eu(round.date_key) }} <span class="chip">[closed]</span></span>
+  <span class="daynav-next">{% match newer %}{% when Some with (d) %}<a href="{{ pool.base() }}/day/{{ d }}" rel="next">{{ crate::templates::eu(d) }} &rarr;</a>{% when None %}{% endmatch %}</span>
 </nav>
 
 <section class="sec" style="--b: 0">
   <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; this round</p>
-  <p class="lead">{{ round.date_key }} &middot; {{ round.total }} played &middot; {% match round.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
+  <p class="lead">{{ crate::templates::eu(round.date_key) }} &middot; {{ round.total }} played &middot; {% match round.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
   {% match my_pick %}{% when Some with (p) %}<p class="dim">your pick: <b class="mine-text">{{ p }}</b></p>{% when None %}{% endmatch %}
 </section>
 
@@ -38,7 +38,7 @@
   <details class="expand">
     <summary><span class="when-closed">view as table &middot; {{ distinct }} numbers</span><span class="when-open">hide table</span></summary>
     <table class="grid narrow">
-      <caption class="sr">every number picked in round {{ round.date_key }}</caption>
+      <caption class="sr">every number picked in round {{ crate::templates::eu(round.date_key) }}</caption>
       <thead><tr><th scope="col" class="num">number</th><th scope="col" class="num">players</th><th scope="col">result</th></tr></thead>
       <tbody>
         {% for r in rows %}
@@ -70,7 +70,7 @@
       <tbody>
         {% for r in earlier %}
           <tr>
-            <td><a href="{{ pool.base() }}/day/{{ r.date_key }}">{{ r.date_key }}</a></td>
+            <td><a href="{{ pool.base() }}/day/{{ r.date_key }}">{{ crate::templates::eu(r.date_key) }}</a></td>
             {% match r.winner %}
               {% when Some with (w) %}
                 <td>{{ w.login }}</td>

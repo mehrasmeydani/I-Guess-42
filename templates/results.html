@@ -9,7 +9,7 @@
   <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; all-time</p>
   {% match latest %}
     {% when Some with (r) %}
-      <p class="lead">{{ r.date_key }} &middot; {{ r.total }} played &middot; {% match r.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
+      <p class="lead">{{ crate::templates::eu(r.date_key) }} &middot; {{ r.total }} played &middot; {% match r.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
       <p><a href="{{ pool.base() }}/day/{{ r.date_key }}">every pick &rarr;</a></p>
     {% when None %}
       <p class="lead">no rounds yet &middot; first reveal {{ first_close }}</p>
@@ -30,7 +30,7 @@
     <form method="get" action="{{ pool.base() }}/results" class="finder" role="search">
       <label for="q">search rounds</label>
       <div class="finder-row">
-        <input id="q" name="q" type="search" value="{{ q }}" placeholder="{% if names_visible %}name, number or month{% else %}number or month{% endif %}"
+        <input id="q" name="q" type="search" value="{{ q }}" placeholder="{% if names_visible %}name, number or 10.2026{% else %}number or 10.2026{% endif %}"
                autocomplete="off" spellcheck="false" enterkeyhint="search"{% if total_rounds == 0 %} disabled{% endif %}>
         <button type="submit"{% if total_rounds == 0 %} disabled{% endif %}>search</button>
       </div>
@@ -38,7 +38,7 @@
     <form method="get" action="{{ pool.base() }}/results" class="finder">
       <label for="date">go to a day</label>
       <div class="finder-row">
-        <input id="date" name="date" type="date" required{% if total_rounds == 0 %} disabled{% endif %}>
+        <input id="date" name="date" type="text" inputmode="numeric" placeholder="21.10.2026" pattern="[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{4}" autocomplete="off" required{% if total_rounds == 0 %} disabled{% endif %}>
         <button type="submit"{% if total_rounds == 0 %} disabled{% endif %}>open</button>
       </div>
     </form>
@@ -57,7 +57,7 @@
       <tbody>
         {% for r in rounds %}
           <tr>
-            <td><a href="{{ pool.base() }}/day/{{ r.date_key }}">{{ r.date_key }}</a></td>
+            <td><a href="{{ pool.base() }}/day/{{ r.date_key }}">{{ crate::templates::eu(r.date_key) }}</a></td>
             {% match r.winner %}
               {% when Some with (w) %}
                 <td>{{ w.login }}</td>

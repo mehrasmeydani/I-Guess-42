@@ -5,7 +5,7 @@
 
 {% block content %}
 <section class="sec" style="--b: 0">
-  <h2 class="rule"><span>round {{ round_key }}</span><span class="tag warn">final</span></h2>
+  <h2 class="rule"><span>round {{ crate::templates::eu(round_key) }}</span><span class="tag warn">final</span></h2>
   <p class="question">sure?</p>
   <p class="bignumber">{{ value_label }}</p>
   <p class="notice warn"><b>warning</b> this is your one guess. it cannot be changed or withdrawn.

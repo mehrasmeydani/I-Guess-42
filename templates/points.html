@@ -21,7 +21,7 @@
       <thead><tr><th scope="col">round</th><th scope="col">what</th><th scope="col" class="num">points</th></tr></thead>
       <tbody>
         {% for r in rows %}
-          <tr><td>{{ r.date }}</td><td>{{ r.what }}</td><td class="num {% if r.gain %}win{% else %}dim{% endif %}">{{ r.amount }}</td></tr>
+          <tr><td>{{ crate::templates::eu(r.date) }}</td><td>{{ r.what }}</td><td class="num {% if r.gain %}win{% else %}dim{% endif %}">{{ r.amount }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
