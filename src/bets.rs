@@ -513,6 +513,46 @@ mod tests {
         assert_eq!(seen, vec![("range:1:4".to_string(), 30)]);
     }
 
+    #[tokio::test]
+    async fn moving_the_clock_back_takes_back_what_the_future_paid() {
+        let (_t, state) = app(&["megardes"]).await;
+        student(&state.db, 1001, "megardes", "adm").await;
+        let (ann, bob) = (player(&state.db, "ann").await, player(&state.db, "bob").await);
+        let today = Round::current(state.now()).key();
+        plays(&state.db, ann, &today, 4).await;
+        plays(&state.db, bob, &today, 9).await;
+        bet(&state.db, ann, &today, "range:1:5", 30, 200).await;
+        let (a0, b0) = (db::balance(&state.db, ann).await.unwrap(), db::balance(&state.db, bob).await.unwrap());
+        let clock = |shift: &str| {
+            let form = Form(crate::handlers::ClockForm { shift: shift.into() });
+            crate::handlers::admin_clock(State(state.clone()), jar("adm"), form)
+        };
+
+        // Past the deadline: the round settles, ann wins the pot and her bet,
+        // and both pick up tomorrow's daily points.
+        clock("deadline").await.unwrap();
+        let tomorrow = Round::current(state.now()).key();
+        settle_all(&state.db, &tomorrow).await.unwrap();
+        collect(&state.db, ann, &tomorrow).await.unwrap();
+        collect(&state.db, bob, &tomorrow).await.unwrap();
+        assert_eq!(db::balance(&state.db, ann).await.unwrap(), a0 + 20 + 60 + crate::economy::DAILY_GRANT);
+        assert!(db::pot(&state.db, &today).await.unwrap().is_some());
+
+        // Back to now: all of it goes back, the bet is open again.
+        clock("reset").await.unwrap();
+        assert_eq!(Round::current(state.now()).key(), today);
+        assert_eq!(db::balance(&state.db, ann).await.unwrap(), a0);
+        assert_eq!(db::balance(&state.db, bob).await.unwrap(), b0);
+        assert!(db::pot(&state.db, &today).await.unwrap().is_none());
+        assert_eq!(db::bets_of(&state.db, ann, &today).await.unwrap()[0].result, None);
+
+        // And when the round really closes, it settles once, as normal.
+        clock("deadline").await.unwrap();
+        settle_all(&state.db, &tomorrow).await.unwrap();
+        settle_all(&state.db, &tomorrow).await.unwrap();
+        assert_eq!(db::balance(&state.db, ann).await.unwrap(), a0 + 20 + 60);
+    }
+
     // ------------------------------------------------------------- pages
 
     async fn bets_page_q(state: &AppState, token: Option<&str>, q: BetsQuery) -> String {

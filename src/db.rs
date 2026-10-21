@@ -2016,6 +2016,36 @@ pub async fn settle_round(db: &Db, round_date: &str) -> Result<Option<Pot>> {
     }))
 }
 
+/// Undoes the settlement of every round from `open_round` on: a test
+/// instance's clock was moved back, so those rounds are open again and
+/// should never have paid. Pots and bet winnings are taken back, bets
+/// reopen (their void refunds taken back too), and daily points and streak
+/// bonuses for days still to come are removed. Guesses and stakes stay: the
+/// rounds settle again, properly, when they close. Returns the rounds undone.
+pub async fn unsettle_from(db: &Db, open_round: &str) -> Result<u64> {
+    let mut tx = write_tx(db).await?;
+    sqlx::query(
+        "DELETE FROM ledger WHERE round_date >= ?1 AND (
+             kind IN ('pot', 'bet_win')
+             OR (kind = 'refund' AND ref LIKE 'bet:%')
+             OR (kind IN ('grant', 'streak') AND round_date > ?1))",
+    )
+    .bind(open_round)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE bets SET result = NULL, payout = NULL, settled_at = NULL WHERE round_date >= ?1")
+        .bind(open_round)
+        .execute(&mut *tx)
+        .await?;
+    let undone = sqlx::query("DELETE FROM pots WHERE round_date >= ?1")
+        .bind(open_round)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    tx.commit().await?;
+    Ok(undone)
+}
+
 /// Calls off a round that has not been settled: every stake refunded, no
 /// guess counts, no pot paid, and what had rolled in rolls on. False if it
 /// was settled already.

@@ -1143,7 +1143,7 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
 
 #[derive(Deserialize)]
 pub struct ClockForm {
-    shift: String,
+    pub shift: String,
 }
 
 pub async fn admin_clock(
@@ -1155,6 +1155,7 @@ pub async fn admin_clock(
         return Ok(admin_gone());
     }
 
+    let before = state.now();
     match form.shift.as_str() {
         "reset" => state.reset_clock(),
         // Land one second past the deadline, so the round is definitively over.
@@ -1166,6 +1167,16 @@ pub async fn admin_clock(
         "day" => state.shift_clock(24 * 60 * 60),
         "back_day" => state.shift_clock(-24 * 60 * 60),
         _ => return Ok(Redirect::to("/admin?msg=invalid").into_response()),
+    }
+    // Moved back: rounds that settled only because the clock ran ahead are
+    // open again, and what they paid out goes back.
+    if state.now() < before {
+        let open = Round::current(state.now()).key();
+        let undone = db::unsettle_from(&state.db, &open).await?;
+        if undone > 0 {
+            tracing::info!(from = %open, rounds = undone, "clock moved back: settlements undone");
+        }
+        *state.odds_base.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
     Ok(Redirect::to("/admin").into_response())
 }
