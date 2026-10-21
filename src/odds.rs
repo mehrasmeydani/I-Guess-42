@@ -37,13 +37,30 @@ pub const PROFIT_PER_PLAYER: i64 = 1000;
 const MIN_PICKS: usize = 30;
 /// Players a round, at most.
 const MAX_PLAYERS: usize = 1000;
-/// Without a week to go on, rounds are imagined this size.
-const DEFAULT_PLAYERS: usize = 10;
-/// Share of every chance taken from a smooth curve instead of the
-/// picks, so a range nobody picked last month is unlikely, not impossible.
+/// Without a month to go on, rounds are imagined this size: about the live
+/// site's average (14.7 a day).
+const DEFAULT_PLAYERS: usize = 15;
+/// Share of every chance taken from the typical crowd (`TYPICAL_PICKS`)
+/// rather than the month's own picks, so a range nobody picked lately is
+/// unlikely, not impossible.
 const SMOOTH: f64 = 0.05;
+/// Of that, the share taken from a 1/n² curve, so that even a range nobody
+/// has ever picked has some chance.
+const CURVE: f64 = 0.1;
 /// That curve's chance of nobody winning.
 const NOBODY_PRIOR: f64 = 0.05;
+/// A typical crowd: every pick of the 28 rounds on iguesslow.com up to
+/// 21.10.2026 (412 picks, 5-43 players a day), as (number, times picked).
+/// The five picks above 100 are folded into one stand-in. Used where there
+/// are no picks of our own, and a little everywhere: the made-up curve it
+/// replaces said 1 would win 63% of the time, when in fact 1 won 14% and
+/// 4-5 won 29%.
+const TYPICAL_PICKS: [(i64, usize); 35] = [
+    (1, 80), (2, 66), (3, 72), (4, 41), (5, 22), (6, 23), (7, 18), (8, 14), (9, 9), (10, 5),
+    (11, 8), (12, 9), (13, 3), (14, 4), (15, 1), (16, 1), (17, 2), (20, 1), (21, 2), (23, 2),
+    (25, 1), (26, 1), (27, 1), (28, 1), (29, 1), (30, 2), (38, 1), (41, 1), (42, 2), (51, 1),
+    (56, 1), (67, 9), (69, 1), (89, 1), (1_000_000, 5),
+];
 /// How many points the starting chances are worth against bets: 1000 points
 /// staked on a range move it as far as all of last month's picks pull.
 const LIQUIDITY: f64 = 1000.0;
@@ -219,26 +236,47 @@ pub struct History {
     pub picks: Vec<i64>,
     pub rounds: usize,
     pub plays: usize,
+    /// Each round's player count: quiet and busy days play differently.
+    pub sizes: Vec<usize>,
+    /// What each round came to: its winning number, if any, and its most
+    /// picked number - the record no range is priced below.
+    pub outcomes: Vec<Outcome>,
 }
 
 impl History {
     /// From per-day tallies, as `db::range_tallies` gives them. Days from
     /// `recent_from` on are drawn from twice.
     pub fn from_tallies(rows: &[crate::stats::DayTally], recent_from: &str) -> History {
-        let mut picks = Vec::new();
-        let mut days: Vec<&str> = Vec::new();
-        let mut plays = 0;
+        let mut h = History::default();
+        // Rows come a day at a time, each day's values in order.
+        let mut day: Vec<(i64, usize)> = Vec::new();
+        let finish = |h: &mut History, day: &mut Vec<(i64, usize)>| {
+            if day.is_empty() {
+                return;
+            }
+            let top = day.iter().map(|d| d.1).max().unwrap_or(0);
+            h.outcomes.push(Outcome {
+                winner: day.iter().find(|d| d.1 == 1).map(|d| d.0),
+                most: day.iter().find(|d| d.1 == top).map(|d| d.0),
+            });
+            h.sizes.push(day.iter().map(|d| d.1).sum());
+            h.rounds += 1;
+            day.clear();
+        };
+        let mut date: Option<&str> = None;
         for r in rows {
+            if date != Some(r.round_date.as_str()) {
+                finish(&mut h, &mut day);
+                date = Some(&r.round_date);
+            }
             let n = r.count.max(0) as usize;
             let times = if r.round_date.as_str() >= recent_from { 2 } else { 1 };
-            picks.extend(std::iter::repeat_n(r.value, n * times));
-            plays += n;
-            if days.last() != Some(&r.round_date.as_str()) {
-                days.push(&r.round_date);
-            }
+            h.picks.extend(std::iter::repeat_n(r.value, n * times));
+            h.plays += n;
+            day.push((r.value, n));
         }
-        days.dedup();
-        History { picks, rounds: days.len(), plays }
+        finish(&mut h, &mut day);
+        h
     }
 
     /// Players a day, on average.
@@ -251,16 +289,39 @@ impl History {
 /// most picked, before any bets.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Base {
-    /// False when there were no picks to go on: the smooth curve alone.
+    /// False when there were no picks to go on: the typical crowd alone.
     pub has_data: bool,
+    /// What the month's picks say, and what a typical crowd of the same size
+    /// would.
+    data: Dist,
+    typical: Dist,
+    /// What the rounds behind `data` actually came to.
+    record: Vec<Outcome>,
+    /// Picks the chances were worked out from, and players a round.
+    pub picks: usize,
+    pub players: usize,
+}
+
+/// Each number's chance to win and to be the most picked, and of nobody
+/// winning.
+#[derive(Debug, Clone, PartialEq, Default)]
+struct Dist {
     /// (number, chance it wins), lowest first.
     winners: Vec<(i64, f64)>,
     nobody: f64,
     /// (number, chance it is the most picked), lowest first.
     modes: Vec<(i64, f64)>,
-    /// Picks the chances were worked out from, and players a round.
-    pub picks: usize,
-    pub players: usize,
+}
+
+impl Dist {
+    fn share(&self, market: Market) -> f64 {
+        let sum = |v: &[(i64, f64)], lo, hi| v.iter().filter(|(n, _)| within(lo, hi, *n)).map(|(_, p)| p).sum();
+        match market {
+            Market::Nobody => self.nobody,
+            Market::Range { lo, hi } => sum(&self.winners, lo, hi),
+            Market::Most { lo, hi } => sum(&self.modes, lo, hi),
+        }
+    }
 }
 
 impl Base {
@@ -270,26 +331,27 @@ impl Base {
         self.players.max(1) as i64 * PROFIT_PER_PLAYER
     }
 
-    /// The starting chance of `market`: mostly the picks, a little the
-    /// smooth curve; all of the curve if there were no picks.
+    /// The starting chance of `market`: mostly the month's picks, a little
+    /// the typical crowd (and of that a little a smooth curve, so nothing is
+    /// impossible); the typical crowd alone if there were no picks.
     fn chance(&self, market: Market) -> f64 {
-        let (smooth, share) = if !self.has_data {
-            (1.0, 0.0)
-        } else {
-            let sum = |v: &[(i64, f64)], lo, hi| v.iter().filter(|(n, _)| within(lo, hi, *n)).map(|(_, p)| p).sum();
-            let share = match market {
-                Market::Nobody => self.nobody,
-                Market::Range { lo, hi } => sum(&self.winners, lo, hi),
-                Market::Most { lo, hi } => sum(&self.modes, lo, hi),
-            };
-            (SMOOTH, share)
-        };
         let curve = match market {
             Market::Nobody => NOBODY_PRIOR,
             Market::Range { lo, hi } => (1.0 - NOBODY_PRIOR) * curve(lo, hi),
             Market::Most { lo, hi } => curve(lo, hi),
         };
-        (1.0 - smooth) * share + smooth * curve
+        let fallback = (1.0 - CURVE) * self.typical.share(market) + CURVE * curve;
+        if !self.has_data {
+            return fallback;
+        }
+        let model = (1.0 - SMOOTH) * self.data.share(market) + SMOOTH * fallback;
+        // Never below the record: if a range won on 2 of the last 28 days,
+        // it is priced at no less than that, whatever the model says - the
+        // way a bookmaker will not offer odds reality has already beaten.
+        // (One round in hand added to the count, so a single day is not
+        // taken at its word.)
+        let hits = self.record.iter().filter(|o| outcome(market, **o)).count();
+        model.max(hits as f64 / (self.record.len() + 1) as f64)
     }
 }
 
@@ -319,7 +381,7 @@ fn once(l: f64) -> f64 {
 ///   has, every lower number has fewer than k and every higher one at most
 ///   k: summed over k. Then scaled to add up to 1, leaving out the day
 ///   nobody plays.
-fn analyse(picks: &[i64], players: usize) -> Base {
+fn analyse(picks: &[i64], players: usize) -> Dist {
     let mut counts: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
     for p in picks {
         *counts.entry(*p).or_default() += 1;
@@ -335,7 +397,12 @@ fn analyse(picks: &[i64], players: usize) -> Base {
         winners.push((v, nobody_yet * p));
         nobody_yet *= 1.0 - p;
     }
-    Base { has_data: true, winners, nobody: nobody_yet, modes: modes(&means), picks: picks.len(), players }
+    Dist { winners, nobody: nobody_yet, modes: modes(&means) }
+}
+
+/// The typical crowd's picks, one entry per pick.
+fn typical_picks() -> Vec<i64> {
+    TYPICAL_PICKS.iter().flat_map(|&(v, n)| std::iter::repeat_n(v, n)).collect()
 }
 
 /// Each number's chance of being the most picked, ties to the lowest, for
@@ -414,11 +481,54 @@ pub fn base(global: &History, vienna: &History) -> Base {
     if picks.len() < MIN_PICKS {
         picks.extend(&vienna.picks);
     }
-    if picks.is_empty() {
-        return Base { has_data: false, winners: Vec::new(), nobody: 0.0, modes: Vec::new(), picks: 0, players: DEFAULT_PLAYERS };
-    }
     let players = global.players().or(vienna.players()).unwrap_or(DEFAULT_PLAYERS).clamp(2, MAX_PLAYERS);
-    analyse(&picks, players)
+    // The day's size is not known ahead: the chances are averaged over the
+    // sizes the rounds behind them had (back-tested on the live site's 28
+    // rounds, a little better than one average size).
+    let source = if global.picks.len() >= MIN_PICKS || vienna.rounds == 0 { global } else { vienna };
+    let mut sizes: Vec<usize> = source.sizes.iter().map(|s| (*s).clamp(2, MAX_PLAYERS)).collect();
+    if sizes.is_empty() {
+        sizes.push(players);
+    }
+    let typical = analyse(&typical_picks(), players);
+    if picks.is_empty() {
+        return Base { has_data: false, data: Dist::default(), typical, record: Vec::new(), picks: 0, players };
+    }
+    let record = if global.picks.len() >= MIN_PICKS { global.outcomes.clone() } else { [global.outcomes.clone(), vienna.outcomes.clone()].concat() };
+    Base { has_data: true, data: averaged(&picks, &sizes), typical, record, picks: picks.len(), players }
+}
+
+/// `analyse` over several round sizes, averaged, each size worked out once.
+fn averaged(picks: &[i64], sizes: &[usize]) -> Dist {
+    let mut by_size: std::collections::BTreeMap<usize, usize> = std::collections::BTreeMap::new();
+    for s in sizes {
+        *by_size.entry(*s).or_default() += 1;
+    }
+    let total = sizes.len() as f64;
+    let mut out: Option<Dist> = None;
+    for (size, times) in by_size {
+        let d = analyse(picks, size);
+        let w = times as f64 / total;
+        out = Some(match out {
+            None => Dist {
+                winners: d.winners.iter().map(|&(v, p)| (v, p * w)).collect(),
+                nobody: d.nobody * w,
+                modes: d.modes.iter().map(|&(v, p)| (v, p * w)).collect(),
+            },
+            Some(mut acc) => {
+                // Same picks, same numbers in the same order: add up in place.
+                for (a, b) in acc.winners.iter_mut().zip(&d.winners) {
+                    a.1 += b.1 * w;
+                }
+                for (a, b) in acc.modes.iter_mut().zip(&d.modes) {
+                    a.1 += b.1 * w;
+                }
+                acc.nobody += d.nobody * w;
+                acc
+            }
+        });
+    }
+    out.unwrap_or_default()
 }
 
 /// The chance of `market` now: the starting chance, moved by the points
@@ -516,7 +626,7 @@ mod tests {
     }
 
     fn week(picks: &[i64], rounds: usize) -> History {
-        History { picks: picks.to_vec(), rounds, plays: picks.len() }
+        History { picks: picks.to_vec(), rounds, plays: picks.len(), ..Default::default() }
     }
 
     /// Last week as a plausible crowd: lots of small numbers, a long tail.
@@ -677,6 +787,22 @@ mod tests {
     }
 
     #[test]
+    fn with_no_picks_the_odds_look_like_the_real_game() {
+        // The typical crowd, not a made-up curve: on the live site 1 won 14%
+        // of rounds and 4-5 won 29%; the curve had said 63% and 5%.
+        let b = base(&History::default(), &History::default());
+        assert!(!b.has_data);
+        let one = b.chance(r(1, Some(1)));
+        let four_five = b.chance(r(4, Some(5)));
+        assert!(one < 0.3, "1 is the most crowded number, not the likeliest winner: {one}");
+        assert!(four_five > 0.15, "{four_five}");
+        // Still every outcome once, and nothing impossible.
+        let sum: f64 = board().iter().map(|m| b.chance(*m)).sum();
+        assert!((sum - 1.0).abs() < 1e-9, "{sum}");
+        assert!(b.chance(r(5000, Some(6000))) > 0.0);
+    }
+
+    #[test]
     fn the_same_picks_give_the_same_chances_every_time() {
         assert_eq!(crowd(), crowd());
     }
@@ -757,6 +883,51 @@ mod tests {
     }
 
     #[test]
+    fn no_range_is_priced_below_its_record() {
+        use crate::stats::DayTally;
+        let t = |d: &str, v, c| DayTally { round_date: d.into(), value: v, count: c };
+        // Nine rounds: seven won by 4, two nobody won (both picks collided).
+        let mut rows = Vec::new();
+        for day in 1..=9 {
+            let d = format!("2026-10-{day:02}");
+            if day <= 2 {
+                rows.push(t(&d, 1, 2));
+                rows.push(t(&d, 3, 2));
+            } else {
+                rows.push(t(&d, 1, 3));
+                rows.push(t(&d, 4, 1));
+                rows.push(t(&d, 9, 1));
+            }
+        }
+        let h = History::from_tallies(&rows, "2026-10-08");
+        assert_eq!(h.outcomes.len(), 9);
+        assert_eq!(h.outcomes.iter().filter(|o| o.winner.is_none()).count(), 2);
+        assert_eq!(h.outcomes[5], Outcome { winner: Some(4), most: Some(1) });
+        assert_eq!(h.sizes, [4, 4, 5, 5, 5, 5, 5, 5, 5]);
+        let b = base(&h, &History::default());
+        // Whatever the formula makes of it, nobody won 2 of 9 days: at least
+        // 2 in 10 (a day in hand), so the odds can never beat that record.
+        assert!(b.chance(Market::Nobody) >= 0.2 - 1e-12, "{}", b.chance(Market::Nobody));
+        assert!(offered_odds_x100(b.chance(Market::Nobody)).unwrap() <= 460);
+    }
+
+    #[test]
+    fn quiet_and_busy_days_are_averaged_not_flattened() {
+        let mut picks = Vec::new();
+        for (v, n) in [(1, 30), (2, 25), (3, 22), (4, 18), (5, 15), (7, 14), (9, 9), (12, 8)] {
+            picks.extend(std::iter::repeat_n(v, n));
+        }
+        // A 5 and a 45 average 25, but the chances of a 25-player day are not
+        // the average of a 5- and a 45-player day.
+        let mixed = averaged(&picks, &[5, 45]);
+        let flat = analyse(&picks, 25);
+        let (m, f) = (mixed.share(Market::Nobody), flat.share(Market::Nobody));
+        let (small, big) = (analyse(&picks, 5).nobody, analyse(&picks, 45).nobody);
+        assert!((m - (small + big) / 2.0).abs() < 1e-12);
+        assert!((m - f).abs() > 0.01, "mixed {m} vs flat {f}");
+    }
+
+    #[test]
     fn a_month_counts_its_rounds_and_its_last_week_twice() {
         use crate::stats::DayTally;
         let t = |d: &str, v, c| DayTally { round_date: d.into(), value: v, count: c };
@@ -772,6 +943,6 @@ mod tests {
         let big = base(&week(&vec![2; 300], 3), &History::default());
         assert_eq!(small.max_profit(), 6 * PROFIT_PER_PLAYER);
         assert_eq!(big.max_profit(), 100 * PROFIT_PER_PLAYER);
-        assert_eq!(base(&History::default(), &History::default()).max_profit(), 10 * PROFIT_PER_PLAYER, "no history: a round of ten");
+        assert_eq!(base(&History::default(), &History::default()).max_profit(), 15 * PROFIT_PER_PLAYER, "no history: a round of fifteen");
     }
 }

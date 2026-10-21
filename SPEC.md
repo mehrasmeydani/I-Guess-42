@@ -637,10 +637,26 @@ Once per open round:
    Exact to any precision, instant, the same on every restart. Checked in the
    tests against 20 000 rounds actually played out; on the local data it
    matched the old 40 000-round simulation to within a point everywhere.
-4. A range's starting chance p0 = 0.95 × (its chance from step 3)
-   + 0.05 × a smooth curve (winners falling off as 1/n², 5% nobody), so a
-   range nobody picked last week is unlikely, not impossible. With no picks
-   at all, the curve alone.
+4. Averaged over the day sizes behind it: the formula is worked out for
+   each round's own player count and averaged, not for one average size
+   (quiet and busy days play differently).
+5. A range's starting chance p0 = 0.95 × (its chance from steps 3-4)
+   + 0.05 × a typical crowd: the same formula over the 412 real picks of
+   the 28 rounds on iguesslow.com up to 21.10.2026 (`TYPICAL_PICKS`), with
+   a tenth of that from a 1/n² curve so no range is impossible. With no
+   picks at all, the typical crowd alone. It replaced a made-up curve that
+   said 1 wins 63% of rounds; on the live site 1 won 14% and 4-5 won 29%,
+   which the typical crowd gets (21% and 28%).
+6. Never below the record: a range that won on h of the last d rounds is
+   priced at no less than h / (d + 1). The model underrates two things the
+   live site shows - nobody winning (1% modelled, 7% seen) and hail marys
+   over 50 (0.5% against 3.4%) - and a bookmaker does not offer odds
+   reality has already beaten. On the live data this lifts the board from
+   100% to 115%.
+
+Back-tested on the live site's rounds, each day predicted from only the
+days before it (average chance given to what then happened): the formula
+11.5%, a blend with past winners worse (10.2-11.3%), the old curve 8.1%.
 
 The ready-made board - exactly 1, 2, 3, 4–5, 6–9, 10–19, 20–49, 50 or more,
 nobody wins - covers every outcome once, so its chances add up to 100%.
