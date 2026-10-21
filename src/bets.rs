@@ -54,21 +54,11 @@ fn parse_book(rows: &[(String, i64)]) -> Vec<(Market, i64)> {
 }
 
 /// The open round's quotes for `markets`, as the book stands now.
+#[cfg(test)]
 pub async fn quotes(state: &AppState, markets: &[Market]) -> Result<Vec<Quote>, AppError> {
     let base = todays_base(state).await?;
     let book = parse_book(&db::book(&state.db, &Round::current(state.now()).key()).await?);
     Ok(markets.iter().map(|m| odds::quote(&base, &book, *m)).collect())
-}
-
-/// The round page's one line about bets: a couple of ranges and their odds.
-pub async fn teaser(state: &AppState) -> Result<String, AppError> {
-    let pick = [Market::Range { lo: 1, hi: Some(9) }, Market::Range { lo: 10, hi: None }, Market::Nobody];
-    Ok(quotes(state, &pick)
-        .await?
-        .iter()
-        .filter_map(|q| Some(format!("{} {}", q.market.label().trim_start_matches("winner "), odds::odds_label(q.odds_x100?))))
-        .collect::<Vec<_>>()
-        .join(" · "))
 }
 
 #[derive(Deserialize, Default)]
@@ -151,8 +141,21 @@ fn offer_views(base: &Base, book: &[(Market, i64)], markets: Vec<Market>, picked
         .collect()
 }
 
-fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market]) -> QuoteView {
+/// What a player may stake today: their points, less what today's guess
+/// costs until they have made it. None for a visitor who cannot bet.
+async fn stake_room(state: &AppState, viewer: Option<&db::Viewer>, open: &str) -> Result<Option<i64>, AppError> {
+    let Some(v) = viewer.filter(|v| v.account.verified) else {
+        return Ok(None);
+    };
+    let balance = db::balance(&state.db, v.account.id).await?;
+    let guessed = db::my_guess(&state.db, Pool::Global, open, v.account.id).await?.is_some();
+    Ok(Some(balance - if guessed { 0 } else { crate::economy::GUESS_STAKE }))
+}
+
+fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market], room: Option<i64>) -> QuoteView {
     let qt = odds::quote(base, book, m);
+    let worth = qt.odds_x100.map_or(0, |o| odds::max_stake(o, base.max_profit()));
+    let room = room.unwrap_or(i64::MAX).max(0);
     QuoteView {
         key: m.key(),
         label: m.label(),
@@ -161,7 +164,9 @@ fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market]) 
         odds_x100: qt.odds_x100.unwrap_or(0),
         bp: qt.chance_bp,
         max_profit: base.max_profit(),
-        max_stake: qt.odds_x100.map_or(0, |o| odds::max_stake(o, base.max_profit())),
+        max_stake: worth.min(room),
+        // Held back by the guess still to make, not by the cap.
+        keeping: room < worth,
         players: base.players,
         taken: taken.contains(&m),
     }
@@ -198,7 +203,8 @@ pub async fn page(
 
     let base = todays_base(&state).await?;
     let book = parse_book(&db::book(&state.db, &open).await?);
-    let quote = pick.market.map(|m| quote_view(&base, &book, m, &taken));
+    let room = stake_room(&state, viewer.as_ref(), &open).await?;
+    let quote = pick.market.map(|m| quote_view(&base, &book, m, &taken, room));
     let (lo, hi) = pick.inputs(&q);
     let notice = q
         .msg
@@ -249,7 +255,8 @@ pub async fn quote(
         Some(m) => {
             let base = todays_base(&state).await?;
             let book = parse_book(&db::book(&state.db, &round.key()).await?);
-            Some(quote_view(&base, &book, m, &taken))
+            let room = stake_room(&state, viewer.as_ref(), &round.key()).await?;
+            Some(quote_view(&base, &book, m, &taken, room))
         }
         None => None,
     };
@@ -317,11 +324,12 @@ pub async fn place(
     // odds shown, or better if they lengthened since.
     let shown = form.odds;
     let price = |rows: &[(String, i64)]| odds::quote(&base, &parse_book(rows), market).odds_x100.filter(|o| *o >= shown);
-    let code = match db::place_bet(&state.db, viewer.account.id, &open, &market.key(), stake, base.max_profit(), price).await? {
+    let code = match db::place_bet(&state.db, viewer.account.id, &open, &market.key(), stake, db::BetLimits { max_profit: base.max_profit(), keep: crate::economy::GUESS_STAKE }, price).await? {
         Placed::In => "bet_placed",
         Placed::Already => "bet_twice",
         Placed::BadStake => "bet_cap",
         Placed::Broke => "broke",
+        Placed::KeepForGuess => "bet_keep",
         Placed::Closed => "bet_closed",
         Placed::Moved => "bet_odds",
     };
@@ -350,7 +358,7 @@ mod tests {
     }
 
     async fn bet(db: &Db, who: i64, round: &str, market: &str, stake: i64, odds: i64) -> Placed {
-        db::place_bet(db, who, round, market, stake, 1_000_000, |_| Some(odds)).await.unwrap()
+        db::place_bet(db, who, round, market, stake, db::BetLimits { max_profit: 1_000_000, keep: 0 }, |_| Some(odds)).await.unwrap()
     }
 
     #[tokio::test]
@@ -473,7 +481,7 @@ mod tests {
         plays(&t.db, bob, "2026-10-21", 2).await;
         plays(&t.db, cat, "2026-10-21", 2).await;
         // 100 on a long shot at x50, with a cap of 300 over the stake.
-        assert_eq!(db::place_bet(&t.db, ann, "2026-10-21", "range:50:", 100, 300, |_| Some(5000)).await.unwrap(), Placed::In);
+        assert_eq!(db::place_bet(&t.db, ann, "2026-10-21", "range:50:", 100, db::BetLimits { max_profit: 300, keep: 0 }, |_| Some(5000)).await.unwrap(), Placed::In);
         let slip = &db::bets_of(&t.db, ann, "").await.unwrap()[0];
         assert_eq!(slip.max_profit, Some(300));
         assert_eq!(super::slip(slip.clone()).amount, 400, "the slip shows the capped amount");
@@ -519,18 +527,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_bet_always_leaves_enough_for_todays_guess() {
+        let t = temp_db().await;
+        let ann = player(&t.db, "ann").await;
+        collect(&t.db, ann, "2026-10-21").await.unwrap();
+        let all = db::balance(&t.db, ann).await.unwrap();
+        let keep = |stake| db::place_bet(&t.db, ann, "2026-10-21", "none", stake, db::BetLimits { max_profit: 1_000_000, keep: GUESS_STAKE }, |_| Some(500));
+        // Not guessed yet: everything but the guess's 10.
+        assert_eq!(keep(all - GUESS_STAKE + 1).await.unwrap(), Placed::KeepForGuess);
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), all, "nothing taken");
+        assert_eq!(keep(all - GUESS_STAKE).await.unwrap(), Placed::In);
+        // The 10 left is exactly the guess.
+        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", ann, 7, GUESS_STAKE).await.unwrap(), db::Locked::In);
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), 0);
+        // Guessed: the rest may all go on bets.
+        collect(&t.db, ann, "2026-10-22").await.unwrap();
+        let more = db::place_bet(&t.db, ann, "2026-10-22", "none", 1, db::BetLimits { max_profit: 1_000_000, keep: GUESS_STAKE }, |_| Some(500));
+        assert_eq!(more.await.unwrap(), Placed::In, "a new day: grant in, guess not yet, 1 of 100 is fine");
+        plays(&t.db, ann, "2026-10-22", 3).await;
+        let rest = db::balance(&t.db, ann).await.unwrap();
+        let all_in = db::place_bet(&t.db, ann, "2026-10-22", "range:1:9", rest, db::BetLimits { max_profit: 1_000_000, keep: GUESS_STAKE }, |_| Some(200));
+        assert_eq!(all_in.await.unwrap(), Placed::In, "after the guess: all of it");
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn a_bet_refused_by_its_price_takes_nothing() {
         let t = temp_db().await;
         let ann = player(&t.db, "ann").await;
         collect(&t.db, ann, "2026-10-21").await.unwrap();
         let start = db::balance(&t.db, ann).await.unwrap();
-        assert_eq!(db::place_bet(&t.db, ann, "2026-10-21", "none", 10, 1_000_000, |_| None).await.unwrap(), Placed::Moved);
+        assert_eq!(db::place_bet(&t.db, ann, "2026-10-21", "none", 10, db::BetLimits { max_profit: 1_000_000, keep: 0 }, |_| None).await.unwrap(), Placed::Moved);
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), start);
         assert!(db::bets_of(&t.db, ann, "").await.unwrap().is_empty());
         // The price sees the bets already in.
         bet(&t.db, ann, "2026-10-21", "range:1:4", 30, 200).await;
         let mut seen = Vec::new();
-        db::place_bet(&t.db, ann, "2026-10-21", "none", 10, 1_000_000, |rows| {
+        db::place_bet(&t.db, ann, "2026-10-21", "none", 10, db::BetLimits { max_profit: 1_000_000, keep: 0 }, |rows| {
             seen = rows.to_vec();
             Some(900)
         })
@@ -774,9 +807,6 @@ mod tests {
         assert_eq!(db::bets_of(&state.db, ann, "").await.unwrap()[0].odds_x100, mid0);
         assert_eq!(db::bets_of(&state.db, bob, "").await.unwrap()[0].odds_x100, mid1);
         assert!(odds_for(&state, mid).await < mid1);
-        // The odds on the round page follow the book too.
-        let teaser = teaser(&state).await.unwrap();
-        assert!(teaser.contains("10 or more ×") && teaser.contains("nobody wins ×"), "{teaser}");
     }
 
     #[tokio::test]
@@ -810,8 +840,7 @@ mod tests {
         student(&state.db, 1001, "megardes", "s").await;
         let q = || Query(crate::handlers::IndexQuery { msg: None, n: None });
         let global = body(crate::handlers::global_index(State(state.clone()), jar("s"), q()).await.unwrap()).await;
-        assert!(global.contains(r#"<a href="/g/bets">all bets &rarr;</a>"#));
-        assert!(global.contains("10 or more ×"), "1 to 9 is too safe to offer with no history");
+        assert!(global.contains(r#"<a href="/g/bets">wanna bet? &rarr;</a>"#));
         assert!(global.contains(r#"href="/g/bets">bets</a>"#), "a tab in the global round");
         let vienna = body(crate::handlers::index(State(state.clone()), jar("s"), q()).await.unwrap()).await;
         assert!(!vienna.contains("/g/bets"), "no bets in the 42 round");

@@ -343,8 +343,8 @@ pub struct IndexTemplate {
     pub carried_label: Option<String>,
     /// What a guess costs, in the global round.
     pub stake_label: Option<String>,
-    /// A few of today's odds, for the line that leads to the bets page.
-    pub bet_teaser: Option<String>,
+    /// The global round links to its bets.
+    pub bets_link: bool,
     pub guess_count: i64,
     pub last_round: Option<RoundView>,
     /// How much of the announcement window is left, in seconds, or `None`
@@ -402,8 +402,7 @@ pub struct ResultsTemplate {
     /// The last round's chart; `Some` exactly when `latest` is. Named
     /// `chart` because chart.html reads that binding.
     pub chart: Option<Chart>,
-    /// The last round analysed: why the winner won, and the picks in numbers.
-    pub why: Option<String>,
+    /// The last round's picks in numbers.
     pub analysis: Option<String>,
     /// The rounds to list: the most recent few, or every match of a search.
     pub rounds: Vec<RoundView>,
@@ -587,6 +586,8 @@ pub struct QuoteView {
     /// reaches it: the stake box takes no more.
     pub max_profit: i64,
     pub max_stake: i64,
+    /// The stake is held to `max_stake` by the 10 kept for today's guess.
+    pub keeping: bool,
     /// Players a day, the reason for the cap.
     pub players: usize,
     /// Bet on already today.

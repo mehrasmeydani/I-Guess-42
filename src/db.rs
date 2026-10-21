@@ -2431,6 +2431,9 @@ pub enum Placed {
     BadStake,
     /// Not enough points for the stake.
     Broke,
+    /// Enough for the stake, but not for that and today's guess after it:
+    /// the account has not guessed yet and must be able to.
+    KeepForGuess,
     /// The round is settled or called off.
     Closed,
     /// The odds moved below what the visitor was shown, or the bet is no
@@ -2439,17 +2442,27 @@ pub enum Placed {
 }
 
 /// Places a bet and takes the stake, in one transaction. Any stake from 1
-/// up to the account's points. `price` is given the round's open bets
+/// up to the account's points - less `keep` while the account has not
+/// guessed in the round yet, so a bet never costs anyone their guess.
+/// `price` is given the round's open bets
 /// (market, stake) as they stand inside the transaction, and returns the
 /// odds to place at, or None to refuse: so two bets at once each see the
 /// other, and nobody gets odds the book has already moved past.
+/// What a bet may not go past: its win over the stake, and the points to
+/// keep for a guess not made yet.
+#[derive(Debug, Clone, Copy)]
+pub struct BetLimits {
+    pub max_profit: i64,
+    pub keep: i64,
+}
+
 pub async fn place_bet(
     db: &Db,
     account_id: i64,
     round_date: &str,
     market: &str,
     stake: i64,
-    max_profit: i64,
+    limits: BetLimits,
     price: impl FnOnce(&[(String, i64)]) -> Option<i64>,
 ) -> Result<Placed> {
     if stake < 1 {
@@ -2481,6 +2494,14 @@ pub async fn place_bet(
     if balance < stake {
         return Ok(Placed::Broke);
     }
+    let guessed: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM global_guesses WHERE round_date = ?1 AND user_id = ?2")
+        .bind(round_date)
+        .bind(account_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if guessed.is_none() && balance - stake < limits.keep {
+        return Ok(Placed::KeepForGuess);
+    }
     let book: Vec<(String, i64)> = sqlx::query_as("SELECT market, stake FROM bets WHERE round_date = ?1 AND result IS NULL")
         .bind(round_date)
         .fetch_all(&mut *tx)
@@ -2501,7 +2522,7 @@ pub async fn place_bet(
     .bind(stake)
     .bind(odds_x100)
     .bind(&now)
-    .bind(max_profit)
+    .bind(limits.max_profit)
     .fetch_optional(&mut *tx)
     .await?;
     let Some((bet_id,)) = inserted else {

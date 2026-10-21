@@ -12,7 +12,6 @@
   {% match latest %}
     {% when Some with (r) %}
       <p class="lead">{{ crate::templates::eu(r.date_key) }} &middot; {{ r.total }} played &middot; {% match r.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
-      {% match why %}{% when Some with (w) %}<p class="why">{{ w }}</p>{% when None %}{% endmatch %}
       {% match chart %}
         {% when Some with (chart) %}
           <p class="legend">
@@ -67,7 +66,7 @@
   {% else %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="recent rounds">
     <table class="grid">
-      <thead><tr><th scope="col">date</th><th scope="col">winner</th><th scope="col" class="num">number</th><th scope="col" class="num">players</th></tr></thead>
+      <thead><tr><th scope="col">date</th><th scope="col">winner</th><th scope="col" class="num">number</th><th scope="col" class="num">players</th><th scope="col"><span class="sr">details</span></th></tr></thead>
       <tbody>
         {% for r in rounds %}
           <tr>
@@ -81,6 +80,7 @@
                 <td class="num dim">&times;</td>
             {% endmatch %}
             <td class="num">{{ r.total }}</td>
+            <td class="num"><a href="{{ pool.base() }}/day/{{ r.date_key }}">details &rarr;</a></td>
           </tr>
         {% endfor %}
       </tbody>

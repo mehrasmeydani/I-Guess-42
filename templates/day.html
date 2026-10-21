@@ -39,7 +39,7 @@
   <p class="legend">
     <span><i class="win">█</i> winner</span>
     <span><i class="once">█</i> picked by one player</span>
-    <span><i class="many">█</i> taken by more than one <s>struck</s></span>
+    <span><i class="many">█</i> taken by more than one</span>
     {% if my_pick.is_some() %}<span><i class="mine">▲</i> your pick</span>{% endif %}
   </p>
   {% match pot_line %}{% when Some with (line) %}<p class="pot-line">{{ line }}</p>{% when None %}{% endmatch %}
@@ -66,7 +66,7 @@
       <thead><tr><th scope="col" class="num">number</th><th scope="col" class="num">players</th><th scope="col">result</th></tr></thead>
       <tbody>
         {% for r in rows %}
-          <tr class="{{ r.fate }}"><td class="num">{% if r.fate == "taken" %}<s>{{ r.value_label }}</s>{% else %}{{ r.value_label }}{% endif %}</td><td class="num">{{ r.count }}</td><td>{% if r.fate == "won" %}won{% else if r.fate == "taken" %}taken{% else %}unique, not lowest{% endif %}</td></tr>
+          <tr class="{{ r.fate }}"><td class="num">{{ r.value_label }}</td><td class="num">{{ r.count }}</td><td>{% if r.fate == "won" %}won{% else if r.fate == "taken" %}taken{% else %}unique, not lowest{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>

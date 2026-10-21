@@ -222,10 +222,7 @@ async fn index_in(
             .filter(|(_, carried)| *carried > 0)
             .map(|(_, carried)| crate::templates::points_label(&carried)),
         stake_label: (pool == Pool::Global).then(|| crate::templates::points_label(&crate::economy::GUESS_STAKE)),
-        bet_teaser: match pool {
-            Pool::Global => Some(crate::bets::teaser(&state).await?),
-            Pool::Vienna => None,
-        },
+        bets_link: pool == Pool::Global,
         round_key,
         time_left: crate::round::clock(seconds_left),
         time_left_spoken: crate::round::spoken_duration(seconds_left),
@@ -330,10 +327,8 @@ async fn results_in(
         Some(newest) => {
             let tallies = db::round_tallies(&state.db, pool, &newest.round_date).await?;
             let day = stats::analyse(&tallies);
-            // The day in two lines, as its day page has them: why the winner
-            // won, and the spread of picks in numbers.
-            let collided = stats::collided_below(&tallies, day.winner, 6);
-            analysis = Some((why_line(day.winner, &collided), chart_summary(&tallies, day.winner, newest.total)));
+            // The spread of picks in numbers, as the day page has it.
+            analysis = Some(chart_summary(&tallies, day.winner, newest.total));
             let mut chart = stats::day_chart(&tallies, &day);
             let player = viewer.as_ref().and_then(|v| player_in(pool, v));
             if let Some(p) = player {
@@ -380,8 +375,7 @@ async fn results_in(
         impersonating: auth::admin_return_token(&jar).is_some(),
         latest,
         chart,
-        why: analysis.as_ref().and_then(|a| a.0.clone()),
-        analysis: analysis.map(|a| a.1),
+        analysis,
         data_source: data_source(&state, pool).await?,
         first_close: Round::current(state.now())
             .deadline

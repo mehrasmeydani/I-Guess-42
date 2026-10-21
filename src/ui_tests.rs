@@ -81,9 +81,8 @@ async fn a_day_page_says_who_won_and_why_in_a_line_and_in_words() {
     assert!(html.contains("won · 5 players · 1 and 2 were all taken"), "the takeaway, not saying 3 twice");
     assert!(html.contains("5 players · 3 numbers · 2 shared numbers · most: 1 (2×) · winner: 3"));
     assert!(html.contains("winner: 3"));
-    // Taken numbers struck through; the winner is not.
-    assert!(html.contains("<s>1</s>") && html.contains("<s>2</s>"));
-    assert!(!html.contains("<s>3</s>"));
+    // Taken numbers are told apart by colour, not crossed out.
+    assert!(!html.contains("<s>"));
     // A table alternative that says what it opens.
     assert!(html.contains("view as table &middot; 3 numbers"));
     assert!(html.contains("hide table"));
@@ -219,7 +218,8 @@ async fn the_leaderboard_ranks_points_first_then_wins() {
     a_played_day(&state).await;
     // The results page opens with the last round analysed, as its day page does.
     let results = results_page(&state, None).await;
-    assert!(results.contains(r#"<p class="why">1 and 2 were all taken</p>"#), "{results}");
+    assert!(!results.contains("were all taken"), "no why line: the chart says it");
+    assert!(results.contains("details &rarr;</a>"), "each day leads to its details");
     assert!(results.contains(r#"<p class="chart-summary">5 players · 3 numbers · 2 shared numbers · most: 1 (2×) · winner: 3</p>"#));
     crate::economy::collect(&state.db, db::viewer_for_session(&state.db, "ann").await.unwrap().unwrap().account.id, "2026-10-21").await.unwrap();
     let board = |pool: Pool, token: Option<&str>| {
@@ -303,7 +303,7 @@ async fn my_rounds_show_the_record_and_every_round_played() {
     // Reached by the name in the header, not a tab; and on to the account.
     assert!(html.contains(r#"<a class="who" href="/g/me""#));
     assert!(!html.contains(r#">me</a>"#), "no me tab");
-    assert!(html.contains(r#"href="/account">account &amp; log out"#));
+    assert!(html.contains(r#"<a class="btn" href="/account">account details &rarr;</a>"#));
     assert!(html.contains(r#"<form method="post" action="/logout"><button type="submit" class="out">log out</button></form>"#), "and log out in the header");
     // Yesterday's winner sees it as a win, and their best.
     let html = body(handlers::global_me(State(state.clone()), jar("cat")).await.unwrap()).await;

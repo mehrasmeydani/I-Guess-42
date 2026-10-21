@@ -916,8 +916,6 @@ p, li { text-wrap: pretty; }
 .day-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; margin-top: 24px; }
 .share-done:empty { display: none; }
 /* Struck: a number more than one player picked. */
-s { text-decoration-thickness: 2px; text-decoration-color: var(--action); }
-.many .col-n s { text-decoration-color: var(--action); }
 /* Your own pick: a triangle under its column, and an outline in the list. */
 .col-you { display: block; color: var(--hi); font-size: var(--fs-1); line-height: 1; text-align: center; translate: -50% 0; }
 .col.mine .col-bar { outline: 2px solid var(--hi); outline-offset: 1px; }
@@ -1181,8 +1179,6 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .captcha.ok .captcha-box { border-color: var(--state); }
 .captcha.ok .captcha-text { color: var(--state); font-weight: 700; }
 .hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
-/* Results: why the last round's winner won, under its headline. */
-.why { margin: 4px 0 0; color: var(--hi); }
 
 @media (max-width: 640px) {
   .pick input[type="text"] { flex: 1 1 6ch; width: 6ch; }

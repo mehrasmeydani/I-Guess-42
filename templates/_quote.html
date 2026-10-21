@@ -19,6 +19,7 @@
   {% when Some with (o) %}
     {% if !can_bet %}
     {% else if q.taken %}<p class="dim">placed</p>
+    {% else if q.max_stake < 1 %}<p class="lose">keep {{ crate::economy::GUESS_STAKE }} for today&rsquo;s guess &middot; <a href="/g/">guess first</a>, then bet</p>
     {% else %}
     <form method="post" action="/g/bet" class="betform">
       <input type="hidden" name="market" value="{{ q.key }}">
@@ -27,8 +28,9 @@
       <input name="stake" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="10" aria-label="stake on {{ q.label }} at {{ o }}, at most {{ q.max_stake }}" autocomplete="off" required data-max="{{ q.max_stake }}" aria-describedby="cap-why">
       <button type="submit">bet</button>
     </form>
-    {# The two things to know before staking: the cap on a win, and the cut. #}
-    <p class="hint cap-why" id="cap-why">wins are capped at <b class="win">+{{ crate::templates::points_label(q.max_profit) }}</b> ({{ q.players }} players a day &times; {{ crate::odds::PROFIT_PER_PLAYER }}) and the house keeps {{ tax }}, so the most worth staking here is <b>{{ q.max_stake }}</b>.</p>
+    {# The two things to know before staking: the cap on a win, and the cut;
+       and, until today's guess is in, the 10 it needs. #}
+    <p class="hint cap-why" id="cap-why">wins are capped at <b class="win">+{{ crate::templates::points_label(q.max_profit) }}</b> ({{ q.players }} players a day &times; {{ crate::odds::PROFIT_PER_PLAYER }}) and the house keeps {{ tax }}, so the most {% if q.keeping %}you can stake here is <b>{{ q.max_stake }}</b>, keeping {{ crate::economy::GUESS_STAKE }} for today&rsquo;s guess.{% else %}worth staking here is <b>{{ q.max_stake }}</b>.{% endif %}</p>
     {% endif %}
   {% endmatch %}
 </div>

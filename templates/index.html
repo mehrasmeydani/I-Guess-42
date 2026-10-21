@@ -124,10 +124,7 @@
 
 <p class="premise">lowest unique number wins</p>
 
-{% match bet_teaser %}
-  {% when Some with (t) %}<p class="teaser"><span class="dim">bets on the winner</span> {{ t }} &middot; <a href="/g/bets">all bets &rarr;</a></p>
-  {% when None %}
-{% endmatch %}
+{% if bets_link %}<p class="teaser"><a href="/g/bets">wanna bet? &rarr;</a></p>{% endif %}
 
 <section class="sec" style="--b: 2">
   <h2 class="section-title">rules</h2>
