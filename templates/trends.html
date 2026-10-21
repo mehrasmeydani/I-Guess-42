@@ -16,6 +16,11 @@
       <a class="{% if range == "custom" %}on{% endif %}" {% if range == "custom" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=custom">custom</a>
     </span>
   </h2>
+  {# One line, the way a terminal reports a job: what was read, a bar that
+     fills, and how long it took. #}
+  {% if rounds > 0 %}
+  <p class="analyse">analysing {{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}, {{ picks }} picks <span class="analyse-bar" aria-hidden="true">[####################]</span> <span class="analyse-done">done in {{ took }}</span></p>
+  {% endif %}
   {% if range == "custom" %}
   {# Two spans side by side: everything below compares span 1 with span 2. #}
   <form class="spans" method="get" action="{{ pool.base() }}/trends">

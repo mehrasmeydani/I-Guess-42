@@ -23,13 +23,11 @@
   function pad(n) { return n < 10 ? '0' + n : String(n); }
   function remaining() { return Math.max(0, closesAt - (Date.now() + offset)); }
 
-  // Same shapes as round::format_duration and round::spoken_duration.
+  // Same shapes as round::clock and round::spoken_duration.
   function short(ms) {
     var t = Math.floor(ms / 1000);
     var h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
-    if (h > 0) return h + 'h ' + pad(m) + 'm';
-    if (m > 0) return m + 'm ' + pad(s) + 's';
-    return s + 's';
+    return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
   }
   function spoken(ms) {
     var t = Math.floor(ms / 1000);

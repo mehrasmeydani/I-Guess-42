@@ -204,7 +204,7 @@ async fn index_in(
             Pool::Vienna => None,
         },
         round_key,
-        time_left: crate::round::format_duration(seconds_left),
+        time_left: crate::round::clock(seconds_left),
         time_left_spoken: crate::round::spoken_duration(seconds_left),
         closes_at: round.deadline.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         // The game's clock (an admin may have moved it), to the millisecond:
@@ -722,6 +722,10 @@ async fn trends_in(
     let round = Round::current(state.now());
     let open_round = round.key();
     let iso = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
+    // Timed from the query to the finished view model, and shown on the
+    // page: an honest number for how heavy the analysis is.
+    let started = std::time::Instant::now();
+    let took = |page: &mut TrendsTemplate| page.took = format!("{:.1} ms", started.elapsed().as_secs_f64() * 1000.0);
 
     // Two spans of the visitor's choosing, set side by side.
     if query.days.as_deref() == Some("custom") {
@@ -762,6 +766,7 @@ async fn trends_in(
                 .map(|v| v.clone().unwrap_or_default());
         }
         page.span_error = error;
+        took(&mut page);
         page.older_label = "span 1";
         page.newer_label = "span 2";
         page.first_close = round.deadline_human();
@@ -791,6 +796,7 @@ async fn trends_in(
         range,
         &trend,
     );
+    took(&mut page);
     page.first_close = round.deadline_human();
     if let Some(((a1, a2), (b1, b2))) = defaults {
         page.span_inputs = [a1, a2, b1, b2].map(|d| templates::eu(&iso(d)));

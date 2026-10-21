@@ -206,22 +206,23 @@ a.tag { color: var(--fg); text-decoration: underline; }
 
 /* ---------------------------------------------------------------- round */
 
-/* The premise, then the status block: state, close time, the countdown and
-   a progress bar, grouped as one thing. */
-.premise { margin: 0 0 24px; color: var(--hi); font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); font-weight: 700; line-height: 1.25; max-width: 32ch; text-wrap: balance; }
+/* The status block: state, close time, the countdown and a progress bar,
+   grouped as one thing. The premise sits under the number box. */
+.premise { margin: 40px 0 0; color: var(--hi); font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); font-weight: 700; line-height: 1.25; max-width: 32ch; text-wrap: balance; }
 /* A shade lighter than the page, so the round's clock is where the eye goes. */
 .roundstatus { padding: 24px; background: #171717; border: 1px solid #2c2c2c; }
 .state-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0; color: var(--dim); }
 .pill { padding: 2px 8px; border: 1px solid var(--edge-strong); color: var(--fg); }
 .closes-in { margin: 24px 0 0; color: var(--dim); font-size: var(--fs-1); letter-spacing: 0.08em; text-transform: uppercase; }
-/* Sized by the viewport so "18h 32m" fits a 320px screen without spilling. */
+/* The original's clock, ticking with seconds: big, sized by the viewport so
+   "23:59:59" still fits a 320px screen. */
 .countdown {
   margin: 4px 0 0;
   color: var(--hi);
-  font-size: clamp(var(--fs-4), 10vw, var(--fs-5));
+  font-size: clamp(3rem, 11vw, 6rem);
   font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.03em;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -722,6 +723,19 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 /* Hard steps only. Sections switch on one after another like lines printed
    to a terminal; bars fill cell by cell. */
 
+.analyse { margin: 0; color: var(--dim); white-space: nowrap; }
+/* A phone has no room for it on one line: smaller, and it may wrap between
+   its parts, never inside the bar. */
+@media (max-width: 640px) { .analyse { white-space: normal; font-size: var(--fs-1); } }
+.analyse-bar {
+  display: inline-block;
+  vertical-align: bottom;
+  overflow: hidden;
+  white-space: pre;
+  color: var(--state);
+  animation: fill 520ms steps(20) 120ms both;
+}
+.analyse-done { color: var(--hi); font-weight: 700; white-space: nowrap; animation: show 1ms 680ms both; }
 @keyframes show { from { visibility: hidden; } }
 /* The round bar wipes in. Clipped, not widened: the bar is text and app.js
    sizes it to the screen, so its final width is not a number CSS can know. */
@@ -978,7 +992,7 @@ details.expand[open] summary .when-open { display: inline; }
   .daynav-here { grid-column: 1 / -1; grid-row: 1; }
   /* The status block shrinks so the number box is in view without
      scrolling on a 375x812 phone (R4.2). */
-  .premise { margin-bottom: 16px; font-size: var(--fs-3); }
+  .premise { margin-top: 32px; font-size: var(--fs-3); }
   .roundstatus { padding: 16px; }
   .closes-in { margin-top: 8px; }
   .progress { margin-top: 8px; }

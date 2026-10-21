@@ -209,8 +209,7 @@ async fn usernames_are_public_on_every_results_view() {
 }
 
 #[tokio::test]
-async fn trends_open_with_the_ranges_and_show_no_timing() {
-    // A test instance: the only place the timing appears at all.
+async fn trends_open_with_the_ranges_and_one_analysing_line() {
     let (_t, state) = app(&["megardes"]).await;
     a_played_day(&state).await;
     let page = |days: &str| {
@@ -226,8 +225,11 @@ async fn trends_open_with_the_ranges_and_show_no_timing() {
     assert!(!html.contains("median winner") && !html.contains("demo data"), "{html}");
     assert!(html.contains(r#"href="/g/trends?days=custom">custom</a>"#));
     assert!(html.contains(r#"aria-current="true" href="/g/trends?days=7">7d</a>"#));
-    assert!(!html.contains("analysing"), "no staged progress");
-    assert!(!html.contains("test details") && !html.contains(" ms"), "no timing, even on a test instance");
+    // One line, terminal style: what was read, the bar, how long it took.
+    let line = html.split("<p class=\"analyse\">").nth(1).expect("the analysing line").split("</p>").next().unwrap();
+    assert!(line.starts_with("analysing 2 rounds, 6 picks "), "{line}");
+    assert!(line.contains("[####################]") && line.contains("done in ") && line.contains(" ms"), "{line}");
+    assert!(!html.contains("test details"));
     assert!(page("all").await.contains("what changed"));
 
     // A live site does not show it at all.
@@ -236,7 +238,6 @@ async fn trends_open_with_the_ranges_and_show_no_timing() {
     let (_t2, live, _) = app_with(cfg).await;
     let html = body(handlers::global_trends(State(live), CookieJar::new(), Query(TrendsQuery { days: None, ..Default::default() })).await.unwrap()).await;
     assert!(!html.contains("test details"));
-    assert!(!html.contains(" ms."));
 }
 
 #[tokio::test]

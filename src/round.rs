@@ -99,6 +99,13 @@ pub fn format_duration(seconds: i64) -> String {
     }
 }
 
+/// The round page's clock, ticking: "21:25:07", or "4:07" in the last hour.
+pub fn clock(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+}
+
 /// The same, spelled out for a screen reader: "18 hours 32 minutes".
 pub fn spoken_duration(seconds: i64) -> String {
     let seconds = seconds.max(0);
@@ -160,6 +167,10 @@ mod tests {
 
     #[test]
     fn formats_the_remaining_time() {
+        assert_eq!(clock(77_227), "21:27:07");
+        assert_eq!(clock(3_600), "1:00:00");
+        assert_eq!(clock(247), "4:07");
+        assert_eq!(clock(-3), "0:00");
         assert_eq!(format_duration(0), "0s");
         assert_eq!(format_duration(-5), "0s");
         assert_eq!(format_duration(59), "59s");

@@ -734,6 +734,10 @@ pub struct TrendsTemplate {
     /// "7", "30" or "all", as in the query string.
     pub range: &'static str,
     pub rounds: usize,
+    /// Every pick in the range, added up.
+    pub picks: i64,
+    /// How long reading and analysing the range took, "0.4 ms".
+    pub took: String,
     pub chart: Chart,
     /// Every value picked in the range with its summed count, lowest first.
     pub totals: Vec<TallyView>,
@@ -827,6 +831,8 @@ impl TrendsTemplate {
             impersonating,
             range,
             rounds: trend.days.len(),
+            picks: trend.totals.iter().map(|t| t.count).sum(),
+            took: String::new(),
             chart: stats::range_chart(trend),
             totals: trend.totals.iter().map(Into::into).collect(),
             days: trend

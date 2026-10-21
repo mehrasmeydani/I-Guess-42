@@ -36,12 +36,9 @@
   {% when None %}
 {% endmatch %}
 
-{# The order is the order a newcomer needs it in (R6.1): the tagline, how
-   long is left, the box, the rules, yesterday. Nothing explains strategy:
+{# The order: how long is left, the box, the tagline, the rules, yesterday. Nothing explains strategy:
    working out that low numbers get crowded is the game (R22.3). #}
 <section class="sec hero" style="--b: 0" aria-labelledby="round-h">
-  <p class="premise">lowest unique number wins</p>
-
   <div class="roundstatus" role="group" aria-labelledby="round-h">
     <p class="state-line">
       <span class="pill" id="round-h">round {{ crate::templates::eu(round_key) }} &middot; <span class="state">[open]</span></span>
@@ -117,6 +114,8 @@
       {% endif %}
   {% endmatch %}
 </section>
+
+<p class="premise">lowest unique number wins</p>
 
 {% match bet_teaser %}
   {% when Some with (t) %}<p class="teaser"><span class="dim">bets on the winner</span> {{ t }} &middot; <a href="/g/bets">all bets &rarr;</a></p>
