@@ -1446,10 +1446,12 @@ An **account** is a person. It has a username and, for a 42 student,
 signing in: `(provider, subject)`, where subject is the intra id, the GitHub
 id, Google's `sub`, or the email. Sessions belong to accounts.
 
-Identities are never joined up because they share an email. If a Google
-sign-in brings an address an account already uses, it is refused with "sign
-in the way you did before, then add Google". Matching by email would hand an
-account to whoever controls that address at another provider.
+One email, one account. A GitHub or Google sign-in brings a verified
+address; if an account has proven it (`db::email_owner`: a confirmed
+password, or another provider), the login is added to that account and the
+visitor signed in. An unconfirmed password on the address is dropped first
+(`db::drop_unproven_login`): otherwise anyone could sign up with someone
+else's address and wait for them to arrive by Google.
 
 ### `oauth.rs` — 42, GitHub, Google
 

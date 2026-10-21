@@ -462,8 +462,10 @@ numbers secret until 12:42.
   confirmed with a button so a mail scanner opening them cannot spend them.
   Signing up with a registered address looks the same as a new one; the
   owner gets a mail instead.
-- Logins are never joined up because they share an email. A login can only
-  be linked to an account by finishing the flow in that account's session.
+- One email, one account: a GitHub or Google sign-in with an address an
+  account has proven (a confirmed password, or another provider) lands in
+  that account. An unconfirmed password on the address is dropped first, so
+  nobody can sign up with someone else's email and wait for them.
 - Admin and moderator rights go by **42 login**, never by username, which
   anyone can choose.
 - The client secret is only ever sent to `api.intra.42.fr` in a POST body, and

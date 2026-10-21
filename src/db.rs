@@ -327,9 +327,11 @@ pub async fn create_password_account(
     let mut tx = write_tx(db).await?;
     let now = ts(Utc::now());
 
+    // Any account with this address, however it signs in: one person, one
+    // account. The owner is told by mail rather than the visitor.
     let (email_taken,): (i64,) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM passwords WHERE email = ?1)
-              + (SELECT COUNT(*) FROM identities WHERE provider = 'email' AND subject = ?1)",
+              + (SELECT COUNT(*) FROM identities WHERE email = ?1 COLLATE NOCASE)",
     )
     .bind(email)
     .fetch_one(&mut *tx)
@@ -670,7 +672,8 @@ pub async fn add_password_login(db: &Db, account_id: i64, email: &str, hash: &st
     let mut tx = write_tx(db).await?;
     let (taken,): (i64,) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM passwords WHERE email = ?1 OR account_id = ?2)
-              + (SELECT COUNT(*) FROM identities WHERE provider = 'email' AND subject = ?1)",
+              + (SELECT COUNT(*) FROM identities WHERE provider = 'email' AND subject = ?1)
+              + (SELECT COUNT(*) FROM identities WHERE email = ?1 COLLATE NOCASE AND account_id != ?2)",
     )
     .bind(email)
     .bind(account_id)
@@ -1067,17 +1070,72 @@ pub async fn identity_account(db: &Db, provider: &str, subject: &str) -> Result<
     Ok(row)
 }
 
-/// Whether some account already signs in with `email`, by password or
-/// through a provider that reported it.
-pub async fn email_in_use(db: &Db, email: &str) -> Result<bool> {
-    let (n,): (i64,) = sqlx::query_as(
-        "SELECT (SELECT COUNT(*) FROM passwords WHERE email = ?1)
-              + (SELECT COUNT(*) FROM identities WHERE email = ?1 COLLATE NOCASE)",
+/// The account an email address belongs to, and whether that address was
+/// ever proven: a confirmed password, or a provider that vouched for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmailOwner {
+    pub account_id: i64,
+    pub proven: bool,
+    /// Not banned or deleted.
+    pub active: bool,
+}
+
+/// Who signs in with `email`, by password or through a provider. A proven
+/// owner first, should two accounts share an address from before accounts
+/// were joined up by email.
+pub async fn email_owner(db: &Db, email: &str) -> Result<Option<EmailOwner>> {
+    let row: Option<(i64, bool, bool)> = sqlx::query_as(
+        "SELECT i.account_id,
+                i.provider != 'email' OR p.verified_at IS NOT NULL AS proven,
+                a.banned_at IS NULL AND a.deleted_at IS NULL AS active
+         FROM identities i
+         JOIN accounts a ON a.id = i.account_id
+         LEFT JOIN passwords p ON p.account_id = i.account_id
+         WHERE i.email = ?1 COLLATE NOCASE
+         ORDER BY proven DESC, i.created_at
+         LIMIT 1",
     )
     .bind(email)
-    .fetch_one(db)
+    .fetch_optional(db)
     .await?;
-    Ok(n > 0)
+    Ok(row.map(|(account_id, proven, active)| EmailOwner { account_id, proven, active }))
+}
+
+/// Takes away a password login whose address was never confirmed, because
+/// someone who does own the address just proved it through a provider: a
+/// stranger may have signed up with it to sit in wait (pre-hijacking). The
+/// account goes with it if that was all it had, and it never played - an
+/// unconfirmed account cannot. Otherwise only the login goes.
+pub async fn drop_unproven_login(db: &Db, account_id: i64) -> Result<()> {
+    let mut tx = write_tx(db).await?;
+    let (others, played): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM identities WHERE account_id = ?1 AND provider != 'email'),
+                (SELECT COUNT(*) FROM ledger WHERE account_id = ?1)
+              + (SELECT COUNT(*) FROM global_guesses WHERE user_id = ?1)
+              + (SELECT COUNT(*) FROM bets WHERE account_id = ?1)",
+    )
+    .bind(account_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM passwords WHERE account_id = ?1 AND verified_at IS NULL")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM identities WHERE account_id = ?1 AND provider = 'email'")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    if others == 0 && played == 0 {
+        for sql in [
+            "DELETE FROM account_sessions WHERE account_id = ?1",
+            "DELETE FROM email_tokens WHERE account_id = ?1",
+            "DELETE FROM accounts WHERE id = ?1 AND verified_at IS NULL",
+        ] {
+            sqlx::query(sql).bind(account_id).execute(&mut *tx).await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// What came of adding a login to an account.

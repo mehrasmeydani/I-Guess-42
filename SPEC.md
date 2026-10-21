@@ -402,11 +402,16 @@ SHA-256 hash is stored.
   campus check passes. This is how someone who signed up with Google first
   gets the 42 pool later.
 - **Add a password**: email + password, then verification as in 6.6.
-- **No automatic linking by email.** If a Google sign-in brings an email that
-  belongs to an existing password account, it does *not* merge them. It says
-  "an account with this email exists — sign in to it and link Google from your
-  account page." Matching emails across providers is a known account-takeover
-  route.
+- **One email, one account.** A GitHub or Google sign-in whose verified
+  email an account already uses signs in to that account and adds the login
+  to it, however the account was made. Only for a *proven* address: a
+  confirmed password, or another provider that verified it. An unconfirmed
+  password login on that address could be a stranger lying in wait
+  (pre-hijacking), so it is dropped, with its account if that had nothing
+  else, and the provider's account is made fresh. An email sign-up with an
+  address any account uses makes no second account: the owner gets the
+  "already registered" mail. A password is never attached to an existing
+  account by sign-up; the owner adds one on the account page.
 - **Unlink** is allowed while at least one other login remains. **42 cannot be
   unlinked** while `intra_id` is set, because the 42 pool depends on it.
 

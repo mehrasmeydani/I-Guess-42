@@ -172,8 +172,10 @@ pub fn exists(to: &str, base: &str) -> Mail {
         text: format!(
             "Hi,\n\n\
              someone tried to sign up for i guess low with this address, which already \
-             has an account. Sign in at {base}/login, or if you forgot your password, \
-             reset it at {base}/forgot.\n\n\
+             has an account. Sign in at {base}/login the way you did before: with your \
+             password, or with GitHub, Google or 42. Forgot your password? Reset it at \
+             {base}/forgot. Want a password on an account you made with GitHub or \
+             Google? Sign in that way and add one on your account page.\n\n\
              If it wasn't you, ignore this mail.\n"
         ),
         purpose: "exists",

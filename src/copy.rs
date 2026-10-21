@@ -101,10 +101,6 @@ pub fn provider_refused(provider: &str, detail: &str) -> String {
     format!("{provider} refused the sign-in · {detail}")
 }
 
-pub fn email_in_use(email: &str, provider: &str) -> String {
-    format!("{email} already has an account · sign in the usual way, then add {provider} on your account page")
-}
-
 pub fn github_too_new(days: i64) -> String {
     format!("github accounts under {days} days can't sign up · use google or email")
 }

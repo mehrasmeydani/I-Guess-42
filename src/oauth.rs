@@ -289,16 +289,26 @@ async fn finish_sign_in(
         }
         None => {}
     }
+    // The same verified address as an account that exists: that account,
+    // with this login added, however it was made first. Only if its address
+    // was proven, though; an unconfirmed password login on it could be a
+    // stranger's, so it goes, and the provider's account is made fresh.
+    if let Some(email) = &person.email {
+        match db::email_owner(&state.db, email).await? {
+            Some(owner) if owner.proven => {
+                if !owner.active {
+                    return Ok(error_page(StatusCode::FORBIDDEN, crate::copy::CANT_SIGN_IN));
+                }
+                db::link_identity(&state.db, provider.key(), &person.subject, owner.account_id, Some(email)).await?;
+                tracing::info!(account = owner.account_id, provider = provider.key(), "joined up by email");
+                return signed_in_to(state, jar, owner.account_id, "/g").await;
+            }
+            Some(owner) => db::drop_unproven_login(&state.db, owner.account_id).await?,
+            None => {}
+        }
+    }
     if let Some(refusal) = may_create {
         return Ok(refusal);
-    }
-    if let Some(email) = &person.email {
-        if db::email_in_use(&state.db, email).await? {
-            return Ok(error_page(
-                StatusCode::CONFLICT,
-                &crate::copy::email_in_use(email, &provider.name().to_lowercase()),
-            ));
-        }
     }
     let account = db::create_provider_account(
         &state.db,
@@ -785,17 +795,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_email_that_already_has_an_account_is_not_joined_up() {
+    async fn the_same_email_is_the_same_account_however_you_sign_in() {
         let (t, state, fake) = setup().await;
+        // Email and password first, confirmed.
         let hash = crate::credentials::hash_password("correct horse battery").await.unwrap();
-        db::create_password_account(&t.db, "ann@example.com", "ann", &hash, None).await.unwrap();
-        fake.people.lock().unwrap().insert("g".into(), google_user("g-1", "Ann@example.com", true));
+        let ann = match db::create_password_account(&t.db, "ann@example.com", "ann", &hash, None).await.unwrap() {
+            db::NewAccount::Created(a) => a.id,
+            other => panic!("{other:?}"),
+        };
+        db::mark_email_verified(&t.db, ann).await.unwrap();
 
+        // Then Google with that address, any case: into ann's account, signed in.
+        fake.people.lock().unwrap().insert("g".into(), google_user("g-1", "Ann@example.com", true));
         let resp = round_trip(&state, "google", "g", None).await;
-        assert_eq!(resp.status(), StatusCode::CONFLICT);
-        assert!(body(resp).await.contains("add google on your account page"));
+        assert_eq!(location(&resp), "/g", "straight in: the account and its name exist");
+        assert_eq!(viewer_of(&state, &resp).await.account.id, ann);
+        // Then GitHub with it too: still ann's.
+        fake.people.lock().unwrap().insert("c".into(), github_user(7, "ann-gh", 400, Some("ann@example.com")));
+        let resp = round_trip(&state, "github", "c", None).await;
+        assert_eq!(viewer_of(&state, &resp).await.account.id, ann);
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 1);
-        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM identities WHERE provider = 'google'").await, 0);
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM identities").await, 3, "email, google, github");
+        // And the password still works.
+        assert_eq!(db::password_login(&t.db, "ann@example.com").await.unwrap().map(|r| r.0), Some(ann));
+
+        // The other way round: made with GitHub, then a sign-up by email with
+        // the same address makes no second account (the owner gets a mail).
+        fake.people.lock().unwrap().insert("d".into(), github_user(8, "dan", 400, Some("dan@example.com")));
+        round_trip(&state, "github", "d", None).await;
+        let again = db::create_password_account(&t.db, "DAN@example.com", "dan2", &hash, None).await.unwrap();
+        assert!(matches!(again, db::NewAccount::EmailTaken), "{again:?}");
+        // Google with dan's address finds the GitHub-made account.
+        fake.people.lock().unwrap().insert("e".into(), google_user("g-8", "dan@example.com", true));
+        let dan = viewer_of(&state, &round_trip(&state, "google", "e", None).await).await;
+        assert_eq!(dan.account.username, "dan");
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 2);
+        // A password for dan's own GitHub address on his own account: fine.
+        // Ann's address on dan's account: no - it is ann's.
+        assert!(db::add_password_login(&t.db, dan.account.id, "dan@example.com", &hash).await.unwrap());
+        assert!(!db::add_password_login(&t.db, ann, "dan@example.com", &hash).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn an_unconfirmed_sign_up_cannot_lie_in_wait_for_the_owner() {
+        let (t, state, fake) = setup().await;
+        // A stranger signs up with ann's address and a password they know,
+        // and never confirms it.
+        let hash = crate::credentials::hash_password("stranger's password").await.unwrap();
+        db::create_password_account(&t.db, "ann@example.com", "lurker", &hash, None).await.unwrap();
+
+        // Ann signs in with Google, which vouches for the address.
+        fake.people.lock().unwrap().insert("g".into(), google_user("g-1", "ann@example.com", true));
+        let resp = round_trip(&state, "google", "g", None).await;
+        assert_eq!(location(&resp), "/welcome", "a fresh account of her own");
+        let ann = viewer_of(&state, &resp).await;
+        assert_ne!(ann.account.username, "lurker");
+        // The stranger's password is gone, and their empty account with it.
+        assert_eq!(db::password_login(&t.db, "ann@example.com").await.unwrap(), None);
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 1);
     }
 
     #[tokio::test]
