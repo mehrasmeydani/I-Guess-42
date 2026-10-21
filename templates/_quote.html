@@ -24,9 +24,12 @@
       <input type="hidden" name="market" value="{{ q.key }}">
       <input type="hidden" name="odds" value="{{ q.odds_x100 }}">
       <input type="hidden" name="round" value="{{ round_key }}">
-      <input name="stake" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="10" aria-label="stake on {{ q.label }} at {{ o }}" autocomplete="off" required>
+      <input name="stake" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="10" aria-label="stake on {{ q.label }} at {{ o }}, at most {{ q.max_stake }}" autocomplete="off" required data-max="{{ q.max_stake }}" aria-describedby="cap-why">
       <button type="submit">bet</button>
     </form>
+    {# Why there is a ceiling: the game's size, not one lucky long shot,
+       decides what a day can be worth. #}
+    <p class="hint cap-why" id="cap-why">stake up to <b>{{ q.max_stake }}</b> &middot; a win is capped at <b class="win">+{{ crate::templates::points_label(q.max_profit) }}</b>, {{ q.players }} players a day &times; {{ crate::odds::PROFIT_PER_PLAYER }}, so one lucky long shot can&rsquo;t outweigh what everyone earns playing &middot; past that a bigger stake only risks more</p>
     {% endif %}
   {% endmatch %}
 </div>

@@ -669,6 +669,9 @@ payout         = floor(stake × odds_x100 / 100)     # includes the stake back
   long the odds or big the stake. Otherwise one player with a lucky long shot
   out-earns everyone who plays for a month. The cap is locked with the bet
   (`bets.max_profit`, migration 0012); bets from before it pay in full.
+  No stake past the one that reaches the cap is taken (`odds::max_stake`):
+  it could only lose more. The stake box stops there as you type, the
+  quote says why, and the server refuses it (`bet_over_cap`).
 - **Locked at placement.** The form carries the odds shown. The bet is
   priced again inside the write transaction, against the book as it stands
   then: placed at those odds or better, else refused with "odds moved". Two

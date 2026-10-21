@@ -1159,6 +1159,9 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .markets .chance b { color: var(--fg); font-weight: 400; }
 .markets .odds, .quote-figures .odds, .quote-figures .pays { color: var(--state); font-weight: 700; }
 .quote-figures .pays small { color: var(--fg); font-size: var(--fs-1); font-weight: 400; margin-left: 6px; }
+.cap-why { margin-top: 8px; }
+.cap-why.hit { color: var(--hi); }
+.cap-why.hit b:first-child { background: var(--hi); color: var(--bg); padding: 0 4px; }
 .quote-chance { display: block; height: 6px; margin-top: 12px; background: #262626; }
 .quote-chance i { display: block; height: 100%; width: var(--w); background: var(--action); }
 .markets tr.on td { background: var(--panel); }

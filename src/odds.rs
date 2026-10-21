@@ -400,6 +400,15 @@ pub fn payout(stake: i64, odds_x100: i64, max_profit: Option<i64>) -> i64 {
     }
 }
 
+/// The biggest stake worth placing at `odds_x100` under a profit cap: past
+/// it, a win would be capped and only the loss would grow. At least 1.
+pub fn max_stake(odds_x100: i64, max_profit: i64) -> i64 {
+    if odds_x100 <= 100 {
+        return 1;
+    }
+    (i128::from(max_profit) * 100 / i128::from(odds_x100 - 100)).clamp(1, i128::from(i64::MAX)) as i64
+}
+
 /// "×2.35".
 pub fn odds_label(odds_x100: i64) -> String {
     format!("×{}.{:02}", odds_x100 / 100, odds_x100 % 100)
@@ -669,6 +678,14 @@ mod tests {
         // Capped: the profit, not the stake, is what the cap limits.
         assert_eq!(payout(500, 40_740, Some(3000)), 3500);
         assert_eq!(payout(50, 135, Some(3000)), 67, "under the cap: as before");
+        // The biggest stake that still wins more: right up to the cap.
+        assert_eq!(max_stake(40_740, 2500), 6, "×407.40: 6 wins 2438, 7 would pass 2500");
+        assert_eq!(max_stake(200, 2500), 2500, "×2: profit equals stake");
+        assert_eq!(max_stake(105, 2500), 50_000);
+        for (o, cap) in [(40_740, 2500), (135, 3000), (918, 700)] {
+            let s = max_stake(o, cap);
+            assert!(payout(s, o, None) - s <= cap && payout(s + 1, o, None) - (s + 1) > cap - 1, "{o} {cap} {s}");
+        }
         assert_eq!(odds_label(235), "×2.35");
         assert_eq!(odds_label(1305), "×13.05");
     }

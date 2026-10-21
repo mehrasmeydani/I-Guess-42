@@ -161,6 +161,8 @@ fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market]) 
         odds_x100: qt.odds_x100.unwrap_or(0),
         bp: qt.chance_bp,
         max_profit: base.max_profit(),
+        max_stake: qt.odds_x100.map_or(0, |o| odds::max_stake(o, base.max_profit())),
+        players: base.players,
         taken: taken.contains(&m),
     }
 }
@@ -310,6 +312,11 @@ pub async fn place(
         return Ok(back("bet_slow", Some(market)));
     }
     let base = todays_base(&state).await?;
+    // Past the cap a bigger stake only risks more: refused, at the odds the
+    // visitor saw (better odds only lower the limit, and the cap still holds).
+    if form.odds > 100 && stake > odds::max_stake(form.odds, base.max_profit()) {
+        return Ok(back("bet_over_cap", Some(market)));
+    }
     crate::economy::collect(&state.db, viewer.account.id, &open).await?;
     // Priced against the book as it stands when the bet goes in: at the
     // odds shown, or better if they lengthened since.
@@ -714,6 +721,11 @@ mod tests {
             let resp = place(State(state.clone()), jar("ann"), f).await.unwrap();
             assert_eq!(location(&resp), format!("/g/bets?msg={code}"));
         }
+        assert!(db::bets_of(&state.db, ann, "").await.unwrap().is_empty());
+        // Past the stake that reaches the cap: refused, since it could only lose more.
+        let most = odds::max_stake(o, todays_base(&state).await.unwrap().max_profit());
+        let resp = place(State(state.clone()), jar("ann"), form(&state, "none", &(most + 1).to_string(), o)).await.unwrap();
+        assert_eq!(location(&resp), "/g/bets?msg=bet_over_cap&m=none");
         assert!(db::bets_of(&state.db, ann, "").await.unwrap().is_empty());
         // Shown worse odds than the book now gives: placed at the better ones.
         let resp = place(State(state.clone()), jar("ann"), form(&state, "none", "10", o - 50)).await.unwrap();

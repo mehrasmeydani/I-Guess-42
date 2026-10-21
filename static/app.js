@@ -374,6 +374,17 @@
     var pays = box.querySelector('.pays');
     if (!pays) return;
     var stake = parseInt(e.target.value.replace(/[^0-9]/g, ''), 10);
+    // No more than the stake that reaches the cap: past it a win pays no
+    // more, so the box stops there and the reason under it lights up.
+    var most = parseInt(e.target.dataset.max, 10);
+    var why = box.querySelector('.cap-why');
+    if (most > 0 && stake > most) {
+      stake = most;
+      e.target.value = String(most);
+      if (why) why.classList.add('hit');
+    } else if (why) {
+      why.classList.remove('hit');
+    }
     var odds = parseInt(pays.dataset.odds, 10);
     var cap = parseInt(pays.dataset.cap, 10);
     if (!(stake > 0) || !(odds > 0)) { pays.textContent = '\u2013'; return; }

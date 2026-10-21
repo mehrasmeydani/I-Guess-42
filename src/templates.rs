@@ -575,8 +575,12 @@ pub struct QuoteView {
     pub odds_x100: i64,
     /// The chance in hundredths of a percent, for its bar.
     pub bp: i64,
-    /// The most a bet on it can win over its stake today.
+    /// The most a bet on it can win over its stake today, and the stake that
+    /// reaches it: the stake box takes no more.
     pub max_profit: i64,
+    pub max_stake: i64,
+    /// Players a day, the reason for the cap.
+    pub players: usize,
     /// Bet on already today.
     pub taken: bool,
 }
