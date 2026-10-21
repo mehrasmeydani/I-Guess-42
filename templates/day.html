@@ -22,7 +22,15 @@
 
 <section class="sec" style="--b: 0">
   {% if data_source == "seeded" %}<p class="scope"><span class="chip">demo data</span></p>{% endif %}
-  <p class="lead">{{ crate::templates::eu(round.date_key) }} &middot; {{ round.total }} played &middot; {% match round.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
+  {# The day in three figures, as the original day page had them. #}
+  <div class="figures">
+    {% match round.winner %}
+      {% when Some with (w) %}<p><b class="win">{{ w.value_label }}</b><span>won &larr; {{ w.login }}</span></p>
+      {% when None %}<p><b class="lose">&times;</b><span>no winner &middot; every number collided</span></p>
+    {% endmatch %}
+    <p><b>{{ lowest_unpicked_label }}</b><span>lowest number nobody picked</span></p>
+    <p><b>{{ round.total }}</b><span>players, {{ distinct }} different {% if distinct == 1 %}number{% else %}numbers{% endif %}</span></p>
+  </div>
   {% match my_pick %}{% when Some with (p) %}<p class="dim">your pick: <b class="mine-text">{{ p }}</b></p>{% when None %}{% endmatch %}
 </section>
 
@@ -37,6 +45,20 @@
   {% match pot_line %}{% when Some with (line) %}<p class="pot-line">{{ line }}</p>{% when None %}{% endmatch %}
   {% include "chart.html" %}
   <p class="chart-summary">{{ summary }}</p>
+  <div class="split duo">
+    <div>
+      <p class="sub">most picked</p>
+      <ol class="ranked">
+        {% for t in most %}<li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>{% endfor %}
+      </ol>
+    </div>
+    <div>
+      <p class="sub">least picked</p>
+      <ol class="ranked">
+        {% for t in least %}<li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>{% endfor %}
+      </ol>
+    </div>
+  </div>
   <details class="expand">
     <summary><span class="when-closed">view as table &middot; {{ distinct }} numbers</span><span class="when-open">hide table</span></summary>
     <table class="grid narrow">

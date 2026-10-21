@@ -198,7 +198,13 @@ async fn usernames_are_public_on_every_results_view() {
         let results = results_page(&state, token).await;
         assert!(results.contains("cat won with <b class=\"win\">3</b>"), "{token:?}");
         assert!(!results.contains("player #"));
-        assert!(day_page(&state, token, &day).await.contains("cat won with"));
+        let page = day_page(&state, token, &day).await;
+        assert!(page.contains("won &larr; cat"), "{page}");
+        // The day's figures and lists, as the original day page had them.
+        assert!(page.contains("<p><b>4</b><span>lowest number nobody picked</span></p>"));
+        assert!(page.contains("<p><b>5</b><span>players, 3 different numbers</span></p>"));
+        assert!(page.contains("<p class=\"sub\">most picked</p>") && page.contains("<p class=\"sub\">least picked</p>"));
+        assert!(page.contains("<li><b>3</b><span>1&times;</span></li>"), "3, picked once, is least");
     }
     let board = body(
         crate::points_pages::leaderboard(State(state.clone()), CookieJar::new(), Query(Default::default())).await.unwrap(),

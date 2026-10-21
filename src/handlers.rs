@@ -534,12 +534,23 @@ async fn day_in(
         impersonating: auth::admin_return_token(&jar).is_some(),
         round: RoundView::new(summary, named),
         distinct: stats.distinct,
+        lowest_unpicked_label: group_digits(stats.lowest_unpicked),
+        most: stats.most.iter().take(DAY_LIST).map(Into::into).collect(),
+        least: {
+            // Fewest picks first; ties to the lower number.
+            let mut by_fewest = tallies.clone();
+            by_fewest.sort_by_key(|t| (t.count, t.value));
+            by_fewest.iter().take(DAY_LIST).map(Into::into).collect()
+        },
         chart,
         earlier,
         newer,
         total_rounds,
     }))
 }
+
+/// How many numbers the day page lists as most and least picked.
+const DAY_LIST: usize = 5;
 
 /// `/me` and `/g/me`: the signed-in player's record and rounds (R14.2).
 pub async fn me(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {

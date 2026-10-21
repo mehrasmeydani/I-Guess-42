@@ -450,6 +450,11 @@ pub struct DayTemplate {
     pub round: RoundView,
     pub distinct: usize,
     pub chart: Chart,
+    /// The lowest number nobody picked, and the five most and least picked
+    /// numbers: the day's figures.
+    pub lowest_unpicked_label: String,
+    pub most: Vec<TallyView>,
+    pub least: Vec<TallyView>,
     /// The rounds before this one, newest first, so the calendar is reachable
     /// from the round itself instead of only from /results.
     pub earlier: Vec<RoundView>,
