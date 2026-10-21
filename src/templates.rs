@@ -126,6 +126,14 @@ impl From<Viewer> for UserView {
     }
 }
 
+/// The progress bar's cells as text (D10): filled blocks, then empty ones.
+/// 24 cells, so the bar and its percentage fit a 320px screen.
+pub fn progress_cells(pct: &i64) -> (String, String) {
+    const CELLS: i64 = 24;
+    let filled = (pct.clamp(&0, &100) * CELLS / 100) as usize;
+    ("█".repeat(filled), "░".repeat(CELLS as usize - filled))
+}
+
 /// "1 250 pts".
 pub fn points_label(points: &i64) -> String {
     format!("{} pts", group_digits(*points))
@@ -324,8 +332,6 @@ pub struct ResultsTemplate {
     /// The round that closed most recently, shown above everything else.
     /// `None` only until a first round has closed.
     pub latest: Option<RoundView>,
-    /// That round in one line, "5 won · 41 players · 1 and 2 were all taken".
-    pub takeaway: Option<String>,
     /// Where the numbers come from: test, seeded or historical.
     pub data_source: &'static str,
     /// When the open round closes, for the page before any round has.
@@ -391,7 +397,6 @@ pub struct DayTemplate {
     pub summary: String,
     /// Where the numbers come from: test, seeded, historical or live.
     pub data_source: &'static str,
-    pub names_visible: bool,
     /// The visitor's own pick that day, and how it went, if they played.
     pub my_pick: Option<String>,
     /// The text "share" copies, for a player who played that day. Never
@@ -402,16 +407,6 @@ pub struct DayTemplate {
     /// The global round's pot that day, in words: "the pot of 340 pts went
     /// to the winner", "nobody won: 340 pts rolled over".
     pub pot_line: Option<String>,
-}
-
-/// The takeaway after the big number that already says who won:
-/// "5 won · 41 players · 1 was taken" becomes "won · 41 players · 1 was
-/// taken", so the number is not said twice.
-pub fn after_number(takeaway: &str) -> String {
-    match takeaway.split_once(" won · ") {
-        Some((_, rest)) if !takeaway.starts_with("nobody") => format!("won · {rest}"),
-        _ => takeaway.to_string(),
-    }
 }
 
 /// A number in a day's table: how many picked it, and its fate.
@@ -476,6 +471,19 @@ pub struct MeTemplate {
     pub cannot_play: bool,
 }
 
+/// The username step after a first sign-in through a provider.
+#[derive(Template)]
+#[template(path = "welcome.html")]
+pub struct WelcomeTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub username: String,
+    pub then: String,
+    pub error: Option<&'static str>,
+}
+
 /// A line of points history.
 pub struct LedgerView {
     pub date: String,
@@ -513,7 +521,6 @@ pub struct BoardTemplate {
     pub impersonating: bool,
     /// Gains over the last week, rather than balances.
     pub week: bool,
-    pub names_visible: bool,
     pub rows: Vec<PointsBoardRow>,
 }
 
@@ -618,38 +625,28 @@ pub struct TrendsTemplate {
 }
 
 /// What a range of rounds answers, as the trends page opens with it.
-pub fn trends_answer(range: &str, trend: &Trend) -> String {
-    let (Some(first), Some(last)) = (trend.days.first(), trend.days.last()) else {
+pub fn trends_answer(_range: &str, trend: &Trend) -> String {
+    let rounds = trend.days.len();
+    if rounds == 0 {
         return String::new();
-    };
-    let span = match range {
-        "7" => "7d",
-        "30" => "30d",
-        _ => "all",
-    };
-    let winners: Vec<i64> = trend
+    }
+    let mut winners: Vec<i64> = trend
         .days
         .iter()
         .filter(|d| !d.winner_outlier)
         .filter_map(|d| d.winner)
         .collect();
+    winners.sort_unstable();
     let won = match winners.len() {
         0 => "no winners".to_string(),
-        n => {
-            let mut sorted = winners.clone();
-            sorted.sort_unstable();
-            format!("median win {}", group_digits(sorted[n / 2]))
-        }
+        n => format!("median winner {}", group_digits(winners[n / 2])),
     };
     let crowd = trend
         .most
         .first()
-        .map(|m| format!(" · most picked {}", group_digits(m.value)))
-        .unwrap_or_else(|| " · no picks".to_string());
-    fn short(date: &str) -> &str {
-        date.get(5..).unwrap_or(date)
-    }
-    format!("{span} · {}–{} · {won}{crowd}.", short(&first.date), short(&last.date))
+        .map(|m| format!(" · most crowded: {}", group_digits(m.value)))
+        .unwrap_or_default();
+    format!("{rounds} {} · {won}{crowd}", if rounds == 1 { "round" } else { "rounds" })
 }
 
 impl TrendsTemplate {
@@ -673,7 +670,7 @@ impl TrendsTemplate {
             if from == to {
                 short(from)
             } else {
-                format!("{} to {}", short(from), short(to))
+                format!("{}→{}", short(from), short(to))
             }
         };
         let (older_range, newer_range) = trend

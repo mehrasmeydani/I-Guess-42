@@ -28,7 +28,7 @@ async fn moderator(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, 
 }
 
 fn gone() -> Response {
-    error_page(StatusCode::NOT_FOUND, "No such page.")
+    error_page(StatusCode::NOT_FOUND, crate::copy::NO_PAGE)
 }
 
 #[derive(Deserialize, Default)]
@@ -59,10 +59,9 @@ pub async fn moderation(
         return Ok(gone());
     };
     let notice = match q.msg.as_deref() {
-        Some("banned") => Some(Notice::ok("Banned.")),
-        Some("unbanned") => Some(Notice::ok("Unbanned.")),
-        Some("adjusted") => Some(Notice::ok("Points adjusted.")),
-        Some("voided") => Some(Notice::ok("Round called off; every stake refunded.")),
+        Some(code @ ("banned" | "unbanned" | "adjusted" | "called_off")) => {
+            crate::copy::notice(code).map(|(_, text)| Notice::ok(text))
+        }
         _ => None,
     };
     page(&state, viewer, notice, StatusCode::OK).await
@@ -86,13 +85,13 @@ pub async fn ban(
     let refuse = |why: &'static str| page(&state, viewer.clone(), Some(Notice::error(why)), StatusCode::UNPROCESSABLE_ENTITY);
     let reason = form.reason.trim();
     if reason.is_empty() {
-        return refuse("Say why: the reason is kept with the ban.").await;
+        return refuse(crate::copy::NEED_REASON).await;
     }
     let Some(target) = db::mod_account(&state.db, &normalize_username(&form.username)).await? else {
-        return refuse("No account by that name.").await;
+        return refuse(crate::copy::NO_SUCH_ACCOUNT).await;
     };
     if target.id == viewer.account.id {
-        return refuse("You can't ban yourself.").await;
+        return refuse(crate::copy::NOT_YOURSELF).await;
     }
     let open_round = Round::current(state.now()).key();
     db::ban_account(&state.db, target.id, reason, &open_round).await?;
@@ -143,16 +142,16 @@ pub async fn adjust(
     let refuse = |why: &'static str| page(&state, viewer.clone(), Some(Notice::error(why)), StatusCode::UNPROCESSABLE_ENTITY);
     let note = form.note.trim();
     if note.is_empty() {
-        return refuse("Say why: the note is shown in the player's history.").await;
+        return refuse(crate::copy::NEED_NOTE).await;
     }
     let Ok(amount) = form.amount.trim().parse::<i64>() else {
-        return refuse("The amount is a whole number, negative to take points away.").await;
+        return refuse(crate::copy::AMOUNT_BAD).await;
     };
     if amount == 0 || amount.abs() > 1_000_000 {
-        return refuse("The amount is between -1 000 000 and 1 000 000, and not 0.").await;
+        return refuse(crate::copy::AMOUNT_RANGE).await;
     }
     let Some(target) = db::mod_account(&state.db, &normalize_username(&form.username)).await? else {
-        return refuse("No account by that name.").await;
+        return refuse(crate::copy::NO_SUCH_ACCOUNT).await;
     };
     let open = Round::current(state.now()).key();
     let reference = format!("adjust:{}", crate::auth::random_token());
@@ -179,16 +178,16 @@ pub async fn void(
     };
     let date = form.round.trim();
     if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err() {
-        let why = Notice::error("Give the round as a date: 2026-10-21.");
+        let why = Notice::error(crate::copy::ROUND_DATE);
         return page(&state, viewer, Some(why), StatusCode::UNPROCESSABLE_ENTITY).await;
     }
     if !db::void_round(&state.db, date).await? {
-        let why = Notice::error("That round is settled already; use an adjustment instead.");
+        let why = Notice::error(crate::copy::ROUND_SETTLED);
         return page(&state, viewer, Some(why), StatusCode::UNPROCESSABLE_ENTITY).await;
     }
     let by = viewer.intra.as_ref().map(|u| u.login.as_str()).unwrap_or("?");
     tracing::info!(moderator = by, round = date, "global round called off");
-    Ok(Redirect::to("/mod?msg=voided").into_response())
+    Ok(Redirect::to("/mod?msg=called_off").into_response())
 }
 
 // --------------------------------------------------------- legal pages
@@ -275,7 +274,7 @@ mod tests {
         let resp = ban(State(state.clone()), jar("mod"), ban_form("cheat", "")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY, "a reason is required");
         let resp = ban(State(state.clone()), jar("mod"), ban_form("nobody", "x")).await.unwrap();
-        assert!(body(resp).await.contains("No account by that name"));
+        assert!(body(resp).await.contains("no account by that name"));
         let resp = ban(State(state.clone()), jar("mod"), ban_form("megardes", "x")).await.unwrap();
         assert!(body(resp).await.contains("ban yourself"));
 
@@ -345,14 +344,14 @@ mod tests {
         cfg.imprint_email = Some("hi@example.com".into());
         let html = page_of(cfg.clone(), true).await;
         assert!(html.contains("i guess low is run by Jane Doe. contact: hi@example.com"));
-        assert!(html.contains(">Impressum</h1>"));
+        assert!(html.contains(">impressum</h1>"));
         assert_eq!(html.matches("<h1").count(), 1, "exactly one h1");
         assert!(!html.contains("not given"));
 
         // A test instance says so instead of showing anyone's details.
         cfg.environment = Some("test".into());
         let html = page_of(cfg, true).await;
-        assert!(html.contains("operator details aren&#x27;t shown on the test site") || html.contains("operator details aren't shown on the test site"));
+        assert!(html.contains("operator details not shown on test instance"));
         assert!(!html.contains("Jane Doe"));
         assert_eq!(html.matches("<h1").count(), 1);
     }

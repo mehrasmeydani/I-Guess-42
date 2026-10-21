@@ -8,7 +8,7 @@
 <section class="sec" style="--b: 0">
   <h2 class="section-title">my record</h2>
   {% if cannot_play %}
-    <p class="dim">confirm your email address to play; your rounds will show up here.</p>
+    <p class="dim">confirm your email to play</p>
   {% else %}
   <dl class="statgrid">
     <div><dt>streak</dt><dd>{{ stats.streak }} <span class="dim">{% if stats.streak == 1 %}day{% else %}days{% endif %}</span></dd></div>
@@ -16,7 +16,7 @@
     <div><dt>won</dt><dd>{{ stats.won }}</dd></div>
     <div><dt>best win</dt><dd>{% match best_label %}{% when Some with (b) %}<span class="win">{{ b }}</span>{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</dd></div>
   </dl>
-  <p class="dim">a streak counts days in a row with a guess; a day without one starts it again.</p>
+  <p class="dim">streak: days in a row with a guess · a missed day resets it</p>
   {% endif %}
 </section>
 

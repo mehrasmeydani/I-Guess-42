@@ -3,7 +3,7 @@
 {% match errors.summary %}
   {% when Some with (e) %}
     <div class="error-summary" role="alert" tabindex="-1">
-      <p><b>that didn't work.</b> {{ e }}</p>
+      <p><b>error</b> {{ e }}</p>
     </div>
   {% when None %}
 {% endmatch %}

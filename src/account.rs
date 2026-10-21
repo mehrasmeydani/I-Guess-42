@@ -30,16 +30,8 @@ pub struct AccountQuery {
 }
 
 fn notice_for(code: Option<&str>) -> Option<Notice> {
-    Some(match code? {
-        "linked" => Notice::ok("Added. You can sign in that way now."),
-        "already_linked" => Notice::ok("That one was already yours."),
-        "linked_elsewhere" => Notice::error("That login belongs to another account, so it can't be added here."),
-        "unlinked" => Notice::ok("Removed."),
-        "renamed" => Notice::ok("Renamed."),
-        "password_changed" => Notice::ok("Password changed. Every other session is signed out."),
-        "password_added" => Notice::ok("Added. Open the link we sent to confirm the address."),
-        _ => return None,
-    })
+    let (kind, text) = crate::copy::notice(code?)?;
+    Some(if kind == "ok" { Notice::ok(text) } else { Notice::error(text) })
 }
 
 /// When the next rename is allowed, if not yet.
@@ -166,10 +158,10 @@ pub async fn rename(
     }
     if let Some(next) = next_rename(db::username_changed_at(&state.db, viewer.account.id).await?.as_deref()) {
         let when = next.format("%-d %B %Y");
-        return refuse(&state, viewer, format!("You can change your username again on {when}.")).await;
+        return refuse(&state, viewer, crate::copy::rename_wait(&when.to_string())).await;
     }
-    if !db::rename_account(&state.db, viewer.account.id, &username).await? {
-        return refuse(&state, viewer, "That username is taken.").await;
+    if !db::rename_account(&state.db, viewer.account.id, &username, true).await? {
+        return refuse(&state, viewer, crate::copy::USERNAME_TAKEN).await;
     }
     Ok(Redirect::to("/account?msg=renamed").into_response())
 }
@@ -190,9 +182,9 @@ pub async fn unlink(
     };
     match db::unlink_identity(&state.db, viewer.account.id, &form.provider).await? {
         Unlinked::Removed | Unlinked::NotLinked => Ok(Redirect::to("/account?msg=unlinked").into_response()),
-        Unlinked::LastOne => refuse(&state, viewer, "That's your only way to sign in. Add another first.").await,
+        Unlinked::LastOne => refuse(&state, viewer, crate::copy::LAST_LOGIN).await,
         Unlinked::Plays42 => {
-            refuse(&state, viewer, "Your 42 Vienna round is played through your 42 login, so it stays.").await
+            refuse(&state, viewer, crate::copy::KEEP_42).await
         }
     }
 }
@@ -225,13 +217,13 @@ pub async fn password(
         Some((email, _)) => {
             let key = format!("login:email:{email}");
             if !state.limits.allows(&key, limits::LOGIN_PER_EMAIL) {
-                return refuse(&state, viewer, "Too many attempts. Try again later.").await;
+                return refuse(&state, viewer, crate::copy::TOO_MANY).await;
             }
             let stored = db::password_login(&state.db, &email).await?.map(|f| f.1);
             let current = form.current.unwrap_or_default();
             if !credentials::verify_password(&current, stored.as_deref()).await? {
                 state.limits.record(&key);
-                return refuse(&state, viewer, "That's not your current password.").await;
+                return refuse(&state, viewer, crate::copy::PASSWORD_WRONG).await;
             }
             if let Some(why) = password_problem(&form.password, &email, &username) {
                 return refuse(&state, viewer, why).await;
@@ -247,7 +239,7 @@ pub async fn password(
         // Adding one.
         None => {
             if !state.cfg.email_signup() {
-                return refuse(&state, viewer, "Email sign-in isn't available here yet.").await;
+                return refuse(&state, viewer, crate::copy::NO_EMAIL_SIGNIN).await;
             }
             let email = match normalize_email(form.email.as_deref().unwrap_or_default()) {
                 Ok(e) => e,
@@ -258,7 +250,7 @@ pub async fn password(
             }
             let hash = credentials::hash_password(&form.password).await?;
             if !db::add_password_login(&state.db, id, &email, &hash).await? {
-                return refuse(&state, viewer, "That email already signs in to an account.").await;
+                return refuse(&state, viewer, crate::copy::EMAIL_TAKEN).await;
             }
             if state.limits.take(&format!("mail:{email}"), limits::MAIL_PER_ADDRESS) {
                 send_verification(&state, id, &email).await?;
@@ -283,7 +275,7 @@ pub async fn delete(
         Err(away) => return Ok(away),
     };
     if normalize_username(&form.confirm) != viewer.account.username {
-        return refuse(&state, viewer, "Type your username exactly to delete the account.").await;
+        return refuse(&state, viewer, crate::copy::CONFIRM_USERNAME).await;
     }
     db::delete_account(&state.db, viewer.account.id).await?;
     tracing::info!(account = viewer.account.id, "account deleted by its owner");
@@ -371,7 +363,7 @@ mod tests {
 
         // Not again this month.
         let resp = rename_to(&state, "a", "annabel").await;
-        assert!(body(resp).await.contains("change your username again on"));
+        assert!(body(resp).await.contains("next rename"));
         let (_, html) = view(&state, "a").await;
         assert!(html.contains("disabled"));
 
@@ -450,7 +442,7 @@ mod tests {
         let id = id_of(&t.db, "a").await;
         with_password(&state, "a", "ann@example.com", "correct horse battery").await;
         let resp = unlink(State(state.clone()), jar("a"), Form(UnlinkForm { provider: "email".into() })).await.unwrap();
-        assert!(body(resp).await.contains("only way to sign in"));
+        assert!(body(resp).await.contains("your only way in"));
 
         db::link_identity(&t.db, "github", "99", id, None).await.unwrap();
         let resp = unlink(State(state.clone()), jar("a"), Form(UnlinkForm { provider: "email".into() })).await.unwrap();
@@ -489,4 +481,83 @@ mod tests {
         assert_ne!(fresh.id, id);
         assert_eq!(fresh.username, "megardes");
     }
+}
+
+// ------------------------------------------------------------ /welcome
+
+#[derive(Deserialize, Default)]
+pub struct WelcomeQuery {
+    /// Where to go once the name is picked; only ever a page of the global
+    /// round, so this cannot be turned into a redirect elsewhere.
+    pub then: Option<String>,
+}
+
+fn after_welcome(then: Option<&str>) -> String {
+    then.filter(|t| t.starts_with("/g?") || *t == "/g" || t.starts_with("/g/") && !t.starts_with("//"))
+        .unwrap_or("/g?msg=welcome")
+        .to_string()
+}
+
+/// The one step after a first sign-in through GitHub, Google or 42 from
+/// another campus: the username, prefilled from the provider, to keep or
+/// change. It is public on every result, so it is the player's choice.
+pub async fn welcome(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(q): Query<WelcomeQuery>,
+) -> Result<Response, AppError> {
+    let Some(viewer) = current_viewer(&state, &jar).await? else {
+        return Ok(Redirect::to("/login").into_response());
+    };
+    Ok(templates::render(&templates::WelcomeTemplate {
+        pool: Pool::Global,
+        test_mode: state.cfg.test_env(),
+        impersonating: false,
+        username: viewer.account.username.clone(),
+        then: after_welcome(q.then.as_deref()),
+        error: None,
+        user: Some(UserView::from(viewer)),
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct WelcomeForm {
+    pub username: String,
+    #[serde(default)]
+    pub then: String,
+}
+
+pub async fn welcome_save(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<WelcomeForm>,
+) -> Result<Response, AppError> {
+    let Some(viewer) = current_viewer(&state, &jar).await? else {
+        return Ok(Redirect::to("/login").into_response());
+    };
+    let then = after_welcome(Some(&form.then));
+    let username = normalize_username(&form.username);
+    if username != viewer.account.username {
+        let problem = match username_problem(&username) {
+            Some(why) => Some(why),
+            None if !db::rename_account(&state.db, viewer.account.id, &username, false).await? => {
+                Some(crate::copy::USERNAME_TAKEN)
+            }
+            None => None,
+        };
+        if let Some(why) = problem {
+            let mut resp = templates::render(&templates::WelcomeTemplate {
+                pool: Pool::Global,
+                test_mode: state.cfg.test_env(),
+                impersonating: false,
+                username,
+                then,
+                error: Some(why),
+                user: Some(UserView::from(viewer)),
+            });
+            *resp.status_mut() = StatusCode::UNPROCESSABLE_ENTITY;
+            return Ok(resp);
+        }
+    }
+    Ok(Redirect::to(&then).into_response())
 }

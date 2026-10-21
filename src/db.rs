@@ -587,7 +587,9 @@ pub async fn username_changed_at(db: &Db, account_id: i64) -> Result<Option<Stri
 }
 
 /// Renames an account; false if the name was taken in the meantime.
-pub async fn rename_account(db: &Db, account_id: i64, username: &str) -> Result<bool> {
+/// `counts`: whether it starts the once-a-month wait. Picking a name right
+/// after signing up does not.
+pub async fn rename_account(db: &Db, account_id: i64, username: &str, counts: bool) -> Result<bool> {
     let mut tx = write_tx(db).await?;
     let (taken,): (i64,) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM accounts WHERE username = ?1 AND id != ?2)
@@ -601,10 +603,15 @@ pub async fn rename_account(db: &Db, account_id: i64, username: &str) -> Result<
     if taken > 0 {
         return Ok(false);
     }
-    sqlx::query("UPDATE accounts SET username = ?1, username_changed_at = ?2 WHERE id = ?3")
+    sqlx::query(
+        "UPDATE accounts SET username = ?1,
+                username_changed_at = CASE WHEN ?4 THEN ?2 ELSE username_changed_at END
+         WHERE id = ?3",
+    )
         .bind(username)
         .bind(ts(Utc::now()))
         .bind(account_id)
+        .bind(counts)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;

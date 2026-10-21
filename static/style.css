@@ -7,31 +7,32 @@
  *   measure (72ch) and spacing, not through a second font.
  * - Sizes come from one scale: 13 / 16 / 20 / 28 / 48 px (--fs-1 ... --fs-5).
  * - Spacing is a multiple of 8 px (half steps of 4 for the tightest gaps).
- * - Blue is the action colour: buttons, sign-in and keyboard focus, as on
- *   the live site. Green marks the brand, an open round and a win. Red means
- *   taken, down or wrong. Amber means "this is a test instance".
- * - One divider: 1 px #2a2a2a. A section header carries at most one rule. */
+ * - Colours are named for what they mean, never for their hue, so a meaning
+ *   cannot end up in the wrong place (spec R21 / D7):
+ *     --action  blue   anything clickable or focused: links, buttons, focus
+ *     --state   green  status and outcome: open, the "low" chip, progress, wins
+ *     --loss    red    taken numbers, losses, errors
+ *     --env     amber  the test-instance line, nothing else
+ *   Where you are (the active tab) is a white inversion: location, not action.
+ * - Three greys, far enough apart to read as three priorities: --hi for
+ *   emphasis, --fg for body text, --dim for short labels only (3.9:1, too
+ *   faint for paragraphs).
+ * - One divider: 1 px --edge, at most one per section header. */
 
 :root {
   --bg: #0c0c0c;
-  --fg: #cccccc;
-  --hi: #f2f2f2;
-  /* 6:1 on --bg. Anything darker fails WCAG AA for body-size text. */
-  --dim: #8f8f8f;
-  --line: #cccccc;
-  --red: #e74856;
-  --green: #16c60c;
-  --blue: #3b78ff;
-  --blue-hover: #5b8dff;
-  /* Greys for surfaces and their edges: a card sits on --panel, framed by
-     --edge; fields and buttons inside it by --edge-strong. */
+  --fg: #c4c4c4;
+  --hi: #ffffff;
+  --dim: #6e6e6e;
   --panel: #121212;
   --edge: #262626;
   --edge-strong: #3a3a3a;
-  /* The one divider colour (R16.6), and amber for "this is a test" (D10):
-     Campbell's yellow, 7:1 on the background. */
-  --rule-color: #2a2a2a;
+  --action: #3b78ff;
+  --action-hi: #5a8cff;
+  --state: #16c60c;
+  --loss: #e74856;
   --env: #c19c00;
+  --rule-color: var(--edge);
   /* The platform's own monospace first: SF Mono on Apple devices, Cascadia
      on Windows, then the rest. */
   --font: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, "Ubuntu Mono",
@@ -47,7 +48,7 @@
   --lh-prose: 1.6;
   --lh-tight: 1.2;
   /* Charts: numbers taken by more than one player, and numbers that never won. */
-  --taken: var(--red);
+  --taken: var(--loss);
   --quiet: #5a5a5a;
   --beat: 80ms;
 }
@@ -72,21 +73,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-::selection { background: var(--green); color: var(--bg); }
+::selection { background: var(--state); color: var(--bg); }
 
 p, ol, pre, table, h2 { margin: 0; }
 
-a { color: var(--hi); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 3px;
-}
-a:hover { background: var(--hi); color: var(--bg); text-decoration: none; }
+/* Clickable is blue, everywhere (R21.2); hover fills it (R16.6). */
+a { color: var(--action); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { background: var(--action-hi); color: var(--bg); text-decoration: none; }
 
 b, .b { color: var(--hi); font-weight: 700; }
 .dim { color: var(--dim); }
-.win { color: var(--green); }
-.lose, .bad { color: var(--red); }
+.win { color: var(--state); }
+.lose, .bad { color: var(--loss); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
 /* ---------------------------------------------------------------- frame */
@@ -105,15 +103,17 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 }
 
 .brand { white-space: nowrap; color: var(--hi); font-weight: 700; font-size: var(--fs-3); text-decoration: none; }
-.brand b { padding: 0 8px; margin-left: 2px; background: var(--green); color: var(--bg); }
+.brand b { padding: 0 8px; margin-left: 2px; background: var(--state); color: var(--bg); }
 .brand:hover { background: none; color: var(--hi); }
 
 .top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
-.top nav a { color: var(--fg); text-decoration: none; }
+.top nav a { color: var(--action); text-decoration: none; }
+/* Where you are: a white inversion, not blue - location is not an action. */
 .top nav a.on { background: var(--hi); color: var(--bg); padding: 0 8px; margin: 0 -8px; }
-.top nav a:hover { background: var(--hi); color: var(--bg); }
-/* The pool switch: one box, two halves, the open one filled in green. */
-.top nav.pools { gap: 0; border: 1px solid var(--dim); }
+.top nav a:hover { background: var(--action-hi); color: var(--bg); }
+.top nav a.on:hover { background: var(--hi); }
+/* The pool switch: one box, two halves, the one you are in inverted. */
+.top nav.pools { gap: 0; border: 1px solid var(--edge-strong); }
 .top nav.pools a { padding: 0 8px; }
 .top nav.pools a.on { margin: 0; background: var(--hi); color: var(--bg); }
 
@@ -127,12 +127,12 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .status .out {
   display: inline-block;
   padding: 2px 8px;
-  border: 1px solid var(--dim);
-  color: var(--fg);
+  border: 1px solid var(--edge-strong);
+  color: var(--action);
   font-weight: 400;
   text-decoration: none;
 }
-.status .out:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+.status .out:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
 /* Your login, next to the log out button: readable, not a control. */
 .status .who { color: var(--fg); }
 /* Signing in from the header is a plain link: the round page's own button
@@ -142,12 +142,12 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
   align-items: center;
   min-height: 32px;
   padding: 2px 8px;
-  border: 1px solid var(--blue);
-  color: var(--blue);
+  border: 1px solid var(--action);
+  color: var(--action);
   text-decoration: none;
   transition: background 120ms, color 120ms;
 }
-.status .signin:hover { background: var(--blue); color: var(--bg); }
+.status .signin:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
 
 main { flex: 1; padding-block: 8px 64px; }
 
@@ -185,7 +185,7 @@ footer .ver { margin-left: auto; }
 a.tag { color: var(--fg); text-decoration: underline; }
 .tag.live { color: var(--fg); font-weight: 700; }
 .tag.warn { color: var(--env); font-weight: 700; }
-.tag.bad { background: var(--red); color: var(--bg); padding: 0 8px; font-weight: 700; }
+.tag.bad { background: var(--loss); color: var(--bg); padding: 0 8px; font-weight: 700; }
 
 /* ---------------------------------------------------------------- round */
 
@@ -207,24 +207,21 @@ a.tag { color: var(--fg); text-decoration: underline; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.progress { height: 8px; margin-top: 20px; background: var(--edge); overflow: hidden; }
-.progress-fill { display: block; height: 100%; background: var(--fg); transition: width 600ms ease; }
+.progress { margin: 16px 0 0; font-size: var(--fs-1); line-height: 1; white-space: nowrap; letter-spacing: 0; }
+.progress-fill { color: var(--state); }
+.progress-empty { color: var(--edge-strong); }
+.progress-pct { color: var(--dim); }
 .facts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; margin: 16px 0 0; color: var(--dim); }
 .facts b { color: var(--hi); }
-.facts .pot b { color: var(--green); }
-.status .pts { color: var(--green); text-decoration: none; font-weight: 700; }
+.facts .pot b { color: var(--state); }
+.status .pts { color: var(--action); text-decoration: none; font-weight: 700; }
 .status .pts:hover { background: none; color: var(--hi); text-decoration: underline; }
 
 .section-title { margin: 0 0 16px; color: var(--hi); font-size: var(--fs-3); font-weight: 700; }
 .section-title label { cursor: pointer; }
 .play .hint { max-width: 60ch; margin-top: 12px; }
-.locked-line { margin: 0 0 16px; color: var(--fg); font-size: var(--fs-3); font-weight: 400; }
+.locked-line { margin: 0 0 8px; color: var(--fg); font-size: var(--fs-4); font-weight: 400; line-height: var(--lh-tight); }
 .locked-line b { color: var(--hi); }
-.locked-panel { margin: 0 0 32px; padding: 20px 24px; border: 1px solid var(--edge-strong); border-left: 4px solid var(--green); background: var(--panel); }
-.locked-panel p { margin: 0; }
-.locked-panel p + p { margin-top: 8px; }
-.locked-title { color: var(--green); font-weight: 700; font-size: var(--fs-3); }
-.locked-actions { margin-top: 16px !important; }
 .secondary .verdict b { font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); }
 
 /* Big figures in a row, each over its caption, split by thick rules. */
@@ -238,8 +235,8 @@ a.tag { color: var(--fg); text-decoration: underline; }
 .figures p { display: flex; flex-direction: column; padding: 16px 16px 16px 0; }
 .figures p + p { padding-left: 16px; border-left: var(--rule); }
 .figures b { font-size: var(--fs-4); line-height: 1.1; letter-spacing: -0.02em; word-break: break-all; }
-.figures b.win { color: var(--green); }
-.figures b.lose { color: var(--red); }
+.figures b.win { color: var(--state); }
+.figures b.lose { color: var(--loss); }
 .figures span { color: var(--dim); }
 
 /* ---------------------------------------------------------------- guess */
@@ -255,34 +252,36 @@ input[type="text"] {
   border-radius: 0;
   color: var(--hi);
   font: 700 var(--fs-4)/1 var(--font);
-  caret-color: var(--green);
+  caret-color: var(--action);
   transition: border-color 120ms;
 }
-input::placeholder { color: #6f6f6f; }
+input::placeholder { color: var(--dim); }
 input[type="text"]:hover { border-color: var(--dim); }
 /* Every field takes the one focus ring (R17.4). */
-input[type="text"]:focus-visible { border-color: var(--blue); }
+input[type="text"]:focus-visible { border-color: var(--action); }
 
+/* Buttons are outlined in blue; only .primary is a solid block, so each page
+   has one obvious thing to press (R4.1), recognisable by shape alone. */
 button,
 .btn {
   display: inline-block;
   padding: 12px 20px;
-  background: var(--hi);
-  border: 2px solid var(--hi);
+  background: transparent;
+  border: 1px solid var(--action);
   border-radius: 0;
-  color: var(--bg);
+  color: var(--action);
   font: 700 var(--fs-2)/1.5 var(--font);
   text-decoration: none;
   cursor: pointer;
   white-space: nowrap;
 }
 button:hover,
-.btn:hover { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.btn:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
 button:active,
 .btn:active { translate: 0 1px; }
 button:disabled,
 button[disabled] { opacity: 0.5; cursor: not-allowed; translate: none; }
-.btn.play { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+.btn.play { background: var(--action); border-color: var(--action); color: #fff; }
 
 /* The way to yesterday's numbers, under the guess box: present, but never
    louder than locking a number in. */
@@ -305,26 +304,26 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; translate: none; }
   border-radius: 0;
   color: var(--hi);
   font: 400 var(--fs-2)/1 var(--font);
-  caret-color: var(--green);
+  caret-color: var(--action);
   transition: border-color 120ms, box-shadow 120ms;
 }
 .authform input:hover { border-color: var(--dim); }
-.authform input:focus-visible { border-color: var(--blue); }
-.authform input[aria-invalid="true"] { border-color: var(--red); }
+.authform input:focus-visible { border-color: var(--action); }
+.authform input[aria-invalid="true"] { border-color: var(--loss); }
 .authform input:disabled { color: var(--dim); border-color: var(--edge); }
 .authform .hint { margin: 2px 0 0; font-size: var(--fs-1); }
 .authform button { margin-top: 16px; justify-self: start; }
 .label-row { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; }
 .label-row label { margin-top: 0; }
-.label-row a { color: var(--dim); font-size: var(--fs-1); }
+.label-row a { font-size: var(--fs-1); }
 
 /* The one thing to press on a form, in the colour that means "you're in". */
 button.primary,
-.btn.primary { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+.btn.primary { background: var(--action); border-color: var(--action); color: #fff; }
 button.primary:hover,
 button.primary:focus-visible,
 .btn.primary:hover,
-.btn.primary:focus-visible { background: var(--blue-hover); border-color: var(--blue-hover); color: var(--bg); }
+.btn.primary:focus-visible { background: var(--action-hi); border-color: var(--action-hi); color: #fff; }
 .btn.wide { display: block; text-align: center; }
 
 /* The sign-in pages: one card in the middle of the page, everything in it
@@ -334,7 +333,6 @@ button.primary:focus-visible,
   width: 100%;
   max-width: 420px;
   padding: 32px;
-  background: var(--panel);
   border: 1px solid var(--edge);
 }
 .auth-title { margin: 0; color: var(--hi); font-size: var(--fs-3); font-weight: 700; line-height: 1.2; }
@@ -354,15 +352,14 @@ button.primary:focus-visible,
   justify-content: center;
   gap: 12px;
   height: 46px;
-  background: var(--bg);
-  border: 1px solid var(--edge-strong);
-  color: var(--hi);
+  background: transparent;
+  border: 1px solid var(--action);
+  color: var(--action);
   font-weight: 700;
   text-decoration: none;
   transition: border-color 120ms, background 120ms;
 }
-.provider:hover,
-.provider:focus-visible { background: var(--edge); border-color: var(--hi); color: var(--hi); }
+.provider:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
 .provider-mark { width: 18px; height: 18px; flex: none; }
 .mark-42 {
   display: grid;
@@ -377,52 +374,36 @@ button.primary:focus-visible,
 .divider::before,
 .divider::after { content: ""; flex: 1; border-top: 1px solid var(--edge); }
 
+/* A ghost is the plain outlined button; kept as a name for clarity. */
 .btn.ghost,
-button.ghost { background: transparent; color: var(--fg); border-color: var(--dim); }
-.btn.ghost:hover,
-button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+button.ghost { background: transparent; color: var(--action); border-color: var(--action); }
 
 .linkish {
   padding: 0;
   background: none;
   border: 0;
-  color: var(--fg);
+  color: var(--action);
   font: inherit;
   font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  cursor: pointer;
 }
-.linkish:hover { background: var(--hi); color: var(--bg); }
+.linkish:hover { background: var(--action-hi); color: var(--bg); text-decoration: none; }
 
 .sec > .dim,
 .sec > .notice { margin-top: 12px; }
 .sec > .notice:first-child { margin: 0 0 24px; }
 
-.sealed {
-  position: relative;
-  display: inline-block;
-  padding: 16px 24px;
-  border: 1px solid var(--edge-strong);
-  background: var(--panel);
-}
-.sealed-value { color: var(--hi); font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); font-weight: 700; line-height: 1; word-break: break-all; }
-.stamp {
-  position: absolute;
-  top: -14px;
-  right: -12px;
-  padding: 2px 8px;
-  background: var(--red);
-  color: var(--bg);
-  font-weight: 700;
-  transform: rotate(4deg);
-}
-
 /* ------------------------------------------------------------- messages */
 
-.notice { padding: 12px 16px; border-left: 4px solid; background: var(--panel); }
+.notice { padding: 8px 16px; border-left: 4px solid; }
 .notice b { margin-right: 8px; }
-.notice.ok { border-color: var(--green); }
-.notice.ok b { color: var(--green); }
-.notice.error { border-color: var(--red); }
-.notice.error b { color: var(--red); }
+.notice.ok { border-color: var(--state); }
+.notice.ok b { color: var(--state); }
+.notice.error { border-color: var(--loss); }
+.notice.error b { color: var(--loss); }
 .notice.warn { border-color: var(--env); }
 .notice.warn b { color: var(--env); }
 
@@ -449,7 +430,7 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   word-break: break-all;
   margin: 8px 0 24px;
 }
-.bignumber.bad { color: var(--red); }
+.bignumber.bad { color: var(--loss); }
 .confirmform { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
 .message { color: var(--hi); font-size: var(--fs-3); margin-bottom: 24px; max-width: 60ch; }
 
@@ -481,8 +462,8 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
 .ranked li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
 .ranked b { font-size: var(--fs-3); }
 .ranked span { color: var(--dim); }
-.ranked .up b { color: var(--green); }
-.ranked .down b { color: var(--red); }
+.ranked .up b { color: var(--state); }
+.ranked .down b { color: var(--loss); }
 
 .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 40px; }
 .split .sub { margin: 24px 0 8px; color: var(--hi); font-weight: 700; }
@@ -504,7 +485,7 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
    its own box instead. */
 .grid td:first-child, .grid .num { white-space: nowrap; }
 .grid th:last-child, .grid td:last-child { padding-right: 0; }
-.grid td.win { color: var(--green); font-weight: 700; }
+.grid td.win { color: var(--state); font-weight: 700; }
 
 .diff { width: auto; margin-bottom: 8px; }
 .diff td { font-size: var(--fs-2); }
@@ -520,24 +501,24 @@ button.ghost:hover { background: var(--hi); border-color: var(--hi); color: var(
   height: 10px;
   background: var(--hi);
 }
-.barcell.win .minibar { background: var(--green); }
-.barcell.win b { color: var(--green); }
+.barcell.win .minibar { background: var(--state); }
+.barcell.win b { color: var(--state); }
 /* Off the scale, so no bar at all: just the number, flush left. */
 .barcell.outlier b { margin-left: 0; }
 
-details summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--hi); font-weight: 700; list-style: none; }
+details summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--action); font-weight: 700; list-style: none; }
 details summary::-webkit-details-marker { display: none; }
 /* The disclosure state, drawn explicitly since the native marker is gone. */
 details summary::before { content: "+"; width: 2ch; color: var(--dim); }
 details[open] summary::before { content: "-"; }
-details summary:hover { color: var(--fg); }
+details summary:hover { color: var(--action-hi); }
 details[open] summary { margin-bottom: 12px; }
 
 /* ---------------------------------------------------------------- chart */
 
 .legend { display: flex; flex-wrap: wrap; gap: 4px 24px; margin-bottom: 12px; color: var(--dim); }
 .legend i { font-style: normal; }
-.legend .win { color: var(--green); }
+.legend .win { color: var(--state); }
 .legend .once { color: var(--hi); }
 .legend .picked { color: var(--quiet); }
 .legend .many { color: var(--taken); }
@@ -553,11 +534,11 @@ details[open] summary { margin-bottom: 12px; }
 .tail-head { margin: 8px 0 8px; color: var(--hi); font-weight: 700; }
 .tail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .tail li { padding: 3px 8px; border: 1px solid #3a3a3a; white-space: nowrap; }
-.tail .won-tag { color: var(--green); font-weight: 700; }
+.tail .won-tag { color: var(--state); font-weight: 700; }
 .tail li b { color: var(--hi); font-weight: 700; }
 .tail li span { margin-left: 4px; color: var(--dim); }
-.tail li.won { border-color: var(--green); }
-.tail li.won b { color: var(--green); }
+.tail li.won { border-color: var(--state); }
+.tail li.won b { color: var(--state); }
 .tail li:hover { border-color: var(--hi); }
 .cols {
   display: grid;
@@ -606,7 +587,7 @@ details[open] summary { margin-bottom: 12px; }
   font-weight: 700;
   white-space: nowrap;
 }
-.win .col-bar { background: var(--green); }
+.win .col-bar { background: var(--state); }
 .once .col-bar { background: var(--hi); }
 /* Taken by more than one player: red, as on the preview image. On the
    trends page, numbers that never won a day are a quiet grey. */
@@ -623,7 +604,7 @@ details[open] summary { margin-bottom: 12px; }
   bottom: 100%;
   left: 50%;
   translate: -50% 0;
-  color: var(--green);
+  color: var(--state);
   font-size: var(--fs-1);
   line-height: 1.2;
 }
@@ -640,11 +621,13 @@ details[open] summary { margin-bottom: 12px; }
   min-width: 44px;
   min-height: 32px;
   padding: 0 8px;
-  border: 1px solid var(--dim);
-  color: var(--fg);
+  border: 1px solid var(--edge-strong);
+  color: var(--action);
   text-decoration: none;
 }
-.ranges a.on { background: var(--hi); border-color: var(--hi); color: var(--bg); font-weight: 700; }
+.ranges a:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
+/* The selected range is where you are: the white inversion, like the nav. */
+.ranges a.on, .ranges a.on:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); font-weight: 700; }
 
 /* ---------------------------------------------------------- test banner */
 
@@ -675,11 +658,11 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .row input[type="text"] { font-size: var(--fs-2); flex: 1 1 160px; padding: 8px 12px; }
 .admin-form { display: block; }
 .check { display: flex; gap: 8px; align-items: baseline; margin-top: 8px; }
-.check input { accent-color: var(--green); }
+.check input { accent-color: var(--action); }
 .hint, .empty, .tally, .nowinner { color: var(--dim); margin-top: 8px; }
 .hint strong { color: var(--hi); }
 .login { color: var(--dim); }
-.value { color: var(--green); font-weight: 700; font-size: var(--fs-3); }
+.value { color: var(--state); font-weight: 700; font-size: var(--fs-3); }
 .ghosttag { color: var(--dim); }
 .demolist { list-style: none; padding: 0; margin: 0 0 12px; }
 .demolist li { display: flex; gap: 20px; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
@@ -697,14 +680,7 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
    sizes it to the screen, so its final width is not a number CSS can know. */
 @keyframes fill { from { clip-path: inset(0 100% 0 0); } }
 @keyframes grow { from { transform: scaleY(0); } }
-@keyframes stamp {
-  0% { visibility: hidden; }
-  1% { visibility: visible; transform: rotate(4deg) scale(2.2); }
-  50% { transform: rotate(4deg) scale(0.9); }
-  100% { transform: rotate(4deg); }
-}
-/* A number locked in just now gets the stamp slammed on, in three frames. */
-.notice.ok ~ .sealed .stamp { animation: stamp 300ms steps(3) 350ms both; }
+
 
 
 button.is-busy { pointer-events: none; }
@@ -745,7 +721,7 @@ button.is-busy { pointer-events: none; }
 /* The checkbox is off-screen, so the ring has to show on what stands in for
    it -- otherwise tabbing to the dismiss control shows nothing at all. */
 .announce-x:focus-visible ~ .announce-card .announce-close {
-  outline: 3px solid var(--green);
+  outline: 3px solid var(--action);
   outline-offset: 3px;
 }
 
@@ -756,7 +732,7 @@ button.is-busy { pointer-events: none; }
 /* ---------------------------------------------------------- accessibility */
 
 /* One visible focus ring for everything reachable by keyboard. */
-:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
+:focus-visible { outline: 3px solid var(--action); outline-offset: 3px; }
 main:focus { outline: none; }
 
 a, button, summary, input, label { touch-action: manipulation; }
@@ -767,8 +743,8 @@ a, button, summary, input, label { touch-action: manipulation; }
   top: -60px;
   z-index: 100;
   padding: 8px 16px;
-  background: var(--green);
-  color: var(--bg);
+  background: var(--action);
+  color: #fff;
   font-weight: 700;
   text-decoration: none;
 }
@@ -794,21 +770,21 @@ a, button, summary, input, label { touch-action: manipulation; }
 .diff .num { white-space: nowrap; }
 .diff .after { font-weight: 700; color: var(--hi); }
 .diff .change { display: inline-block; min-width: 7ch; font-weight: 700; text-align: right; }
-.diff tr.up .change, .diff tr.up .after { color: var(--green); }
-.diff tr.down .change, .diff tr.down .after { color: var(--red); }
+.diff tr.up .change, .diff tr.up .after { color: var(--state); }
+.diff tr.down .change, .diff tr.down .after { color: var(--loss); }
 .diff tr.same .change { color: var(--dim); }
 /* The two lists sit side by side and start on the same line. */
 .pair { align-items: start; margin-top: 8px; }
 .ranked em { font-style: normal; font-weight: 700; }
 /* Rising numbers are green, falling ones red, each with a triangle too. */
-.ranked .up em { color: var(--green); }
-.ranked .down em { color: var(--red); }
+.ranked .up em { color: var(--state); }
+.ranked .down em { color: var(--loss); }
 .ranked .up em::after { content: " \25B2"; }
 .ranked .down em::after { content: " \25BC"; }
 
 /* Your own status in the third box on the home page. */
 .figures .you b { color: var(--fg); }
-.figures .you.in b { color: var(--green); }
+.figures .you.in b { color: var(--state); }
 
 /* Headings wrap into balanced lines; running text avoids one-word last lines. */
 .rule span, .question, .message { text-wrap: balance; }
@@ -863,7 +839,7 @@ s { text-decoration-thickness: 2px; text-decoration-color: var(--taken); }
 .legend .mine { color: var(--hi); }
 .mine-text { color: var(--hi); }
 .grid tr.taken td:first-child { color: var(--dim); }
-.grid tr.won td { color: var(--green); font-weight: 700; }
+.grid tr.won td { color: var(--state); font-weight: 700; }
 
 /* Expand controls say what they open, and what closing does (R11.5). */
 details.expand summary .when-open,
@@ -877,23 +853,17 @@ details.expand[open] summary .when-open { display: inline; }
 
 /* A player's record: four figures, then their rounds. */
 .statgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 0 0 16px; }
-.statgrid div { padding: 16px; background: var(--panel); border: 1px solid var(--edge); }
+.statgrid div { padding: 16px 0; border-top: 1px solid var(--edge); }
 .statgrid dt { color: var(--dim); font-size: var(--fs-1); }
 .statgrid dd { margin: 4px 0 0; color: var(--hi); font-size: var(--fs-4); font-weight: 700; line-height: var(--lh-tight); }
 .mystats { margin: 16px 0 0; font-size: var(--fs-1); }
-.mystats a { color: var(--fg); }
 
-/* The round's progress, drawn as a row of terminal blocks (████░░░░). */
-.progress {
-  height: 12px;
-  background: repeating-linear-gradient(90deg, var(--edge-strong) 0 8px, transparent 8px 10px);
-}
-.progress-fill { background: repeating-linear-gradient(90deg, var(--green) 0 8px, transparent 8px 10px); }
 
 /* Form errors: a summary that takes focus, and a line under each field. */
-.error-summary { margin: 0 0 16px; padding: 12px 16px; border-left: 4px solid var(--red); background: var(--panel); color: var(--hi); }
-.error-summary:focus { outline: 3px solid var(--red); outline-offset: 2px; }
-.field-error { margin: 4px 0 0; color: var(--red); font-size: var(--fs-1); }
+.error-summary { margin: 0 0 16px; padding: 8px 16px; border-left: 4px solid var(--loss); color: var(--hi); }
+.error-summary b { color: var(--loss); }
+.error-summary:focus { outline: 3px solid var(--loss); outline-offset: 2px; }
+.field-error { margin: 4px 0 0; color: var(--loss); font-size: var(--fs-1); }
 .provider-note { margin: 0 0 0 4px; color: var(--dim); font-size: var(--fs-1); }
 
 /* Coarse pointers (phones) get the full 44px on every small control. */
@@ -971,7 +941,6 @@ details.expand[open] summary .when-open { display: inline; }
   /* Short lists (most / least picked) stay side by side. */
   .split.duo { grid-template-columns: 1fr 1fr; gap: 0 20px; }
   .duo .ranked b { font-size: var(--fs-3); }
-  .sealed { display: block; }
   .privacy-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .privacy-table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--rule-color); }
   .privacy-table td { display: grid; grid-template-columns: 7ch minmax(0, 1fr); gap: 12px; padding: 6px 0; border: 0; }
@@ -988,3 +957,35 @@ details.expand[open] summary .when-open { display: inline; }
     animation-iteration-count: 1 !important;
   }
 }
+
+/* --dim is for short labels only: too faint for a paragraph (R21.8). */
+p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .message { color: var(--fg); }
+
+/* The one personality beat (R23, D9): a blinking cursor in the number box.
+   On a wrapper, since ::after does not render on an <input>; hidden once the
+   field has focus (a real caret shows) or holds a number. */
+.guess-field { position: relative; display: flex; flex: 1 1 260px; min-width: 0; }
+.guess-field input { flex: 1 1 auto; }
+.guess-field::after {
+  content: "▊";
+  position: absolute;
+  left: 17px;
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--action);
+  font-size: var(--fs-4);
+  line-height: 1;
+  pointer-events: none;
+  animation: blink 1s steps(1) infinite;
+}
+.guess-field:has(input:focus)::after,
+.guess-field:has(input:not(:placeholder-shown))::after { display: none; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .guess-field::after { animation: none; } }
+
+.rules li span { display: block; }
+.mystats a { color: var(--action); }
+
+/* A page's opening line of figures (R11.1, R13.1). */
+.lead { margin: 0 0 8px; color: var(--hi); font-size: var(--fs-3); line-height: var(--lh-tight); max-width: var(--measure); }
+.lead b.win, .lead b.lose { font-size: var(--fs-4); }

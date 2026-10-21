@@ -2,6 +2,7 @@ mod account;
 mod app;
 mod auth;
 mod config;
+mod copy;
 mod credentials;
 mod db;
 mod demo;
@@ -138,6 +139,7 @@ async fn main() -> Result<()> {
         .route("/auth/callback", get(oauth::callback_42))
         .route("/logout", post(handlers::logout))
         .route("/account", get(account::account))
+        .route("/welcome", get(account::welcome).post(account::welcome_save))
         .route("/account/username", post(account::rename))
         .route("/account/unlink", post(account::unlink))
         .route("/account/password", post(account::password))

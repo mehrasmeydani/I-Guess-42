@@ -40,6 +40,18 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 - [ ] Confirm the retention periods stated on /privacy fit (sessions 30 days,
       logs capped at 30 MB, emailed links 24 h / 1 h, mail log 2 days).
 
+## 4b. UI spec v2.0 decisions (docs/ui-spec)
+
+- [ ] **Contrast.** The spec's `--dim #6e6e6e` (3.9:1) and white bold text
+      on the blue button (~3.9:1) are below WCAG AA for small text; axe flags
+      both on every page. The spec accepts this (R21.8, R21.9). If you want AA:
+      `--dim: #8a8a8a` (5.2:1) and button text in `--bg` (5:1) - two lines in
+      static/style.css.
+- [ ] **Username prompt (Q4).** Done for new GitHub / Google / other-campus 42
+      sign-ups only; existing SSO accounts are not asked retroactively.
+- [ ] **Range control:** R13.4 asks for `aria-pressed`, which is only valid
+      on buttons; the ranges are links, so they carry `aria-current` instead.
+
 ## 5. Tests only a person can do
 
 - [ ] Import a round's `.ics` into Apple Calendar, Google Calendar, Outlook.

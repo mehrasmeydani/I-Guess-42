@@ -36,15 +36,15 @@
   {% when None %}
 {% endmatch %}
 
-{# The order is the order a newcomer needs it in: what the game is, how
-   long is left, the box, how to think about it, the rules, and only then
-   the ways off the page. #}
+{# The order is the order a newcomer needs it in (R6.1): the tagline, how
+   long is left, the box, the rules, yesterday. Nothing explains strategy:
+   working out that low numbers get crowded is the game (R22.3). #}
 <section class="sec hero" style="--b: 0" aria-labelledby="round-h">
-  <p class="premise">lowest unique number wins.</p>
+  <p class="premise">lowest unique number wins</p>
 
   <div class="roundstatus" role="group" aria-labelledby="round-h">
     <p class="state-line">
-      <span class="pill" id="round-h">round {{ round_key }} &middot; <span class="state">open</span></span>
+      <span class="pill" id="round-h">round {{ round_key }} &middot; <span class="state">[open]</span></span>
       <span class="closes-at">closes {{ close_time }} vienna</span>
     </p>
     <p class="closes-in">closes in</p>
@@ -52,25 +52,25 @@
        nothing is announced on its own (no aria-live, no role=timer). #}
     <p class="countdown" data-closes-at="{{ closes_at }}" data-server-now="{{ server_now }}"
        aria-label="closes in {{ time_left_spoken }}">{{ time_left }}</p>
-    <div class="progress" role="progressbar" aria-label="round gone by"
-         aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress_pct }}"
-         aria-valuetext="{{ progress_pct }}% of the round gone">
-      <span class="progress-fill" style="width: {{ progress_pct }}%"></span>
-    </div>
+    {# Terminal blocks, drawn as text: filled in green, empty in the edge
+       grey, with the share beside it (D10). #}
+    <p class="progress" role="progressbar" aria-label="round gone by"
+       aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress_pct }}"
+       aria-valuetext="{{ progress_pct }}% of the round gone"><span class="progress-fill" aria-hidden="true">{{ crate::templates::progress_cells(progress_pct).0 }}</span><span class="progress-empty" aria-hidden="true">{{ crate::templates::progress_cells(progress_pct).1 }}</span> <span class="progress-pct" aria-hidden="true">{{ progress_pct }}%</span></p>
     <p class="facts">
       <span><b>{{ guess_count }}</b> {% if guess_count == 1 %}player{% else %}players{% endif %} this round</span>
-      {% match pot_label %}{% when Some with (pot) %}<span class="pot">pot <b class="win">{{ pot }}</b>{% match carried_label %}{% when Some with (c) %} <span class="dim">({{ c }} rolled over)</span>{% when None %}{% endmatch %}</span>{% when None %}{% endmatch %}
+      {% match pot_label %}{% when Some with (pot) %}<span class="pot">pot <b class="win">{{ pot }}</b>{% match carried_label %}{% when Some with (c) %} <span class="dim">· {{ c }} rolled over</span>{% when None %}{% endmatch %}</span>{% when None %}{% endmatch %}
       <span class="you">
         {% match my_guess_label %}
           {% when Some with (_g) %}<b>you're in</b>
-          {% when None %}{% if signed_in && !can_play %}confirm your email to play{% else %}pick yours below{% endif %}
+          {% when None %}{% if signed_in && !can_play %}confirm your email to play{% else %}not playing yet &darr;{% endif %}
         {% endmatch %}
       </span>
     </p>
   </div>
   {% match stats %}
     {% when Some with (s) %}
-      <p class="mystats"><a href="{{ pool.base() }}/me">{% if s.streak >= 2 %}&#128293; {% endif %}{{ s.streak }}-day streak &middot; played {{ s.played }} &middot; won {{ s.won }}{% match s.best %}{% when Some with (b) %} &middot; best: {{ b }}{% when None %}{% endmatch %}</a></p>
+      <p class="mystats"><a href="{{ pool.base() }}/me">&#128293; {{ s.streak }} &middot; played {{ s.played }} &middot; won {{ s.won }}{% match s.best %}{% when Some with (b) %} &middot; best {{ b }}{% when None %}{% endmatch %}</a></p>
     {% when None %}
   {% endmatch %}
 </section>
@@ -84,39 +84,27 @@
 
   {% match my_guess_label %}
     {% when Some with (g) %}
-      {% if just_locked %}
-        <div class="locked-panel" role="status">
-          <p class="locked-title">&check; you're in</p>
-          <p>your number: <b>{{ g }}</b> &middot; closes {{ close_time }} vienna (in <span class="countdown-mirror">{{ time_left }}</span>)</p>
-          <p class="locked-actions">
-            <a class="btn ghost" href="{{ calendar_href }}" download>add to calendar</a>
-          </p>
-        </div>
-      {% endif %}
-      <h2 class="locked-line">locked: your number is <b>{{ g }}</b></h2>
-      <div class="sealed">
-        <p class="sealed-value">{{ g }}</p>
-        <span class="stamp">sealed</span>
-      </div>
-      <p class="dim">hidden from everyone until {{ close_time }}.{% if !just_locked %} <a href="{{ calendar_href }}" download>add the reveal to your calendar</a>{% endif %}</p>
+      {# In place of the input, from what the server holds (R8.1, R10.2). #}
+      <h2 class="locked-line"{% if just_locked %} role="status"{% endif %}>locked: <b>{{ g }}</b> &middot; reveal {{ close_time }} &middot; <span class="countdown-mirror">{{ time_left }}</span></h2>
+      <p><a href="{{ calendar_href }}" download>add to calendar</a></p>
     {% when None %}
       {% if signed_in && !can_play %}
-        <h2 class="section-title">play</h2>
-        <p class="dim">confirm your email address to play &mdash; open the link we sent you.</p>
+        <h2 class="section-title">confirm your email to play</h2>
         <form method="post" action="/verify/resend" class="inline">
-          <button type="submit" class="ghost">send another link</button>
+          <button type="submit" class="primary">send another link</button>
         </form>
       {% else %}
         <h2 class="section-title"><label for="guess">your number</label></h2>
         <form class="guessform" method="post" action="{{ pool.base() }}/guess">
           <input type="hidden" name="round" value="{{ round_key }}">
-          <input id="guess" name="guess" type="text" inputmode="numeric" enterkeyhint="go"
-                 pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
-                 placeholder="e.g. 7" aria-describedby="guess-hint" required>
+          {# The one flourish (R23): a blinking cursor that says "type here",
+             gone once the field has focus and a real caret, or a number. #}
+          <span class="guess-field">
+            <input id="guess" name="guess" type="text" inputmode="numeric" enterkeyhint="go"
+                   pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false" placeholder=" " required>
+          </span>
           <button type="submit" class="primary">lock it in{% match stake_label %}{% when Some with (s) %} &middot; {{ s }}{% when None %}{% endmatch %}</button>
         </form>
-        <p class="hint" id="guess-hint">low gets crowded. think a little higher. {% if signed_in %}final when you confirm.{% else %}sign in to lock it in.{% endif %}
-          {% match stake_label %}{% when Some with (s) %}a guess costs {{ s }}; the winner takes the whole pot. points are just for fun.{% when None %}{% endmatch %}</p>
       {% endif %}
   {% endmatch %}
 </section>
@@ -124,16 +112,14 @@
 <section class="sec" style="--b: 2">
   <h2 class="section-title">rules</h2>
   <ol class="rules">
-    <li><b>01</b> pick a whole number above 0. one guess a day.</li>
-    <li><b>02</b> every number is revealed at {{ close_time }} vienna.</li>
-    <li><b>03</b> lowest unique number wins. shared numbers are out.</li>
+    <li><b>01</b> one whole number above 0. once a day.</li>
+    <li><b>02</b> all numbers revealed at {{ close_time }}.</li>
+    <li><b>03</b> <span>lowest number only one person picks wins.<br>match anyone &rarr; you both lose it.</span></li>
   </ol>
-  {# Coalition points, said once and quietly: playing is worth something and
-     winning is worth a lot more, but the game is the number, not the payout. #}
   {% if points_announced %}
-    <p class="footnote dim">coalition points land after 12:42 &mdash;
-      <b>{{ crate::points::PARTICIPANT_POINTS }}</b> to everyone who played,
-      <b class="win">{{ crate::points::WINNER_POINTS }}</b> to the one who won.</p>
+    <p class="footnote dim">coalition points after {{ close_time }} &middot;
+      <b>{{ crate::points::PARTICIPANT_POINTS }}</b> for playing &middot;
+      <b class="win">{{ crate::points::WINNER_POINTS }}</b> for the win</p>
   {% endif %}
 </section>
 
@@ -143,11 +129,11 @@
       <h2 class="section-title">yesterday</h2>
       {% match r.winner %}
         {% when Some with (w) %}
-          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>won by {{ w.login }} &middot; {{ r.total }} played</span></p>
+          <p class="verdict"><b class="win">{{ w.value_label }}</b> <span>{{ w.login }} won &middot; {{ r.total }} played</span></p>
         {% when None %}
-          <p class="verdict"><b class="lose">&times;</b> <span>no winner &middot; {{ r.total }} played</span></p>
+          <p class="verdict"><b class="lose">&times;</b> <span>nobody won &middot; {{ r.total }} played</span></p>
       {% endmatch %}
-      <p><a href="{{ pool.base() }}/day/{{ r.date_key }}">yesterday's analysis &rarr;</a></p>
+      <p><a href="{{ pool.base() }}/day/{{ r.date_key }}">every pick &rarr;</a></p>
     </section>
   {% when None %}
 {% endmatch %}

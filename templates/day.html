@@ -20,18 +20,8 @@
 
 <section class="sec" style="--b: 0">
   <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; this round</p>
-  <p class="takeaway">
-    {% match round.winner %}
-      {% when Some with (w) %}<b class="win">{{ w.value_label }}</b>
-      {% when None %}<b class="lose">&times;</b>
-    {% endmatch %}
-    <span>{{ crate::templates::after_number(takeaway) }}</span>
-  </p>
-  {% match round.winner %}
-    {% when Some with (w) %}<p class="dim">won by {{ w.login }}.{% match my_pick %}{% when Some with (p) %} your pick: <b class="mine-text">{{ p }}</b>.{% when None %}{% endmatch %}</p>
-    {% when None %}{% match my_pick %}{% when Some with (p) %}<p class="dim">your pick: <b class="mine-text">{{ p }}</b>.</p>{% when None %}{% endmatch %}
-  {% endmatch %}
-  {% if !names_visible %}<p class="dim mask-note">sign in to see names. signed-out players get a stable label.</p>{% endif %}
+  <p class="lead">{{ round.date_key }} &middot; {{ round.total }} played &middot; {% match round.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
+  {% match my_pick %}{% when Some with (p) %}<p class="dim">your pick: <b class="mine-text">{{ p }}</b></p>{% when None %}{% endmatch %}
 </section>
 
 <section class="sec" style="--b: 1">
@@ -46,7 +36,7 @@
   {% include "chart.html" %}
   <p class="chart-summary">{{ summary }}</p>
   <details class="expand">
-    <summary><span class="when-closed">view as a table ({{ distinct }} numbers)</span><span class="when-open">hide the table</span></summary>
+    <summary><span class="when-closed">view as table &middot; {{ distinct }} numbers</span><span class="when-open">hide table</span></summary>
     <table class="grid narrow">
       <caption class="sr">every number picked in round {{ round.date_key }}</caption>
       <thead><tr><th scope="col" class="num">number</th><th scope="col" class="num">players</th><th scope="col">result</th></tr></thead>
@@ -60,10 +50,10 @@
 
   <p class="day-actions">
     {% match share_text %}
-      {% when Some with (text) %}<button type="button" class="ghost share" data-share="{{ text }}">share result</button><span class="share-done dim" role="status"></span>
+      {% when Some with (text) %}<button type="button" class="linkish share" data-share="{{ text }}">share</button><span class="share-done dim" role="status"></span>
       {% when None %}
     {% endmatch %}
-    <a href="{{ pool.base() }}/">play today's round &rarr;</a>
+    <a href="{{ pool.base() }}/">play today &rarr;</a>
   </p>
 </section>
 
@@ -72,7 +62,7 @@
 <section class="sec" style="--b: 2">
   <h2 class="section-title">earlier rounds</h2>
   {% if earlier.is_empty() %}
-    <p class="dim">nothing before this one. it is the first round played.</p>
+    <p class="dim">first round · nothing earlier</p>
   {% else %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="earlier rounds">
     <table class="grid">
@@ -96,8 +86,7 @@
     </table>
     </div>
     <p class="dim listed">
-      the {{ earlier.len() }} {% if earlier.len() == 1 %}round{% else %}rounds{% endif %} before this one, of {{ total_rounds }} closed in all.
-      <a href="{{ pool.base() }}/results">every round &rarr;</a>
+      {{ earlier.len() }} of {{ total_rounds }} &middot; <a href="{{ pool.base() }}/results">every round &rarr;</a>
     </p>
   {% endif %}
 </section>

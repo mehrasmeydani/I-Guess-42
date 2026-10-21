@@ -82,7 +82,7 @@ impl IntoResponse for AppError {
         tracing::error!(error = ?self.0, "request failed");
         error_page(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Something broke on our side. Try again in a moment.",
+            crate::copy::BROKE_HERE,
         )
     }
 }

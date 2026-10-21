@@ -63,7 +63,7 @@ async fn a_day_page_walks_the_calendar_and_leads_back_to_today() {
     let html = day_page(&state, Some("ann"), &day).await;
     assert!(html.contains(&format!(r#"href="/g/day/{before}" rel="prev">&larr; {before}</a>"#)));
     assert!(!html.contains(r#"rel="next""#), "the newest closed round has no next");
-    assert!(html.contains(r#"<a href="/g/">play today's round &rarr;</a>"#));
+    assert!(html.contains(r#"<a href="/g/">play today &rarr;</a>"#));
     let html = day_page(&state, Some("ann"), &before).await;
     assert!(html.contains(&format!(r#"href="/g/day/{day}" rel="next">{day} &rarr;</a>"#)));
     assert!(!html.contains(r#"rel="prev""#), "the first round has no previous");
@@ -76,14 +76,14 @@ async fn a_day_page_says_who_won_and_why_in_a_line_and_in_words() {
     let (_, day) = a_played_day(&state).await;
     let html = day_page(&state, Some("ann"), &day).await;
     assert!(html.contains("won · 5 players · 1 and 2 were all taken"), "the takeaway, not saying 3 twice");
-    assert!(html.contains("5 players · 3 numbers · 2 shared numbers · most: 1 (2×) · winner: 3."));
-    assert!(html.contains("winner: 3."));
+    assert!(html.contains("5 players · 3 numbers · 2 shared numbers · most: 1 (2×) · winner: 3"));
+    assert!(html.contains("winner: 3"));
     // Taken numbers struck through; the winner is not.
     assert!(html.contains("<s>1</s>") && html.contains("<s>2</s>"));
     assert!(!html.contains("<s>3</s>"));
     // A table alternative that says what it opens.
-    assert!(html.contains("view as a table (3 numbers)"));
-    assert!(html.contains("hide the table"));
+    assert!(html.contains("view as table &middot; 3 numbers"));
+    assert!(html.contains("hide table"));
     assert!(html.contains("<caption class=\"sr\">every number picked in round"));
     assert!(html.contains(r#"<span class="chip">historical</span> &middot; this round"#), "a live site's closed rounds are historical");
     // Its own preview picture and description.
@@ -165,8 +165,8 @@ async fn results_list_the_rounds_first_then_the_top_ten() {
     // Ten leaders shown, the rest behind a control that says what it does.
     let shown = &html[leaders..html[leaders..].find("<details").map_or(html.len(), |i| leaders + i)];
     assert_eq!(shown.matches("<tr title=").count(), 10);
-    assert!(html.contains("show all 12 winners"));
-    assert!(html.contains("show the top 10 only"));
+    assert!(html.contains("show all 12"));
+    assert!(html.contains("show top 10"));
     assert!(html.contains("&middot; all-time"));
     assert!(html.contains(r#"aria-current="true" href="/g/results">7</a>"#));
 }
@@ -175,8 +175,7 @@ async fn results_list_the_rounds_first_then_the_top_ten() {
 async fn before_any_round_closes_results_look_ahead_and_filters_wait() {
     let (_t, state) = app(&[]).await;
     let html = results_page(&state, None).await;
-    assert!(html.contains("no round has closed yet."));
-    assert!(html.contains("first round closes"));
+    assert!(html.contains("no rounds yet &middot; first reveal"));
     assert!(html.contains(r#"id="q" name="q" type="search""#));
     assert_eq!(html.matches(" disabled>").count() + html.matches(" disabled ").count(), 4, "search, date and both buttons");
     let trends = body(
@@ -185,29 +184,25 @@ async fn before_any_round_closes_results_look_ahead_and_filters_wait() {
             .unwrap(),
     )
     .await;
-    assert!(trends.contains("no rounds yet. nothing to trend."));
-    assert!(trends.contains("first round closes"));
+    assert!(trends.contains("no data yet &middot; check back after 12:42"));
 }
 
 #[tokio::test]
-async fn masked_names_are_stable_labels_with_a_word_on_why() {
+async fn usernames_are_public_on_every_results_view() {
     let (_t, state) = app(&[]).await;
     let (_, day) = a_played_day(&state).await;
-    let signed_out = results_page(&state, None).await;
-    let cat = db::viewer_for_session(&state.db, "cat").await.unwrap().unwrap().account.id;
-    let label = crate::templates::anon_label(cat);
-    assert!(label.starts_with("player #") && label.len() == 12, "{label}");
-    assert!(signed_out.contains(&label));
-    assert!(!signed_out.contains(">cat<"));
-    assert!(signed_out.contains("sign in to see names"));
-    // The same label on the day page and on the next visit.
-    assert!(day_page(&state, None, &day).await.contains(&label));
-    assert_eq!(crate::templates::anon_label(cat), label);
-    assert_ne!(crate::templates::anon_label(cat + 1), label);
-    // Signed in: the name, and no note.
-    let signed_in = results_page(&state, Some("ann")).await;
-    assert!(signed_in.contains("cat"));
-    assert!(!signed_in.contains("sign in to see names"));
+    // Signed out, as signed in: the username, never a stand-in label.
+    for token in [None, Some("ann")] {
+        let results = results_page(&state, token).await;
+        assert!(results.contains("cat won with <b class=\"win\">3</b>"), "{token:?}");
+        assert!(!results.contains("player #"));
+        assert!(day_page(&state, token, &day).await.contains("cat won with"));
+    }
+    let board = body(
+        crate::points_pages::leaderboard(State(state.clone()), CookieJar::new(), Query(Default::default())).await.unwrap(),
+    )
+    .await;
+    assert!(!board.contains("player #"));
 }
 
 #[tokio::test]
@@ -224,13 +219,12 @@ async fn trends_open_with_an_answer_and_keep_the_timing_out_of_sight() {
         }
     };
     let html = page("7").await;
-    assert!(html.contains("7d · "), "{html}");
     // Won with 9, then 3: the middle of the two, taken as the upper.
-    assert!(html.contains("median win 9"));
+    assert!(html.contains("2 rounds · median winner 9 · most crowded: 1"), "{html}");
     assert!(html.contains(r#"aria-current="true" href="/g/trends?days=7">7d</a>"#));
     assert!(!html.contains("analysing"), "no staged progress");
     assert!(html.contains("test details"), "timing only in the test-only details");
-    assert!(page("all").await.contains("all · "));
+    assert!(page("all").await.contains("median winner 9"));
 
     // A live site does not show it at all.
     let mut cfg = config(&[]);
@@ -263,7 +257,7 @@ async fn my_rounds_show_the_record_and_every_round_played() {
     // Signed out: to sign in. And no "me" tab.
     let resp = handlers::global_me(State(state.clone()), CookieJar::new()).await.unwrap();
     assert_eq!(location(&resp), "/login");
-    let front = body(handlers::global_index(State(state.clone()), CookieJar::new(), Query(IndexQuery { msg: None })).await.unwrap()).await;
+    let front = body(handlers::global_index(State(state.clone()), CookieJar::new(), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
     assert!(!front.contains("/g/me\">me</a>"));
 }
 
@@ -271,8 +265,8 @@ async fn my_rounds_show_the_record_and_every_round_played() {
 async fn the_round_page_shows_a_players_streak() {
     let (_t, state) = app(&[]).await;
     a_played_day(&state).await;
-    let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None })).await.unwrap()).await;
-    assert!(html.contains("2-day streak &middot; played 2 &middot; won 1 &middot; best: 9"), "{html}");
+    let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
+    assert!(html.contains("&#128293; 2 &middot; played 2 &middot; won 1 &middot; best 9"), "{html}");
     assert!(html.contains("<title>today's round &middot; i guess low</title>"));
 }
 
@@ -282,14 +276,14 @@ async fn every_page_has_one_h1_and_the_sign_in_pages_do_not_repeat_it() {
     let login = body(crate::signin::login_page_handler(State(state.clone()), CookieJar::new(), Query(Default::default())).await.unwrap()).await;
     let signup = body(crate::signin::signup_page_handler(State(state.clone()), CookieJar::new()).await).await;
     let privacy = body(crate::moderation::privacy(State(state.clone()), CookieJar::new()).await.unwrap()).await;
-    let front = body(handlers::global_index(State(state.clone()), CookieJar::new(), Query(IndexQuery { msg: None })).await.unwrap()).await;
+    let front = body(handlers::global_index(State(state.clone()), CookieJar::new(), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
     for (name, html) in [("login", &login), ("signup", &signup), ("privacy", &privacy), ("round", &front)] {
         assert_eq!(html.matches("<h1").count(), 1, "{name}");
     }
     assert!(login.contains(r#"<h1 class="auth-title">sign in</h1>"#));
     assert!(!login.contains(r#"<h2 class="auth-title">"#));
     // What each provider learns, beside its button; the 42 mark is decoration.
-    assert!(login.contains("42 shares your login, name and campus."));
+    assert!(login.contains("shares login, name, campus"));
     assert!(login.contains(r#"class="provider-mark mark-42" aria-hidden="true""#));
 }
 
@@ -306,7 +300,7 @@ async fn a_failed_sign_in_gets_a_focusable_summary_and_marked_fields() {
     .unwrap();
     let html = body(resp).await;
     assert!(html.contains(r#"class="error-summary" role="alert" tabindex="-1""#));
-    assert!(html.contains(r#"<p class="field-error" id="login-error">Wrong username, email or password.</p>"#));
+    assert!(html.contains(r#"<p class="field-error" id="login-error">wrong username, email or password</p>"#));
     assert_eq!(html.matches(r#"aria-invalid="true" aria-describedby="login-error""#).count(), 2);
 
     let resp = crate::signin::signup(
@@ -322,7 +316,7 @@ async fn a_failed_sign_in_gets_a_focusable_summary_and_marked_fields() {
     .await
     .unwrap();
     let html = body(resp).await;
-    assert!(html.contains(r#"<p class="field-error" id="username-error">Usernames are 3 to 20 characters long.</p>"#));
+    assert!(html.contains(r#"<p class="field-error" id="username-error">username: 3 to 20 characters</p>"#));
     assert!(html.contains(r#"aria-describedby="username-hint username-error""#));
     assert!(!html.contains("email-error"), "only the field that was wrong");
 }
@@ -387,4 +381,37 @@ async fn a_42_students_rounds_stay_in_the_42_round() {
     assert!(html.contains(r#"href="/me">me</a>"#));
     let resp = handlers::me(State(state.clone()), jar("ann-none")).await.unwrap();
     assert_eq!(location(&resp), "/g/me", "anyone else is sent to the global one");
+}
+
+#[tokio::test]
+async fn a_new_sso_account_picks_its_username_once_and_goes_on() {
+    use crate::account::{welcome, welcome_save, WelcomeForm, WelcomeQuery};
+    let (_t, state) = app(&[]).await;
+    player(&state.db, "octo-cat").await;
+    stranger(&state.db, "taken", "x").await;
+    let page = body(
+        welcome(State(state.clone()), jar("octo-cat"), Query(WelcomeQuery { then: Some("/g?msg=saved".into()) }))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(page.contains(r#"value="octo-cat""#), "prefilled from the provider");
+    assert!(page.contains(r#"name="then" value="/g?msg=saved""#));
+
+    let save = |name: &str, then: &str| {
+        let state = state.clone();
+        let f = Form(WelcomeForm { username: name.into(), then: then.into() });
+        async move { welcome_save(State(state), jar("octo-cat"), f).await.unwrap() }
+    };
+    assert_eq!(save("taken", "/g").await.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(save("x", "/g").await.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(location(&save("kai", "/g?msg=saved").await), "/g?msg=saved");
+    let v = db::viewer_for_session(&state.db, "octo-cat").await.unwrap().unwrap();
+    assert_eq!(v.account.username, "kai");
+    // Picking here does not start the month-long wait to rename.
+    assert_eq!(db::username_changed_at(&state.db, v.account.id).await.unwrap(), None);
+    // Nowhere but the round: no open redirect.
+    for evil in ["https://evil.example", "//evil.example", "/account/delete"] {
+        assert_eq!(location(&save("kai", evil).await), "/g?msg=welcome", "{evil}");
+    }
 }

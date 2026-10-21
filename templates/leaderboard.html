@@ -12,9 +12,8 @@
     </span>
   </h2>
   <p class="dim">{% if week %}points won from playing over the last seven days: pots minus stakes. daily and welcome points don't count here.{% else %}everyone's balance. points are just for fun.{% endif %}</p>
-  {% if !names_visible %}<p class="dim mask-note">sign in to see names. signed-out players get a stable label.</p>{% endif %}
   {% if rows.is_empty() %}
-    <p class="dim">nobody yet.</p>
+    <p class="dim">nobody yet</p>
   {% else %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="points leaderboard">
     <table class="grid">

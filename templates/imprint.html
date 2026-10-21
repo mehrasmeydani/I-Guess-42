@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Impressum &middot; i guess low{% endblock %}
+{% block title %}impressum &middot; i guess low{% endblock %}
 {% block path %}/imprint{% endblock %}
 {% block heading %}{% endblock %}
 
 {% block content %}
 <section class="sec prose" style="--b: 0">
-  <h1 class="page-title">Impressum</h1>
+  <h1 class="page-title">impressum</h1>
   {% if test_mode %}
-    <p>operator details aren't shown on the test site.</p>
+    <p>operator details not shown on test instance</p>
   {% else %}
     <p>{{ operator }}</p>
   {% endif %}

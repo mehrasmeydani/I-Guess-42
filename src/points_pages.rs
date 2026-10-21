@@ -10,7 +10,7 @@ use crate::app::{AppError, AppState};
 use crate::db::{self, Pool};
 use crate::handlers::current_viewer;
 use crate::round::Round;
-use crate::templates::{self, anon_label, points_label, LedgerView, PointsBoardRow, PointsTemplate, BoardTemplate, UserView};
+use crate::templates::{self, points_label, LedgerView, PointsBoardRow, PointsTemplate, BoardTemplate, UserView};
 
 /// How many lines of history the points page shows.
 const HISTORY: i64 = 200;
@@ -83,18 +83,15 @@ pub async fn leaderboard(
     let since = (chrono::Utc::now() - chrono::Duration::days(7))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let rows = db::points_board(&state.db, week.then_some(since.as_str()), BOARD).await?;
-    // Usernames are shown to anyone signed in, as on the other pages.
-    let named = viewer.is_some();
     Ok(templates::render(&BoardTemplate {
         pool: Pool::Global,
         test_mode: state.cfg.test_env(),
         impersonating: false,
         week,
-        names_visible: named,
         rows: rows
             .into_iter()
             .map(|r| PointsBoardRow {
-                name: if named { r.username } else { anon_label(r.id) },
+                name: r.username,
                 points: if week && r.points > 0 {
                     format!("+{}", templates::group_digits(r.points))
                 } else {

@@ -1533,6 +1533,22 @@ list groups accounts that signed up or guessed from one address hash, or
 signed up within ten minutes of each other. Hints for a human, never acted on
 by themselves.
 
+### The UI/UX spec (v2.0, `docs/ui-spec/`)
+
+v2.0 replaced v1.1's look and voice; the files are kept in `docs/ui-spec/`.
+The rules that live in code:
+
+- **Colour roles** (`static/style.css` header): `--action` blue for anything
+  clickable or focused, `--state` green for status and wins, `--loss` red,
+  `--env` amber, white inversion for "you are here". Buttons are outlined;
+  `.primary` is the only solid block.
+- **Copy** (`src/copy.rs`): every message the server writes, as lowercase
+  fragments. Templates follow the same register; privacy and imprint keep
+  full sentences.
+- **The cursor** (`.guess-field::after`): the one decorative animation.
+- **Usernames are public** in the global round; new SSO accounts pick theirs
+  at `/welcome` first, without starting the monthly rename wait.
+
 ### The UI/UX spec (R1-R20)
 
 The round, results, day, trends and "me" pages follow the `ui-ux-improvements`

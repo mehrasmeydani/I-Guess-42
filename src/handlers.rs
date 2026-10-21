@@ -22,9 +22,9 @@ const HISTORY_LIMIT: i64 = i64::MAX;
 const LEADERBOARD_LIMIT: i64 = i64::MAX;
 /// Shown up front on the results page; the rest of the leaderboard folds away.
 const PODIUM: usize = 10;
-/// How many earlier rounds a day page lists under itself. A fortnight is
-/// enough to find your way around without turning the page into /results.
-const DAY_HISTORY: i64 = 14;
+/// How many earlier rounds a day page lists under itself: at most ten
+/// rows before "every round" (spec R11.4).
+const DAY_HISTORY: i64 = 10;
 
 pub(crate) async fn current_viewer(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
     let Some(token) = auth::session_token(jar) else {
@@ -36,46 +36,8 @@ pub(crate) async fn current_viewer(state: &AppState, jar: &CookieJar) -> Result<
 /// Flash messages travel as a fixed code in the query string, so nothing a
 /// visitor types is ever echoed back into the page.
 fn notice_for(code: Option<&str>) -> Option<Notice> {
-    Some(match code? {
-        "saved" => Notice::ok("Locked in. Come back after 12:42 to see who took it."),
-        "added" => Notice::ok("Added, and it counts towards the round."),
-        "added_ghost" => Notice::ok("Added as a ghost — visible here, but it cannot win."),
-        "cleared" => Notice::ok("Round cleared."),
-        "not_demo" => {
-            Notice::error("That is a real 42 account. Only stand-in players can be signed in as.")
-        }
-        "bad_login" => Notice::error("Logins may only contain letters, digits and hyphens."),
-        "bad_guess" => Notice::error("That is not a whole number of 1 or more."),
-        "already" => {
-            Notice::error("You have already guessed this round, and a guess cannot be changed.")
-        }
-        "empty" => Notice::error("Type a number first."),
-        "invalid" => Notice::error("Whole numbers only — no signs, decimals or letters."),
-        "too_small" => Notice::error("The smallest allowed guess is 1."),
-        "too_big" => Notice::error(
-            "That is past the ceiling of 9 223 372 036 854 775 807. Aim lower — that is the point.",
-        ),
-        "signin" => Notice::error("Sign in before guessing."),
-        "verified" => Notice::ok("Email confirmed. You're in: pick a number."),
-        "password_set" => Notice::ok("New password saved, and every other session signed out."),
-        "resent" => Notice::ok("Sent another link. It works for 24 hours."),
-        "resend_wait" => Notice::error("We sent a few links already. Give it an hour."),
-        "mail_failed" => Notice::error("The mail didn't go out. Try again later."),
-        "welcome" => Notice::ok("Welcome. Pick a number: lowest one nobody else picks wins."),
-        "held_existing" => Notice::error("You had already guessed this round, so that number stands."),
-        "voided" => Notice::error("This round was called off by a moderator; it takes no more guesses."),
-        "broke" => Notice::error(
-            "Not enough points for a guess. You get more each day you visit the round.",
-        ),
-        "held_unverified" => Notice::error(
-            "Confirm your email first; then pick your number again. Nothing was entered.",
-        ),
-        "deleted" => Notice::ok("Your account is deleted."),
-        "unverified" => Notice::error(
-            "Verify your email address to play: open the link we sent you.",
-        ),
-        _ => return None,
-    })
+    let (kind, text) = crate::copy::notice(code?)?;
+    Some(if kind == "ok" { Notice::ok(text) } else { Notice::error(text) })
 }
 
 /// Whether this visitor may be shown who played in `pool`.
@@ -83,12 +45,12 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
 /// In the 42 pool a login and a real name are a 42 student's personal data,
 /// so they leave the server only for a visitor who plays as a 42 student;
 /// being signed in is not enough, since an account need not be a 42 one.
-/// In the global pool everyone goes by a username they chose, shown to anyone
-/// signed in. Everyone else gets `templates::MASK`.
+/// In the global pool everyone goes by a username they chose, and usernames
+/// are public (spec R9.2): shown to every visitor, signed in or not.
 fn names_visible(pool: Pool, viewer: Option<&Viewer>) -> bool {
     match pool {
         Pool::Vienna => viewer.is_some_and(|v| v.intra.is_some()),
-        Pool::Global => viewer.is_some(),
+        Pool::Global => true,
     }
 }
 
@@ -124,6 +86,9 @@ fn home(pool: Pool) -> &'static str {
 #[derive(Deserialize)]
 pub struct IndexQuery {
     pub msg: Option<String>,
+    /// The number a "held_late" notice is about: digits only, so safe to show.
+    #[serde(default)]
+    pub n: Option<i64>,
 }
 
 pub async fn index(
@@ -210,15 +175,14 @@ async fn index_in(
     let just_locked = query.msg.as_deref() == Some("saved") && my_guess_label.is_some();
     let notice = match query.msg.as_deref() {
         // Both name the round that is open now, which a fixed text cannot.
-        Some("rolled") => Some(Notice::error(format!(
-            "too late, round closed. nothing was entered; this round closes {}.",
-            round.deadline_human()
+        Some("rolled") => Some(Notice::error(crate::copy::too_late())),
+        Some("held_late") => Some(Notice::error(crate::copy::closed_during_signin(
+            query.n.map(group_digits).as_deref(),
+            &round.deadline.with_timezone(&crate::round::TZ).format("%H:%M").to_string(),
         ))),
-        Some("held_late") => Some(Notice::error(format!(
-            "the round closed while you were signing in, so your number was not entered. \
-             this round closes {}.",
-            round.deadline_human()
-        ))),
+        Some("held_existing") => my_guess_label
+            .as_deref()
+            .map(|n| Notice::error(crate::copy::already_locked(n))),
         code => notice_for(code).filter(|_| !just_locked),
     };
     Ok(templates::render(&IndexTemplate {
@@ -328,15 +292,7 @@ async fn results_in(
 
     // The round that closed most recently, said in one line: it is what
     // most people open /results for. Its chart is on its day page.
-    let (latest, takeaway) = match all.first().cloned() {
-        Some(newest) => {
-            let tallies = db::round_tallies(&state.db, pool, &newest.round_date).await?;
-            let collided = stats::collided_below(&tallies, newest.winning_value, 6);
-            let line = takeaway_line(newest.winning_value, newest.total, &collided);
-            (Some(RoundView::new(newest, named)), Some(line))
-        }
-        None => (None, None),
-    };
+    let latest = all.first().cloned().map(|newest| RoundView::new(newest, named));
     let q = query.q.unwrap_or_default().trim().to_string();
     let show: &'static str = match query.show.as_deref() {
         Some("30") => "30",
@@ -369,7 +325,6 @@ async fn results_in(
         test_mode: state.cfg.test_env(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         latest,
-        takeaway,
         data_source: data_source(&state, pool).await?,
         first_close: Round::current(state.now()).deadline_human(),
         rounds,
@@ -406,7 +361,7 @@ async fn day_in(
     jar: CookieJar,
     date: String,
 ) -> Result<Response, AppError> {
-    let no_such_day = || error_page(StatusCode::NOT_FOUND, "No closed round on that day.");
+    let no_such_day = || error_page(StatusCode::NOT_FOUND, crate::copy::NO_DAY);
 
     // Only well-formed dates reach the database.
     let is_date = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
@@ -486,14 +441,18 @@ async fn day_in(
     let previous = earlier.first().map(|r| r.date_key.clone());
     let data_source = data_source(&state, pool).await?;
     let pot_line = match pool {
-        Pool::Global => db::pot(&state.db, &date).await?.map(|p| {
+        // Said only when there was a pot: a round played before points
+        // existed, or by bots, has nothing to say here.
+        Pool::Global => db::pot(&state.db, &date).await?.and_then(|p| {
             let total = templates::points_label(&(p.stakes + p.carried_in));
             if p.voided {
-                "this round was called off; every stake was refunded.".to_string()
+                Some("called off · stakes refunded".to_string())
+            } else if p.stakes + p.carried_in == 0 {
+                None
             } else if p.winner_id.is_some() {
-                format!("the pot of {total} went to the winner.")
+                Some(format!("pot {total} → winner"))
             } else {
-                format!("nobody won, so the pot of {total} rolled over to the next round.")
+                Some(format!("no winner · pot {total} rolled over"))
             }
         }),
         Pool::Vienna => None,
@@ -506,7 +465,6 @@ async fn day_in(
         takeaway,
         summary: summary_text,
         data_source,
-        names_visible: named,
         my_pick: mine.map(group_digits),
         share_text,
         rows,
@@ -604,7 +562,7 @@ fn chart_summary(tallies: &[stats::Tally], winner: Option<i64>, players: i64) ->
         .map(|w| format!("winner: {}", group_digits(w)))
         .unwrap_or_else(|| "no winner".to_string());
     format!(
-        "{players} {} · {distinct} {} · {shared} shared numbers · {most} · {winner}.",
+        "{players} {} · {distinct} {} · {shared} shared numbers · {most} · {winner}",
         if players == 1 { "player" } else { "players" },
         if distinct == 1 { "number" } else { "numbers" },
     )
@@ -955,7 +913,7 @@ fn is_admin(state: &AppState, viewer: &Viewer) -> bool {
 }
 
 fn admin_gone() -> Response {
-    error_page(StatusCode::NOT_FOUND, "No such page.")
+    error_page(StatusCode::NOT_FOUND, crate::copy::NO_PAGE)
 }
 
 pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
@@ -1347,7 +1305,7 @@ fn calendar_in(pool: Pool, state: &AppState, file: &str) -> Response {
 }
 
 fn not_found_page() -> Response {
-    error_page(StatusCode::NOT_FOUND, "No such page.")
+    error_page(StatusCode::NOT_FOUND, crate::copy::NO_PAGE)
 }
 
 /// The open round's deadline and the server's clock, for the countdown to
@@ -1387,7 +1345,7 @@ pub async fn healthz(State(state): State<AppState>) -> Response {
 }
 
 pub async fn not_found() -> Response {
-    error_page(StatusCode::NOT_FOUND, "No such page.")
+    error_page(StatusCode::NOT_FOUND, crate::copy::NO_PAGE)
 }
 
 #[cfg(test)]
@@ -1466,7 +1424,7 @@ mod tests {
         // The global pool goes by chosen usernames, shown to anyone signed in.
         assert!(names_visible(Pool::Global, Some(&student)));
         assert!(names_visible(Pool::Global, Some(&stranger)));
-        assert!(!names_visible(Pool::Global, None));
+        assert!(names_visible(Pool::Global, None), "usernames are public");
 
         let r = round("2026-08-14", Some(("megardes", 1_337)));
         let shown = RoundView::new(r.clone(), true).winner.unwrap();
@@ -1564,7 +1522,7 @@ mod tests {
             db::insert_guess(&t.db, Pool::Vienna, &yesterday, 1001, 3, true).await.unwrap();
 
             // A student gets the 42 round, names and all.
-            let front = handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None }))
+            let front = handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None, n: None }))
                 .await
                 .unwrap();
             let html = body(front).await;
@@ -1574,7 +1532,7 @@ mod tests {
             // Anyone else, signed in or not, is sent to the same page of the
             // global round and never sees a thing about the 42 one.
             for jar in [jar("x"), CookieJar::new()] {
-                let front = handlers::index(State(state.clone()), jar.clone(), Query(handlers::IndexQuery { msg: None }))
+                let front = handlers::index(State(state.clone()), jar.clone(), Query(handlers::IndexQuery { msg: None, n: None }))
                     .await
                     .unwrap();
                 assert_eq!(location(&front), "/g/");
@@ -1657,7 +1615,7 @@ mod tests {
         async fn global_page(state: &AppState, token: Option<&str>) -> String {
             let jar = token.map(jar).unwrap_or_default();
             body(
-                handlers::global_index(State(state.clone()), jar, Query(handlers::IndexQuery { msg: None }))
+                handlers::global_index(State(state.clone()), jar, Query(handlers::IndexQuery { msg: None, n: None }))
                     .await
                     .unwrap(),
             )
@@ -1713,13 +1671,13 @@ mod tests {
 
             // Each front page shows that pool's sealed number.
             let vienna = body(
-                handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None }))
+                handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None, n: None }))
                     .await
                     .unwrap(),
             )
             .await;
-            assert!(vienna.contains(r#"<p class="sealed-value">4</p>"#));
-            assert!(global_page(&state, Some("s")).await.contains(r#"<p class="sealed-value">9</p>"#));
+            assert!(vienna.contains("locked: <b>4</b>"));
+            assert!(global_page(&state, Some("s")).await.contains("locked: <b>9</b>"));
         }
 
         #[tokio::test]
@@ -1749,7 +1707,7 @@ mod tests {
             let html = page(Some("w")).await;
             assert!(html.contains("ann"), "an account, even unverified, sees who won");
             assert!(html.contains(&format!(r#"href="/g/day/{yesterday}""#)), "links stay in the pool");
-            assert!(!page(None).await.contains("ann"), "signed out does not");
+            assert!(page(None).await.contains("ann"), "usernames are public, signed out too");
             // The 42 pool has nothing for that day.
             let vienna = body(
                 handlers::results(State(state.clone()), jar("w"), Query(ResultsQuery { q: None, show: None, date: None }))
@@ -1782,7 +1740,7 @@ mod tests {
             let global = global_page(&state, Some("s")).await;
             assert!(global.contains(r#"<a class="on" aria-current="true" href="/g/">global</a>"#));
             let vienna = body(
-                handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None }))
+                handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None, n: None }))
                     .await
                     .unwrap(),
             )
@@ -1912,7 +1870,7 @@ mod round_page_tests {
     use crate::testkit::{app, body, jar, location, set_cookie, stranger, student};
 
     async fn page(state: &AppState, jar: CookieJar, msg: Option<&str>) -> String {
-        let q = Query(IndexQuery { msg: msg.map(str::to_string) });
+        let q = Query(IndexQuery { msg: msg.map(str::to_string), n: None });
         body(handlers::global_index(State(state.clone()), jar, q).await.unwrap()).await
     }
 
@@ -1968,17 +1926,17 @@ mod round_page_tests {
         let at = |needle: &str| html.find(needle).unwrap_or_else(|| panic!("missing {needle:?}"));
         // premise, status, input + action, hint, rules, then the rest.
         let order = [
-            at("lowest unique number wins."),
+            at("lowest unique number wins"),
             at(r#"class="roundstatus""#),
             at(r#"id="guess""#),
-            at("low gets crowded"),
-            at("shared numbers are out"),
+            at("<b>01</b>"),
+            at("match anyone &rarr; you both lose it."),
         ];
         assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
 
         assert!(html.contains("closes in"));
         assert!(html.contains("closes 12:42 vienna"));
-        assert!(html.contains("pick yours below"));
+        assert!(html.contains("not playing yet &darr;"));
         assert!(!html.contains(">guest<"));
         // Server time for the countdown, and no live region on it.
         assert!(html.contains("data-closes-at=\""));
@@ -1994,7 +1952,8 @@ mod round_page_tests {
         // One primary action, and the header's sign-in is a plain link.
         assert_eq!(html.matches("class=\"primary\"").count(), 1);
         assert!(html.contains(r#"<a class="signin" href="/login">sign in</a>"#));
-        assert!(html.contains("sign in to lock it in"));
+        assert!(!html.contains("crowded"), "no strategy hint (R22.3)");
+        assert!(html.contains(r#"class="guess-field""#), "the cursor's wrapper (R23)");
     }
 
     #[tokio::test]
@@ -2028,7 +1987,7 @@ mod round_page_tests {
         )
         .await
         .unwrap();
-        assert!(body(login).await.contains("create an account to lock in your 7."));
+        assert!(body(login).await.contains("sign in to lock 7"));
         assert!(guesses(&t.db).await.is_empty(), "nothing locked before signing in");
 
         let resp = sign_in(&state, held.clone(), "ann").await;
@@ -2054,11 +2013,17 @@ mod round_page_tests {
         state.shift_clock(Round::current(now).seconds_left(now) + 1);
 
         let resp = sign_in(&state, held, "ann").await;
-        assert_eq!(location(&resp), "/g?msg=held_late");
+        assert_eq!(location(&resp), "/g?msg=held_late&n=7");
         assert!(guesses(&t.db).await.is_empty());
-        let html = page(&state, CookieJar::new(), Some("held_late")).await;
-        assert!(html.contains("your number was not entered"));
-        assert!(html.contains("this round closes"), "names the next close");
+        let resp = handlers::global_index(
+            State(state.clone()),
+            CookieJar::new(),
+            Query(IndexQuery { msg: Some("held_late".into()), n: Some(7) }),
+        )
+        .await
+        .unwrap();
+        let html = body(resp).await;
+        assert!(html.contains("round closed while you signed in · 7 not entered · next round 12:42"), "{html}");
     }
 
     #[tokio::test]
@@ -2121,15 +2086,13 @@ mod round_page_tests {
 
         let html = page(&state, jar(&session), Some("saved")).await;
         assert!(html.contains("you're in"));
-        assert!(html.contains("your number: <b>7</b> &middot; closes 12:42 vienna (in"));
-        assert!(html.contains(&format!(r#"href="/g/round/{round}.ics" download"#)));
-        assert!(html.contains("locked: your number is <b>7</b>"));
+        assert!(html.contains("locked: <b>7</b> &middot; reveal 12:42 &middot; <span class=\"countdown-mirror\">"), "{html}");
+        assert!(html.contains(&format!(r#"<a href="/g/round/{round}.ics" download>add to calendar</a>"#)));
         assert!(!html.contains(r#"id="guess""#), "no input once locked");
 
-        // Back later: the locked line, from what the server holds, no panel.
+        // Back later: the same line, from what the server holds.
         let html = page(&state, jar(&session), None).await;
-        assert!(html.contains("locked: your number is <b>7</b>"));
-        assert!(!html.contains("locked-panel"));
+        assert!(html.contains("locked: <b>7</b>"));
     }
 
     #[tokio::test]
@@ -2174,7 +2137,7 @@ mod round_page_tests {
         assert_eq!(location(&resp), "/g?msg=rolled");
         assert_eq!(guesses(&t.db).await.len(), 1);
         let html = page(&state, jar("b"), Some("rolled")).await;
-        assert!(html.contains("too late, round closed"));
+        assert!(html.contains("too late · round closed"));
         // So is a first step typed on the old page.
         let resp = handlers::global_submit_guess(
             State(state.clone()),
@@ -2232,10 +2195,10 @@ mod round_page_tests {
         let (_t, state) = app(&[]).await;
         student(&state.db, 1001, "megardes", "s").await;
         let html = body(
-            handlers::index(State(state.clone()), jar("s"), Query(IndexQuery { msg: None })).await.unwrap(),
+            handlers::index(State(state.clone()), jar("s"), Query(IndexQuery { msg: None, n: None })).await.unwrap(),
         )
         .await;
         assert!(html.contains(r#"action="/guess""#));
-        assert!(html.contains("final when you confirm"));
+        assert!(html.contains(r#"action="/guess""#));
     }
 }

@@ -70,7 +70,13 @@ pub(crate) async fn signed_in_to(state: &AppState, jar: CookieJar, account_id: i
         // Always cleared, whatever becomes of it.
         jar = jar.remove(crate::held::clearing_cookie());
         if let Some(held) = state.held.take(&held_token) {
-            to = lock_held(state, account_id, held).await?.to_string();
+            let after = lock_held(state, account_id, held).await?;
+            // A new account still picks its username first, then goes on.
+            to = if to == "/welcome" {
+                format!("/welcome?then={}", after.replace('?', "%3F").replace('&', "%26").replace('=', "%3D"))
+            } else {
+                after
+            };
         }
     }
     Ok((jar, Redirect::to(&to)).into_response())
@@ -78,13 +84,14 @@ pub(crate) async fn signed_in_to(state: &AppState, jar: CookieJar, account_id: i
 
 /// Locks a held number for a freshly signed-in account, exactly once, and
 /// says where to go to hear how that went.
-async fn lock_held(state: &AppState, account_id: i64, held: crate::held::Held) -> Result<&'static str, AppError> {
+async fn lock_held(state: &AppState, account_id: i64, held: crate::held::Held) -> Result<String, AppError> {
     let round = crate::round::Round::current(state.now()).key();
     if held.round != round {
-        return Ok("/g?msg=held_late");
+        // The number goes back with the message, so the page can say which.
+        return Ok(format!("/g?msg=held_late&n={}", held.value));
     }
     if !db::account_verified(&state.db, account_id).await? {
-        return Ok("/g?msg=held_unverified");
+        return Ok("/g?msg=held_unverified".to_string());
     }
     crate::economy::collect(&state.db, account_id, &round).await?;
     Ok(
@@ -93,7 +100,8 @@ async fn lock_held(state: &AppState, account_id: i64, held: crate::held::Held) -
             db::Locked::AlreadyOther => "/g?msg=held_existing",
             db::Locked::Broke => "/g?msg=broke",
             db::Locked::Voided => "/g?msg=voided",
-        },
+        }
+        .to_string(),
     )
 }
 
@@ -146,10 +154,7 @@ fn login_page(state: &AppState, viewer: Option<Viewer>, notice: Option<Notice>, 
 /// "create an account to lock in your 7", for a visitor with a held number.
 fn held_notice(state: &AppState, jar: &CookieJar) -> Option<Notice> {
     let held = state.held.peek(&crate::held::token(jar)?)?;
-    Some(Notice::ok(format!(
-        "create an account to lock in your {}.",
-        crate::templates::group_digits(held.value)
-    )))
+    Some(Notice::ok(crate::copy::sign_in_to_lock(&crate::templates::group_digits(held.value))))
 }
 
 pub async fn login_page_handler(
@@ -159,8 +164,8 @@ pub async fn login_page_handler(
 ) -> Result<Response, AppError> {
     let viewer = current_viewer(&state, &jar).await?;
     let notice = match query.msg.as_deref() {
-        Some("signed_out") => Some(Notice::ok("Signed out.")),
-        Some("password_set") => Some(Notice::ok("Password changed. Sign in with the new one.")),
+        Some("signed_out") => Some(Notice::ok(crate::copy::notice("signed_out").expect("known").1)),
+        Some("password_set") => Some(Notice::ok(crate::copy::notice("password_set").expect("known").1)),
         _ => held_notice(&state, &jar),
     };
     Ok(templates::render(&login_page(&state, viewer, notice, String::new())))
@@ -201,7 +206,7 @@ pub async fn login_email(
     for (key, rule) in [(&by_account, limits::LOGIN_PER_EMAIL), (&by_ip, limits::LOGIN_PER_IP)] {
         if !state.limits.allows(key, rule) {
             let wait = minutes(state.limits.retry_after(key, rule));
-            return refuse(format!("Too many attempts. Try again in {wait} minutes."), typed);
+            return refuse(crate::copy::too_many_tries(wait), typed);
         }
     }
 
@@ -211,7 +216,7 @@ pub async fn login_email(
         _ => {
             state.limits.record(&by_account);
             state.limits.record(&by_ip);
-            refuse("Wrong username, email or password.".to_string(), typed)
+            refuse(crate::copy::WRONG_LOGIN.to_string(), typed)
         }
     }
 }
@@ -290,14 +295,14 @@ pub async fn signup(
         return refuse("password", why);
     }
     if !turnstile_passed(&state, &form.turnstile, &ip).await {
-        return refuse("", "The are-you-human check didn't pass. Try again.");
+        return refuse("", crate::copy::HUMAN_CHECK);
     }
     if !db::username_available(&state.db, &username).await? {
-        return refuse("username", "That username is taken.");
+        return refuse("username", crate::copy::USERNAME_TAKEN);
     }
     // Counted only for a sign-up that got this far, so typos are free.
     if !state.limits.take(&format!("signup:{}", ip_key(&ip)), limits::SIGNUP_PER_IP) {
-        return refuse("", "Too many new accounts from here. Try again in an hour.");
+        return refuse("", crate::copy::SIGNUP_LIMIT);
     }
 
     let hash = credentials::hash_password(&form.password).await?;
@@ -314,7 +319,7 @@ pub async fn signup(
                 send(&state, mail::exists(&email, &state.cfg.public_url)).await;
             }
         }
-        NewAccount::UsernameTaken => return refuse("username", "That username is taken."),
+        NewAccount::UsernameTaken => return refuse("username", crate::copy::USERNAME_TAKEN),
     }
     Ok(check_inbox(&state))
 }
@@ -364,12 +369,8 @@ fn dead_link(state: &AppState) -> Response {
         user: None,
         test_mode: state.cfg.test_env(),
         impersonating: false,
-        title: "that link doesn't work",
-        lines: vec![
-            "it has expired or was already used. links from us work once, for a day \
-             (password links for an hour)."
-                .into(),
-        ],
+        title: crate::copy::DEAD_LINK,
+        lines: vec!["confirm links last 24h · reset links 1h · each works once".into()],
         link: Some(("/login", "sign in")),
     });
     *resp.status_mut() = StatusCode::GONE;
@@ -667,15 +668,15 @@ mod tests {
         sent.lock().unwrap().clear();
 
         for (email, username, password, says) in [
-            ("not-an-email", "ann", PASSWORD, "look like an email"),
-            ("x@mailinator.com", "ann", PASSWORD, "Throwaway"),
+            ("not-an-email", "ann", PASSWORD, "not an email"),
+            ("x@mailinator.com", "ann", PASSWORD, "throwaway"),
             ("ann@example.com", "a", PASSWORD, "3 to 20"),
             ("ann@example.com", "admin", PASSWORD, "reserved"),
             ("ann@example.com", "MeGardes", PASSWORD, "taken"),
             ("ann@example.com", "takenname", PASSWORD, "taken"),
             ("ann@example.com", "ann", "short", "at least 10"),
-            ("ann@example.com", "ann", "1234567890", "most common"),
-            ("ann@example.com", "ann", "ann@example.com", "be your email address"),
+            ("ann@example.com", "ann", "1234567890", "too common"),
+            ("ann@example.com", "ann", "ann@example.com", "your email or username"),
         ] {
             let resp = sign_up(&state, email, username, password).await;
             assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY, "{email} {username}");
@@ -692,7 +693,7 @@ mod tests {
     async fn a_live_site_without_mail_offers_no_email_sign_up() {
         let (t, state, _) = app_with(config(&[])).await;
         let resp = sign_up(&state, "ann@example.com", "ann", PASSWORD).await;
-        assert!(body(resp).await.contains("isn't available"));
+        assert!(body(resp).await.contains("not available"));
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 0);
         let page = body(login_page_handler(State(state), CookieJar::new(), Query(LoginQuery::default())).await.unwrap()).await;
         assert!(!page.contains(r#"action="/login/email""#));
@@ -718,7 +719,7 @@ mod tests {
         for resp in [wrong, unknown] {
             assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
             assert_eq!(set_cookie(&resp, auth::SESSION_COOKIE), None);
-            assert!(body(resp).await.contains("Wrong username, email or password."));
+            assert!(body(resp).await.contains("wrong username, email or password"));
         }
 
         let resp = log_in(&state, " ANN@example.com", PASSWORD).await;
@@ -740,7 +741,7 @@ mod tests {
         let session = set_cookie(&resp, auth::SESSION_COOKIE).unwrap();
 
         let page = body(
-            crate::handlers::global_index(State(state.clone()), jar(&session), Query(crate::handlers::IndexQuery { msg: None }))
+            crate::handlers::global_index(State(state.clone()), jar(&session), Query(crate::handlers::IndexQuery { msg: None, n: None }))
                 .await
                 .unwrap(),
         )
@@ -780,8 +781,8 @@ mod tests {
         crate::testkit::student(&t.db, 1001, "megardes", "s").await;
         let no_password = body(log_in(&state, "megardes", PASSWORD).await).await;
         let nobody = body(log_in(&state, "nobody", PASSWORD).await).await;
-        assert!(no_password.contains("Wrong username, email or password."));
-        assert!(nobody.contains("Wrong username, email or password."));
+        assert!(no_password.contains("wrong username, email or password"));
+        assert!(nobody.contains("wrong username, email or password"));
     }
 
     #[tokio::test]
@@ -794,7 +795,7 @@ mod tests {
         }
         for typed in ["ann", "ann@example.com"] {
             let resp = log_in(&state, typed, PASSWORD).await;
-            assert!(body(resp).await.contains("Too many attempts"), "{typed}");
+            assert!(body(resp).await.contains("too many tries"), "{typed}");
         }
     }
 
@@ -807,7 +808,7 @@ mod tests {
         }
         let resp = log_in(&state, "ann@example.com", PASSWORD).await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-        assert!(body(resp).await.contains("Too many attempts"));
+        assert!(body(resp).await.contains("too many tries"));
     }
 
     #[tokio::test]

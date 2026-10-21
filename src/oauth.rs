@@ -150,7 +150,7 @@ async fn start(state: &AppState, provider: Provider, link: Option<i64>) -> Resul
 }
 
 fn unavailable() -> Response {
-    error_page(StatusCode::NOT_FOUND, "That way of signing in isn't available here.")
+    error_page(StatusCode::NOT_FOUND, crate::copy::NO_PROVIDER)
 }
 
 /// `/login/{provider}`: sign in, or make an account, through a provider.
@@ -208,13 +208,13 @@ async fn arrived(
         // Askama escapes this on the way into the page.
         return Ok(Err(error_page(
             StatusCode::BAD_REQUEST,
-            &format!("{} refused the sign-in: {detail}", provider.name()),
+            &crate::copy::provider_refused(&provider.name().to_lowercase(), &detail),
         )));
     }
     let (Some(code), Some(token)) = (query.code, query.state) else {
         return Ok(Err(error_page(
             StatusCode::BAD_REQUEST,
-            "That sign-in link is incomplete. Start again from the home page.",
+            crate::copy::LINK_INCOMPLETE,
         )));
     };
     // Consumed before anything else happens, so a state cannot be replayed.
@@ -222,7 +222,7 @@ async fn arrived(
         Some(flow) if flow.provider == provider.key() => Ok(Ok((code, flow))),
         _ => Ok(Err(error_page(
             StatusCode::BAD_REQUEST,
-            "That sign-in link has expired or was already used. Start again from the home page.",
+            crate::copy::LINK_USED,
         ))),
     }
 }
@@ -233,7 +233,7 @@ fn provider_failed(provider: Provider, err: anyhow::Error) -> Response {
     tracing::error!(error = ?err, provider = provider.key(), "sign-in with a provider failed");
     error_page(
         StatusCode::BAD_GATEWAY,
-        &format!("Signing in with {} didn't work just now. Try again in a moment.", provider.name()),
+        &crate::copy::provider_failed(&provider.name().to_lowercase()),
     )
 }
 
@@ -261,7 +261,7 @@ async fn finish_link(
     if viewer.map(|v| v.account.id) != Some(account_id) {
         return Ok(Err(error_page(
             StatusCode::BAD_REQUEST,
-            "That link was started from another session. Start again from your account page.",
+            crate::copy::LINK_OTHER_SESSION,
         )));
     }
     let msg = match db::link_identity(&state.db, provider.key(), &person.subject, account_id, person.email.as_deref()).await? {
@@ -285,7 +285,7 @@ async fn finish_sign_in(
     match db::identity_account(&state.db, provider.key(), &person.subject).await? {
         Some((account_id, true)) => return signed_in_to(state, jar, account_id, "/g").await,
         Some((_, false)) => {
-            return Ok(error_page(StatusCode::FORBIDDEN, "This account can't sign in."));
+            return Ok(error_page(StatusCode::FORBIDDEN, crate::copy::CANT_SIGN_IN));
         }
         None => {}
     }
@@ -296,11 +296,7 @@ async fn finish_sign_in(
         if db::email_in_use(&state.db, email).await? {
             return Ok(error_page(
                 StatusCode::CONFLICT,
-                &format!(
-                    "An account already uses {email}. Sign in to it the way you did before, \
-                     then add {} on your account page.",
-                    provider.name()
-                ),
+                &crate::copy::email_in_use(email, &provider.name().to_lowercase()),
             ));
         }
     }
@@ -314,7 +310,9 @@ async fn finish_sign_in(
     )
     .await?;
     tracing::info!(account = account.id, provider = provider.key(), "new account");
-    signed_in_to(state, jar, account.id, "/g?msg=welcome").await
+    // A provider's handle may be a real name its owner never meant to make
+    // public here: one step to pick the username before playing (D6).
+    signed_in_to(state, jar, account.id, "/welcome").await
 }
 
 // ---------------------------------------------------------------- GitHub
@@ -418,11 +416,7 @@ pub async fn github_callback(
     let too_new = (chrono::Utc::now() - created < min_age).then(|| {
         error_page(
             StatusCode::FORBIDDEN,
-            &format!(
-                "GitHub accounts newer than {} days can't make an account here. \
-                 Sign up with Google or an email address instead.",
-                state.cfg.github_min_age_days
-            ),
+            &crate::copy::github_too_new(state.cfg.github_min_age_days),
         )
     });
     finish_sign_in(&state, jar, &ip, Provider::Github, person, too_new).await
@@ -494,7 +488,7 @@ pub async fn google_callback(
     let Some(email) = email else {
         return Ok(error_page(
             StatusCode::FORBIDDEN,
-            "Google didn't confirm an email address for that account, so it can't be used here.",
+            crate::copy::GOOGLE_NO_EMAIL,
         ));
     };
     let person = Person {
@@ -570,7 +564,7 @@ pub async fn callback_42(
     }
 
     if let Some((_, false)) = db::identity_account(&state.db, "42", &person.subject).await? {
-        return Ok(error_page(StatusCode::FORBIDDEN, "This account can't sign in."));
+        return Ok(error_page(StatusCode::FORBIDDEN, crate::copy::CANT_SIGN_IN));
     }
     db::upsert_user(&state.db, me.id, &me.login, me.display_name(), me.image_url()).await?;
     let account = db::account_for_intra(&state.db, me.id, &me.login).await?;
@@ -760,7 +754,7 @@ mod tests {
         assert_eq!(q["code_challenge_method"], "S256");
 
         let resp = back(&state, "github", "c1", &st, None).await;
-        assert_eq!(location(&resp), "/g?msg=welcome");
+        assert_eq!(location(&resp), "/welcome");
         // PKCE: the token endpoint got the verifier behind the challenge.
         let verifier = fake.verifiers.lock().unwrap()["c1"].clone();
         assert_eq!(pkce_challenge(&verifier), q["code_challenge"]);
@@ -786,7 +780,7 @@ mod tests {
         fake.people.lock().unwrap().insert("new".into(), github_user(1, "fresh", 3, None));
         let resp = round_trip(&state, "github", "new", None).await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-        assert!(body(resp).await.contains("newer than 30 days"));
+        assert!(body(resp).await.contains("under 30 days"));
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 0);
     }
 
@@ -799,7 +793,7 @@ mod tests {
 
         let resp = round_trip(&state, "google", "g", None).await;
         assert_eq!(resp.status(), StatusCode::CONFLICT);
-        assert!(body(resp).await.contains("add Google on your account page"));
+        assert!(body(resp).await.contains("add google on your account page"));
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 1);
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM identities WHERE provider = 'google'").await, 0);
     }
@@ -811,7 +805,7 @@ mod tests {
         assert_eq!(round_trip(&state, "google", "u", None).await.status(), StatusCode::FORBIDDEN);
         fake.people.lock().unwrap().insert("v".into(), google_user("g-2", "bob@example.com", true));
         let resp = round_trip(&state, "google", "v", None).await;
-        assert_eq!(location(&resp), "/g?msg=welcome");
+        assert_eq!(location(&resp), "/welcome");
         assert_eq!(viewer_of(&state, &resp).await.account.username, "bob");
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 1);
     }
@@ -828,7 +822,7 @@ mod tests {
         assert_eq!(back(&state, "github", "c", &st, None).await.status(), StatusCode::BAD_REQUEST);
 
         let (st, _) = begin(&state, "github", None).await;
-        assert_eq!(location(&back(&state, "github", "c", &st, None).await), "/g?msg=welcome");
+        assert_eq!(location(&back(&state, "github", "c", &st, None).await), "/welcome");
         assert_eq!(back(&state, "github", "c", &st, None).await.status(), StatusCode::BAD_REQUEST, "no replay");
 
         // Made up.
@@ -929,7 +923,7 @@ mod tests {
         fake.people.lock().unwrap().insert("p".into(), intra_user(2002, "parisien", 1));
 
         let resp = round_trip(&state, "42", "p", None).await;
-        assert_eq!(location(&resp), "/g?msg=welcome");
+        assert_eq!(location(&resp), "/welcome");
         let v = viewer_of(&state, &resp).await;
         assert!(v.intra.is_none(), "no 42 pool");
         assert!(v.account.verified);
@@ -997,7 +991,7 @@ mod tests {
         let resp = google_callback(State(state.clone()), CookieJar::new(), ClientIp(None), q).await.unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         let html = body(resp).await;
-        assert!(html.contains("Google refused the sign-in"));
+        assert!(html.contains("google refused the sign-in"));
         assert!(!html.contains("<script>x"));
     }
 

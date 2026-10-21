@@ -9,14 +9,14 @@
 <section class="sec auth" style="--b: 0">
   <div class="auth-card">
     <h1 class="auth-title">pick a new password</h1>
-    <p class="auth-sub">this signs you out everywhere else.</p>
+    <p class="auth-sub">signs out every other session</p>
     {% include "_notice.html" %}
     <form class="authform" method="post" action="/reset">
       <input type="hidden" name="token" value="{{ token }}">
       <label for="password">new password</label>
       <input id="password" name="password" type="password" autocomplete="new-password" required
              minlength="10" maxlength="128" aria-describedby="password-hint">
-      <p class="hint" id="password-hint">at least 10 characters.</p>
+      <p class="hint" id="password-hint">10+ characters</p>
       <button type="submit" class="primary">save and sign in</button>
     </form>
   </div>

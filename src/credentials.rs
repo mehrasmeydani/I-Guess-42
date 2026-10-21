@@ -39,15 +39,15 @@ pub fn username_problem(name: &str) -> Option<&'static str> {
     if !USERNAME.is_match(name) {
         let len = name.chars().count();
         return Some(if !(USERNAME_MIN..=USERNAME_MAX).contains(&len) {
-            "Usernames are 3 to 20 characters long."
+            crate::copy::USERNAME_LENGTH
         } else if !USERNAME_CHARS.is_match(name) {
-            "Usernames use lowercase letters, digits, - and _ only."
+            crate::copy::USERNAME_CHARS
         } else {
-            "Usernames start with a letter or a digit."
+            crate::copy::USERNAME_START
         });
     }
     if RESERVED.contains(&name) || RESERVED_PREFIXES.iter().any(|p| name.starts_with(p)) {
-        return Some("That username is reserved.");
+        return Some(crate::copy::USERNAME_RESERVED);
     }
     None
 }
@@ -71,7 +71,7 @@ pub fn username_from(raw: &str) -> String {
     if name.chars().count() < USERNAME_MIN {
         name = format!("player-{name}").trim_end_matches('-').to_string();
     }
-    if username_problem(&name) == Some("That username is reserved.") {
+    if username_problem(&name) == Some(crate::copy::USERNAME_RESERVED) {
         name = format!("p-{name}");
         name.truncate(USERNAME_MAX - 3);
     }
@@ -114,11 +114,11 @@ pub fn looks_like_email(typed: &str) -> bool {
 pub fn normalize_email(raw: &str) -> Result<String, &'static str> {
     let email = raw.trim().to_lowercase();
     if email.len() > 254 || !EMAIL.is_match(&email) {
-        return Err("That doesn't look like an email address.");
+        return Err(crate::copy::EMAIL_BAD);
     }
     let (_, domain) = email.split_once('@').expect("the pattern has one @");
     if is_disposable(domain) {
-        return Err("Throwaway email addresses can't be used here.");
+        return Err(crate::copy::EMAIL_THROWAWAY);
     }
     Ok(email)
 }
@@ -159,18 +159,18 @@ static COMMON: LazyLock<std::collections::HashSet<&'static str>> = LazyLock::new
 pub fn password_problem(password: &str, email: &str, username: &str) -> Option<&'static str> {
     let len = password.chars().count();
     if len < PASSWORD_MIN {
-        return Some("Passwords are at least 10 characters long.");
+        return Some(crate::copy::PASSWORD_SHORT);
     }
     if len > PASSWORD_MAX {
-        return Some("Passwords are at most 128 characters long.");
+        return Some(crate::copy::PASSWORD_LONG);
     }
     let lower = password.to_lowercase();
     let local = email.split('@').next().unwrap_or("");
     if lower == email || lower == username || (!local.is_empty() && lower == local) {
-        return Some("Your password can't be your email address or username.");
+        return Some(crate::copy::PASSWORD_SELF);
     }
     if COMMON.contains(lower.as_str()) {
-        return Some("That password is one of the most common ones. Pick another.");
+        return Some(crate::copy::PASSWORD_COMMON);
     }
     None
 }
@@ -265,12 +265,12 @@ mod tests {
         assert!(username_problem("Mega").is_some(), "uppercase is normalised first");
         assert!(username_problem("me gardes").is_some());
         assert!(username_problem("mé").is_some());
-        assert_eq!(username_problem("-lead"), Some("Usernames start with a letter or a digit."));
-        assert_eq!(username_problem("_ab"), Some("Usernames start with a letter or a digit."));
-        assert_eq!(username_problem("ab!"), Some("Usernames use lowercase letters, digits, - and _ only."));
+        assert_eq!(username_problem("-lead"), Some(crate::copy::USERNAME_START));
+        assert_eq!(username_problem("_ab"), Some(crate::copy::USERNAME_START));
+        assert_eq!(username_problem("ab!"), Some(crate::copy::USERNAME_CHARS));
         assert_eq!(username_problem(&"a".repeat(20)), None);
         for taken in ["admin", "mod", "bot-001", "testing", "deleted-4", "system"] {
-            assert_eq!(username_problem(taken), Some("That username is reserved."), "{taken}");
+            assert_eq!(username_problem(taken), Some(crate::copy::USERNAME_RESERVED), "{taken}");
         }
         assert_eq!(normalize_username("  MeGardes "), "megardes");
     }
@@ -314,7 +314,7 @@ mod tests {
         assert!(normalize_email(&format!("{}@example.com", "a".repeat(250))).is_err(), "too long");
         assert_eq!(
             normalize_email("x@mailinator.com"),
-            Err("Throwaway email addresses can't be used here.")
+            Err(crate::copy::EMAIL_THROWAWAY)
         );
         assert!(normalize_email("x@inbox.mailinator.com").is_err(), "subdomains too");
         assert!(normalize_email("x@gmail.com").is_ok());

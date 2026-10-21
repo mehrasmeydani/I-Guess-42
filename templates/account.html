@@ -52,7 +52,7 @@
         <input id="current" name="current" type="password" autocomplete="current-password" required>
         <label for="password">new password</label>
         <input id="password" name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
-        <p class="hint">changing it signs you out everywhere else.</p>
+        <p class="hint">signs out every other session</p>
         <button type="submit">change password &rarr;</button>
       </form>
     {% when None %}
@@ -63,7 +63,7 @@
         <input id="email" name="email" type="email" autocomplete="email" required>
         <label for="password">password</label>
         <input id="password" name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
-        <p class="hint">we send a link to confirm the address.</p>
+        <p class="hint">we mail a confirm link</p>
         <button type="submit">add &rarr;</button>
       </form>
       {% endif %}
@@ -72,8 +72,7 @@
 
 <section class="sec" style="--b: 3">
   <h2 class="rule"><span>delete your account</span></h2>
-  <p class="dim">your logins, password and name go for good. rounds you played stay, under <b>deleted-{{ account_id }}</b>, so their results still add up.
-    {% if plays_42 %}your 42 Vienna round history belongs to the 42 pool and stays as it is.{% endif %}</p>
+  <p class="dim">logins, password, name: gone for good &middot; your rounds stay as <b>deleted-{{ account_id }}</b>{% if plays_42 %} &middot; 42 round history unchanged{% endif %}</p>
   <form class="authform" method="post" action="/account/delete">
     <label for="confirm">type your username to confirm</label>
     <input id="confirm" name="confirm" type="text" autocomplete="off" spellcheck="false" required>

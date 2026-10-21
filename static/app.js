@@ -13,6 +13,9 @@
   var DAY = 24 * 60 * 60 * 1000;
   var bar = document.querySelector('.progress');
   var fill = document.querySelector('.progress-fill');
+  var empty = document.querySelector('.progress-empty');
+  var pctLabel = document.querySelector('.progress-pct');
+  var CELLS = 24; // as templates::progress_cells
   var mirrors = document.querySelectorAll('.countdown-mirror');
   var stateEl = document.querySelector('.roundstatus .state');
   var closesIn = document.querySelector('.closes-in');
@@ -54,7 +57,10 @@
         var pct = Math.min(100, Math.max(0, Math.floor((DAY - ms) * 100 / DAY)));
         bar.setAttribute('aria-valuenow', pct);
         bar.setAttribute('aria-valuetext', pct + '% of the round gone');
-        fill.style.width = pct + '%';
+        var filled = Math.floor(pct * CELLS / 100);
+        fill.textContent = new Array(filled + 1).join('█');
+        if (empty) empty.textContent = new Array(CELLS - filled + 1).join('░');
+        if (pctLabel) pctLabel.textContent = pct + '%';
       }
     }
     if (ms <= 0) closed();
@@ -66,8 +72,8 @@
     clearInterval(timer);
     el.textContent = 'revealing…';
     el.setAttribute('aria-label', 'round closed, revealing the numbers');
-    if (stateEl) stateEl.textContent = 'closed';
-    if (closesIn) closesIn.textContent = 'round closed';
+    if (stateEl) stateEl.textContent = '[closed]';
+    if (closesIn) closesIn.textContent = 'round closed · revealing…';
     var closedRound = (document.querySelector('input[name=round]') || {}).value
       || el.dataset.closesAt.slice(0, 10);
     var base = location.pathname.indexOf('/g') === 0 ? '/g' : '';
@@ -175,7 +181,7 @@
     var url = new URL(a.href, location.href);
     if (url.origin !== location.origin) return;
     if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
-    spin(url.pathname.indexOf('/login/') === 0 ? 'connecting' : 'loading ' + url.pathname);
+    spin(url.pathname.indexOf('/login/') === 0 ? 'connecting…' : 'loading…');
   });
 
   document.addEventListener('submit', function (e) {

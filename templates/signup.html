@@ -9,7 +9,7 @@
 <section class="sec auth" style="--b: 0">
   <div class="auth-card">
     <h1 class="auth-title">create an account</h1>
-    <p class="auth-sub">or <a href="/login">sign in with 42, GitHub or Google</a> &mdash; no password needed.</p>
+    <p class="auth-sub">or <a href="/login">42, github or google</a> &middot; no password</p>
     {% include "_notice.html" %}
     {% include "_errors.html" %}
     {% if enabled %}
@@ -24,13 +24,13 @@
              aria-describedby="username-hint{% match errors.username %}{% when Some with (_e) %} username-error{% when None %}{% endmatch %}" spellcheck="false" autocapitalize="none"
              {% match errors.username %}{% when Some with (_e) %}aria-invalid="true"{% when None %}{% endmatch %}>
       {% match errors.username %}{% when Some with (e) %}<p class="field-error" id="username-error">{{ e }}</p>{% when None %}{% endmatch %}
-      <p class="hint" id="username-hint">3&ndash;20 letters, digits, - or _. shown next to your wins.</p>
+      <p class="hint" id="username-hint">3&ndash;20 · a-z, 0-9, - and _ · public</p>
       <label for="password">password</label>
       <input id="password" name="password" type="password" autocomplete="new-password" required
              minlength="10" maxlength="128" aria-describedby="password-hint{% match errors.password %}{% when Some with (_e) %} password-error{% when None %}{% endmatch %}"
              {% match errors.password %}{% when Some with (_e) %}aria-invalid="true"{% when None %}{% endmatch %}>
       {% match errors.password %}{% when Some with (e) %}<p class="field-error" id="password-error">{{ e }}</p>{% when None %}{% endmatch %}
-      <p class="hint" id="password-hint">at least 10 characters. a few words strung together work well.</p>
+      <p class="hint" id="password-hint">10+ characters · a few words work well</p>
       {% match turnstile_site_key %}
         {% when Some with (key) %}
           <div class="cf-turnstile" data-sitekey="{{ key }}" data-theme="dark"></div>
@@ -39,9 +39,9 @@
       {% endmatch %}
       <button type="submit" class="primary">create account</button>
     </form>
-    <p class="auth-fine">one confirmation email. password resets only when you ask. <a href="/privacy">privacy</a></p>
+    <p class="auth-fine">one confirm mail · resets only on request · <a href="/privacy">privacy</a></p>
     {% else %}
-    <p class="message">signing up with an email isn't available here yet.</p>
+    <p class="message">email sign-up not available here</p>
     {% endif %}
   </div>
   <p class="auth-foot">already have an account? <a href="/login">sign in</a></p>

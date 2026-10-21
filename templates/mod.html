@@ -11,8 +11,8 @@
     <input id="username" name="username" type="text" autocomplete="off" spellcheck="false" required>
     <label for="reason">why</label>
     <input id="reason" name="reason" type="text" autocomplete="off" required maxlength="200">
-    <p class="hint">signs them out everywhere and keeps them out; their guess in today's global round stops counting.
-      a 42 student banned here is shut out of both rounds. closed rounds are not changed.</p>
+    <p class="hint">signed out and kept out · today's guess stops counting ·
+      42 students: shut out of both rounds · closed rounds unchanged</p>
     <button type="submit" class="danger">ban</button>
   </form>
 </section>
@@ -31,7 +31,7 @@
   <form class="authform" method="post" action="/mod/void">
     <label for="void-round">call off a global round that is not settled yet</label>
     <input id="void-round" name="round" type="text" placeholder="2026-10-21" autocomplete="off" required>
-    <p class="hint">every stake is refunded, nobody wins it, and it takes no more guesses. a settled round can only be corrected with adjustments.</p>
+    <p class="hint">stakes refunded · nobody wins · no more guesses · settled rounds: adjust instead</p>
     <button type="submit" class="danger">call it off</button>
   </form>
 </section>
@@ -39,7 +39,7 @@
 <section class="sec" style="--b: 2">
   <h2 class="rule"><span>worth a look</span><span class="tag">{{ clusters.len() }}</span></h2>
   {% if clusters.is_empty() %}
-    <p class="dim">nothing stands out: no three accounts share an address or a ten-minute sign-up window.</p>
+    <p class="dim">nothing stands out</p>
   {% else %}
     <table class="history">
       <tbody>
@@ -48,14 +48,14 @@
         {% endfor %}
       </tbody>
     </table>
-    <p class="hint">shared networks are common (a campus, a dorm, a phone carrier). these are hints, not proof.</p>
+    <p class="hint">shared networks are common · hints, not proof</p>
   {% endif %}
 </section>
 
 <section class="sec" style="--b: 2">
   <h2 class="rule"><span>banned</span><span class="tag">{{ banned.len() }}</span></h2>
   {% if banned.is_empty() %}
-    <p class="dim">nobody.</p>
+    <p class="dim">nobody</p>
   {% else %}
     <table class="history logins">
       <tbody>

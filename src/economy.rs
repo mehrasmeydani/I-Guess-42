@@ -272,7 +272,7 @@ mod tests {
     async fn the_round_page_gives_points_and_shows_the_pot() {
         let (_t, state) = app(&[]).await;
         player(&state.db, "ann").await;
-        let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None })).await.unwrap()).await;
+        let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
         let start = format!("{} pts", crate::templates::group_digits(SIGNUP_BONUS + DAILY_GRANT));
         assert!(html.contains(&format!(r#"href="/g/points" title="your points">{start}</a>"#)), "{html}");
         assert!(html.contains("pot <b class=\"win\">0 pts</b>"));
@@ -283,7 +283,7 @@ mod tests {
         let form = Form(GuessForm { guess: "7".into(), round: round.clone() });
         let resp = handlers::global_confirm_guess(State(state.clone()), ClientIp(None), jar("ann"), form).await.unwrap();
         assert_eq!(location(&resp), "/g?msg=saved");
-        let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None })).await.unwrap()).await;
+        let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
         assert!(html.contains("pot <b class=\"win\">10 pts</b>"));
         assert!(html.contains(&format!("{} pts</a>", SIGNUP_BONUS + DAILY_GRANT - GUESS_STAKE)));
     }
@@ -308,7 +308,7 @@ mod tests {
     async fn the_42_round_has_no_points() {
         let (_t, state) = app(&[]).await;
         student(&state.db, 1001, "megardes", "s").await;
-        let html = body(handlers::index(State(state.clone()), jar("s"), Query(IndexQuery { msg: None })).await.unwrap()).await;
+        let html = body(handlers::index(State(state.clone()), jar("s"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
         assert!(!html.contains(" pts"), "no points, no pot, no stake in the 42 round");
         let round = Round::current(state.now()).key();
         let form = Form(GuessForm { guess: "7".into(), round });
@@ -342,7 +342,7 @@ mod tests {
         assert!(!html.contains(">+610<"));
         // Signed out: labels, not names.
         let html = board(None, None).await;
-        assert!(!html.contains(">ann<") && html.contains("player #"));
+        assert!(html.contains(">ann<"), "usernames are public");
         let resp = crate::points_pages::points(State(state.clone()), CookieJar::new()).await.unwrap();
         assert_eq!(location(&resp), "/login");
     }
@@ -356,7 +356,7 @@ mod tests {
         plays(&state.db, bob, &day, 3).await;
         settle_all(&state.db, &Round::current(state.now()).key()).await.unwrap();
         let html = body(handlers::global_day(State(state.clone()), jar("ann"), axum::extract::Path(day)).await.unwrap()).await;
-        assert!(html.contains("nobody won, so the pot of 20 pts rolled over to the next round."));
+        assert!(html.contains("no winner · pot 20 pts rolled over"));
     }
 
     #[tokio::test]
@@ -412,7 +412,7 @@ mod tests {
             let f = crate::moderation::VoidForm { round: round.into() };
             async move { crate::moderation::void(State(state), jar("mod"), Form(f)).await.unwrap() }
         };
-        assert_eq!(location(&void(&round).await), "/mod?msg=voided");
+        assert_eq!(location(&void(&round).await), "/mod?msg=called_off");
         assert_eq!(db::balance(&state.db, ann).await.unwrap(), before - 50 + GUESS_STAKE);
         assert_eq!(void(&round).await.status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY, "settled now");
         // Not a moderator: nothing there.

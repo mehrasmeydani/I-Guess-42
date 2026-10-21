@@ -5,21 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0c0c0c">
   <title>{% block title %}i guess low{% endblock %}</title>
-  <meta name="description" content="{% block description %}pick the lowest number nobody else picks. one guess a day.{% endblock %}">
+  <meta name="description" content="{% block description %}lowest unique number wins. one guess a day.{% endblock %}">
   {# Link previews in chats. Absolute URLs: a preview is fetched by a bot
      that knows nothing about this page's address. #}
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="i guess low">
   <meta property="og:title" content="{% block og_title %}i guess low{% endblock %}">
-  <meta property="og:description" content="{% block og_description %}pick the lowest number nobody else picks. one guess a day.{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}lowest unique number wins. one guess a day.{% endblock %}">
   <meta property="og:url" content="{{ crate::templates::public_url() }}{% block path %}/g/{% endblock %}">
   <meta property="og:image" content="{{ crate::templates::public_url() }}{% block og_image %}/static/og.png{% endblock %}">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="i guess low: pick the lowest number nobody else picks">
+  <meta property="og:image:alt" content="i guess low: lowest unique number wins">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{% block twitter_title %}i guess low{% endblock %}">
-  <meta name="twitter:description" content="{% block twitter_description %}pick the lowest number nobody else picks. one guess a day.{% endblock %}">
+  <meta name="twitter:description" content="{% block twitter_description %}lowest unique number wins. one guess a day.{% endblock %}">
   <meta name="twitter:image" content="{{ crate::templates::public_url() }}{% block twitter_image %}/static/og.png{% endblock %}">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">

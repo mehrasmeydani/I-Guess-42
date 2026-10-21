@@ -7,14 +7,14 @@
 <section class="sec" style="--b: 0">
   <h2 class="section-title">your points</h2>
   <p class="takeaway"><b class="win">{{ balance_label }}</b></p>
-  <p class="dim">{{ bonus }} to start, {{ grant }} each day you visit the round, {{ stake }} for each guess. the winner of a round takes every stake in it; a round nobody wins rolls its pot into the next. points are just for fun: they can't be bought, sold or swapped for anything.</p>
+  <p class="dim">+{{ bonus }} to start &middot; +{{ grant }} a day you visit &middot; &minus;{{ stake }} a guess &middot; winner takes the pot &middot; no winner: pot rolls over &middot; just for fun, never for money</p>
   <p><a href="/g/leaderboard">the points leaderboard &rarr;</a></p>
 </section>
 
 <section class="sec" style="--b: 1">
   <h2 class="section-title">history <span class="dim scope-inline">newest first</span></h2>
   {% if rows.is_empty() %}
-    <p class="dim">nothing yet. visit the round to collect your first points.</p>
+    <p class="dim">nothing yet &middot; <a href="/g/">visit the round &rarr;</a></p>
   {% else %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="points history">
     <table class="grid">
