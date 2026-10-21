@@ -126,11 +126,12 @@ impl From<Viewer> for UserView {
     }
 }
 
-/// The progress bar's cells (D10): true for each filled one, of 24.
-pub fn progress_cells(pct: &i64) -> Vec<bool> {
-    const CELLS: i64 = 24;
-    let filled = pct.clamp(&0, &100) * CELLS / 100;
-    (0..CELLS).map(|i| i < filled).collect()
+/// The round's text bar, "[###-------]", 30 cells: short enough for the
+/// narrowest phone; app.js widens it to the row.
+pub fn meter(pct: &i64) -> String {
+    const CELLS: usize = 30;
+    let filled = (*pct.clamp(&0, &100) as usize) * CELLS / 100;
+    format!("[{}{}]", "#".repeat(filled), "-".repeat(CELLS - filled))
 }
 
 /// A date the European way: "2026-10-21" is shown as "21.10.2026". Dates

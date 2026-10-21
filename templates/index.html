@@ -39,35 +39,24 @@
 {# The order: how long is left, the box, the tagline, the rules, yesterday. Nothing explains strategy:
    working out that low numbers get crowded is the game (R22.3). #}
 <section class="sec hero" style="--b: 0" aria-labelledby="round-h">
-  <div class="roundstatus" role="group" aria-labelledby="round-h">
-    <p class="state-line">
-      <span class="pill" id="round-h">round {{ crate::templates::eu(round_key) }} &middot; <span class="state">[open]</span></span>
-      <span class="closes-at">closes {{ close_time }} vienna</span>
-    </p>
-    <p class="closes-in">closes in</p>
-    {# Text only: the time is in aria-label, refreshed once a minute, and
-       nothing is announced on its own (no aria-live, no role=timer). #}
-    <p class="countdown" data-closes-at="{{ closes_at }}" data-server-now="{{ server_now }}"
-       aria-label="closes in {{ time_left_spoken }}">{{ time_left }}</p>
-    {# Terminal blocks across the whole box: filled in green, empty in a grey
-       that still reads on the panel (D10). Real boxes, not glyphs, so every
-       font draws them the same. #}
-    <div class="progress" role="progressbar" aria-label="round gone by"
-         aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress_pct }}"
-         aria-valuetext="{{ progress_pct }}% of the round gone">
-      <span class="cells" aria-hidden="true">{% for on in crate::templates::progress_cells(progress_pct) %}<i{% if on %} class="on"{% endif %}></i>{% endfor %}</span>
-      <span class="progress-pct" aria-hidden="true">{{ progress_pct }}%</span>
-    </div>
-    <p class="facts">
-      <span><b>{{ guess_count }}</b> {% if guess_count == 1 %}player{% else %}players{% endif %} this round</span>
-      {% match pot_label %}{% when Some with (pot) %}<span class="pot">pot <b class="win">{{ pot }}</b>{% match carried_label %}{% when Some with (c) %} <span class="dim">· {{ c }} rolled over</span>{% when None %}{% endmatch %}</span>{% when None %}{% endmatch %}
-      <span class="you">
-        {% match my_guess_label %}
-          {% when Some with (_g) %}<b>you're in</b>
-          {% when None %}{% if signed_in && !can_play %}confirm your email to play{% else %}not playing yet &darr;{% endif %}
-        {% endmatch %}
-      </span>
-    </p>
+  <h2 class="rule" id="round-h"><span>round {{ crate::templates::eu(round_key) }}</span><span class="tag live state">open</span></h2>
+  {# Text only: the time is in aria-label, refreshed once a minute, and
+     nothing is announced on its own (no aria-live, no role=timer). #}
+  <p class="countdown" data-closes-at="{{ closes_at }}" data-server-now="{{ server_now }}"
+     aria-label="closes in {{ time_left_spoken }}">{{ time_left }}</p>
+  {# The original's text bar: the server paints a short one that fits the
+     narrowest phone, and app.js widens it to the row. #}
+  <p class="meter" role="progressbar" aria-label="round gone by"
+     aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress_pct }}"
+     aria-valuetext="{{ progress_pct }}% of the round gone"><span class="meter-bar" aria-hidden="true">{{ crate::templates::meter(progress_pct) }}</span> <span class="meter-pct" aria-hidden="true">{{ progress_pct }}%</span></p>
+  {# Players, the pot (the global round only), and you. #}
+  <div class="figures">
+    <p><b>{{ guess_count }}</b><span>{% if guess_count == 1 %}player{% else %}players{% endif %} this round</span></p>
+    {% match pot_label %}{% when Some with (pot) %}<p class="pot"><b class="win">{{ pot }}</b><span>in the pot{% match carried_label %}{% when Some with (c) %} &middot; {{ c }} rolled over{% when None %}{% endmatch %}</span></p>{% when None %}{% endmatch %}
+    {% match my_guess_label %}
+      {% when Some with (_g) %}<p class="you in"><b>you're in</b><span>your number is locked</span></p>
+      {% when None %}<p class="you"><b>not yet</b><span>{% if !signed_in %}sign in to play{% else if !can_play %}confirm your email to play{% else %}your number goes below &darr;{% endif %}</span></p>
+    {% endmatch %}
   </div>
   {% match stats %}
     {% when Some with (s) %}

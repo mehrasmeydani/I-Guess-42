@@ -200,24 +200,19 @@ footer .ver { margin-left: auto; }
 .section-title { flex-wrap: wrap; row-gap: 4px; }
 .tag { color: var(--dim); font-weight: 400; text-decoration: none; }
 a.tag { color: var(--fg); text-decoration: underline; }
-.tag.live { color: var(--fg); font-weight: 700; }
+.tag.live { background: var(--state); color: var(--bg); padding: 0 8px; font-weight: 700; }
 .tag.warn { color: var(--env); font-weight: 700; }
 .tag.bad { background: var(--loss); color: var(--bg); padding: 0 8px; font-weight: 700; }
 
 /* ---------------------------------------------------------------- round */
 
-/* The status block: state, close time, the countdown and a progress bar,
-   grouped as one thing. The premise sits under the number box. */
+/* The round as the original showed it: a rule with the state, the big
+   clock, a text bar, and the figures. The premise sits under the number box. */
 .premise { margin: 40px 0 0; color: var(--hi); font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); font-weight: 700; line-height: 1.25; max-width: 32ch; text-wrap: balance; }
-/* A shade lighter than the page, so the round's clock is where the eye goes. */
-.roundstatus { padding: 24px; background: #171717; border: 1px solid #2c2c2c; }
-.state-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0; color: var(--dim); }
-.pill { padding: 2px 8px; border: 1px solid var(--edge-strong); color: var(--fg); }
-.closes-in { margin: 24px 0 0; color: var(--dim); font-size: var(--fs-1); letter-spacing: 0.08em; text-transform: uppercase; }
 /* The original's clock, ticking with seconds: big, sized by the viewport so
    "23:59:59" still fits a 320px screen. */
 .countdown {
-  margin: 4px 0 0;
+  margin: 0;
   color: var(--hi);
   font-size: clamp(3rem, 11vw, 6rem);
   font-weight: 700;
@@ -226,16 +221,11 @@ a.tag { color: var(--fg); text-decoration: underline; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-/* The round's progress: a full-width row of blocks, then the share. Empty
-   blocks are #4d4d4d, 3:1 against the panel, so the unfilled part reads. */
-.progress { display: flex; align-items: center; gap: 12px; margin: 16px 0 0; }
-.cells { flex: 1; display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; }
-.cells i { height: 12px; background: #4d4d4d; }
-.cells i.on { background: var(--state); }
-.progress-pct { color: var(--fg); font-size: var(--fs-1); font-variant-numeric: tabular-nums; min-width: 4ch; text-align: right; }
-.facts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; margin: 16px 0 0; color: var(--dim); }
-.facts b { color: var(--hi); }
-.facts .pot b { color: var(--state); }
+.meter { margin: 16px 0 0; white-space: nowrap; overflow: hidden; }
+/* Wipes in once on load. A clip to animate to: from "none" it would jump. */
+.meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; color: var(--state); clip-path: inset(0); animation: fill 420ms steps(30) 80ms both; }
+.meter-pct { color: var(--hi); font-weight: 700; }
+.figures .pot span { white-space: normal; }
 .status .pts { color: var(--state); text-decoration: none; font-weight: 700; }
 .status .pts:hover { background: none; color: var(--hi); text-decoration: underline; }
 
@@ -337,7 +327,7 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; translate: none; }
 /* A plain way on, under a chart. The top margin clears the number labels,
    which hang outside the chart's box. */
 .morelink { margin: 32px 0 0; }
-.guessform button { font-size: var(--fs-3); }
+.guessform button { font-size: 1.1rem; }
 
 /* Sign-in and account forms: one field per row, labels above. Smaller type
    than the guess box, which is the only input that gets to shout. */
@@ -661,7 +651,7 @@ details[open] summary { margin-bottom: 12px; }
 
 /* --------------------------------------------------------------- trends */
 
-.ranges { display: flex; gap: 8px; font-weight: 400; }
+.ranges { display: flex; gap: 8px; font-size: var(--fs-2); font-weight: 400; }
 .ranges a {
   display: inline-flex;
   align-items: center;
@@ -735,9 +725,9 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
   color: var(--state);
   /* A clip to animate to: from "none" it would jump, not fill. */
   clip-path: inset(0);
-  animation: fill 520ms steps(20) 120ms both;
+  animation: fill 260ms steps(20) 60ms both;
 }
-.analyse-done { color: var(--hi); font-weight: 700; white-space: nowrap; animation: show 1ms 680ms both; }
+.analyse-done { color: var(--hi); font-weight: 700; white-space: nowrap; animation: show 1ms 340ms both; }
 @keyframes show { from { visibility: hidden; } }
 /* The round bar wipes in. Clipped, not widened: the bar is text and app.js
    sizes it to the screen, so its final width is not a number CSS can know. */
@@ -995,10 +985,6 @@ details.expand[open] summary .when-open { display: inline; }
   /* The status block shrinks so the number box is in view without
      scrolling on a 375x812 phone (R4.2). */
   .premise { margin-top: 32px; font-size: var(--fs-3); }
-  .roundstatus { padding: 16px; }
-  .closes-in { margin-top: 8px; }
-  .progress { margin-top: 8px; }
-  .facts { margin-top: 8px; }
   .sec { margin-top: 32px; }
   .auth { margin-top: 32px; }
   .auth-card { padding: 24px 20px; }

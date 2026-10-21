@@ -11,12 +11,25 @@
   if (!isFinite(closesAt) || !isFinite(offset)) return;
 
   var DAY = 24 * 60 * 60 * 1000;
-  var bar = document.querySelector('.progress');
-  var cells = document.querySelectorAll('.progress .cells i');
-  var pctLabel = document.querySelector('.progress-pct');
+  var bar = document.querySelector('.meter');
+  var barText = document.querySelector('.meter-bar');
+  var pctLabel = document.querySelector('.meter-pct');
   var mirrors = document.querySelectorAll('.countdown-mirror');
-  var stateEl = document.querySelector('.roundstatus .state');
-  var closesIn = document.querySelector('.closes-in');
+  var stateEl = document.querySelector('#round-h .state');
+  // The server paints 30 cells, which fit the narrowest phone; fit() makes
+  // it as many as the row holds. The bar is monospace text, so one cell is
+  // one character: the row's width, less room for "100%", over a
+  // character's width.
+  var CELLS = 30;
+  function fit() {
+    if (!barText) return;
+    var text = barText.textContent || '';
+    var ch = barText.offsetWidth / text.length;
+    if (!(ch > 0)) return;
+    var cells = Math.floor((bar.clientWidth - 5 * ch) / ch) - 2; // less the brackets
+    if (isFinite(cells)) CELLS = Math.max(10, Math.min(300, cells));
+  }
+  function repeat(c, n) { return new Array(n + 1).join(c); }
   var lastMinute = null;
   var timer = null;
 
@@ -39,6 +52,17 @@
     return unit(h, 'hour') + ' ' + unit(m, 'minute');
   }
 
+  // As templates::meter: floor(pct * cells / 100) filled.
+  function paint(ms) {
+    if (!bar || !barText) return;
+    var pct = Math.min(100, Math.max(0, Math.floor((DAY - ms) * 100 / DAY)));
+    bar.setAttribute('aria-valuenow', pct);
+    bar.setAttribute('aria-valuetext', pct + '% of the round gone');
+    var filled = Math.floor(pct * CELLS / 100);
+    barText.textContent = '[' + repeat('#', filled) + repeat('-', CELLS - filled) + ']';
+    if (pctLabel) pctLabel.textContent = pct + '%';
+  }
+
   function render() {
     var ms = remaining();
     var text = short(ms);
@@ -49,15 +73,7 @@
     if (minute !== lastMinute) {
       lastMinute = minute;
       el.setAttribute('aria-label', 'closes in ' + spoken(ms));
-      if (bar && cells.length) {
-        var pct = Math.min(100, Math.max(0, Math.floor((DAY - ms) * 100 / DAY)));
-        bar.setAttribute('aria-valuenow', pct);
-        bar.setAttribute('aria-valuetext', pct + '% of the round gone');
-        // As templates::progress_cells: floor(pct * cells / 100) filled.
-        var filled = Math.floor(pct * cells.length / 100);
-        for (var c = 0; c < cells.length; c++) cells[c].className = c < filled ? 'on' : '';
-        if (pctLabel) pctLabel.textContent = pct + '%';
-      }
+      paint(ms);
     }
     if (ms <= 0) closed();
   }
@@ -68,8 +84,7 @@
     clearInterval(timer);
     el.textContent = 'revealing…';
     el.setAttribute('aria-label', 'round closed, revealing the numbers');
-    if (stateEl) stateEl.textContent = '[closed]';
-    if (closesIn) closesIn.textContent = 'round closed · revealing…';
+    if (stateEl) stateEl.textContent = 'closed';
     var closedRound = (document.querySelector('input[name=round]') || {}).value
       || el.dataset.closesAt.slice(0, 10);
     var base = location.pathname.indexOf('/g') === 0 ? '/g' : '';
@@ -102,8 +117,15 @@
       .catch(function () { render(); });
   });
 
+  fit();
   render();
   timer = setInterval(render, 1000);
+  // A rotated phone or a dragged window holds a different number of cells.
+  var refit = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(refit);
+    refit = setTimeout(function () { fit(); paint(remaining()); }, 120);
+  });
 })();
 
 // Vienna wall-clock time in the header - the clock the game runs on, which

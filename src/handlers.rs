@@ -2068,20 +2068,27 @@ mod round_page_tests {
         let (_t, state) = app(&[]).await;
         let html = page(&state, CookieJar::new(), None).await;
         let at = |needle: &str| html.find(needle).unwrap_or_else(|| panic!("missing {needle:?}"));
-        // premise, status, input + action, hint, rules, then the rest.
+        // The clock, the number box, the premise, the rules, then the rest.
         let order = [
-            at("lowest unique number wins"),
-            at(r#"class="roundstatus""#),
+            at(r#"class="countdown""#),
             at(r#"id="guess""#),
+            at(r#"<p class="premise">lowest unique number wins"#),
             at("<b>01</b>"),
             at("match anyone &rarr; you both lose it."),
         ];
         assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
 
-        assert!(html.contains("closes in"));
-        assert!(html.contains("closes 12:42 vienna"));
-        assert!(html.contains("not playing yet &darr;"));
+        assert!(html.contains(r#"<span class="tag live state">open</span>"#));
+        assert!(!html.contains("closes 12:42 vienna"), "no close time in the figures");
+        assert!(html.contains("<b>not yet</b><span>sign in to play</span>"));
         assert!(!html.contains(">guest<"));
+        // Players, the pot, you; the 42 round has no pot, so two.
+        assert!(html.contains("<span>in the pot</span>"));
+        crate::testkit::student(&state.db, 1001, "megardes", "s").await;
+        let vienna = body(handlers::index(State(state.clone()), crate::testkit::jar("s"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
+        assert!(vienna.contains("players this round</span></p>") && vienna.contains("<p class=\"you\">"));
+        assert!(!vienna.contains("in the pot"), "two figures in the 42 round");
+        assert!(html.contains("[------------------------------]") || html.contains("[#"), "the text bar");
         // Server time for the countdown, and no live region on it.
         assert!(html.contains("data-closes-at=\""));
         assert!(html.contains("data-server-now=\""));

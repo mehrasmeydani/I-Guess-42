@@ -275,7 +275,7 @@ mod tests {
         let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
         let start = format!("{} pts", crate::templates::group_digits(SIGNUP_BONUS + DAILY_GRANT));
         assert!(html.contains(&format!(r#"href="/g/points" title="your points">{start}</a>"#)), "{html}");
-        assert!(html.contains("pot <b class=\"win\">0 pts</b>"));
+        assert!(html.contains(r#"<p class="pot"><b class="win">0 pts</b><span>in the pot</span></p>"#));
         assert!(html.contains("lock it in &middot; 10 pts"));
 
         // Locking costs the stake, and the pot shows it.
@@ -284,7 +284,7 @@ mod tests {
         let resp = handlers::global_confirm_guess(State(state.clone()), ClientIp(None), jar("ann"), form).await.unwrap();
         assert_eq!(location(&resp), "/g?msg=saved");
         let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
-        assert!(html.contains("pot <b class=\"win\">10 pts</b>"));
+        assert!(html.contains(r#"<p class="pot"><b class="win">10 pts</b><span>in the pot</span></p>"#));
         assert!(html.contains(&format!("{} pts</a>", SIGNUP_BONUS + DAILY_GRANT - GUESS_STAKE)));
     }
 
