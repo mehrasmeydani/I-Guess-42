@@ -32,6 +32,8 @@
   --state: #16c60c;
   --loss: #e74856;
   --env: #c19c00;
+  /* First place on the leaderboard: none of the roles above. */
+  --first: #c678dd;
   /* The original's separating lines: thick and light, so sections read as
      boxes rather than text floating on black. */
   --rule-color: #cccccc;
@@ -935,14 +937,16 @@ details.expand[open] summary .when-open { display: inline; }
 /* Rankings: the place hugs its number, the name takes the room, and the
    score is a bar against the leader. Your own row is marked. */
 .leaders-table th:first-child, .leaders-table td:first-child { width: 1%; padding-right: 16px; white-space: nowrap; }
-.leaders-table .place { color: var(--hi); font-weight: 700; }
+.leaders-table .place { font-weight: 700; }
 .leaders-table .score { width: 45%; text-align: left; }
-.leaders-table .score b { color: var(--hi); font-variant-numeric: tabular-nums; }
-.leaders-table .minibar { background: var(--hi); }
+.leaders-table .place { color: var(--state); }
+.leaders-table .score b { color: var(--state); font-variant-numeric: tabular-nums; }
+.leaders-table .minibar { background: var(--state); }
 .leaders-table .r1 .who { color: var(--hi); font-weight: 700; }
-/* The first three: green, blue, red - place, bar and score alike; the rest white. */
-.leaders-table .r1 .place, .leaders-table .r1 .score b { color: var(--state); }
-.leaders-table .r1 .minibar { background: var(--state); }
+/* The first three: violet, blue, red - place, bar and score alike; everyone
+   after them green. */
+.leaders-table .r1 .place, .leaders-table .r1 .score b { color: var(--first); }
+.leaders-table .r1 .minibar { background: var(--first); }
 .leaders-table .r2 .place, .leaders-table .r2 .score b { color: var(--action-hi); }
 .leaders-table .r2 .minibar { background: var(--action); }
 .leaders-table .r3 .place, .leaders-table .r3 .score b { color: var(--loss); }
