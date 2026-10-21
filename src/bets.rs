@@ -141,19 +141,34 @@ fn offer_views(base: &Base, book: &[(Market, i64)], markets: Vec<Market>, picked
 
 /// What a player may stake today: their points, less what today's guess
 /// costs until they have made it. None for a visitor who cannot bet.
-async fn stake_room(state: &AppState, viewer: Option<&db::Viewer>, open: &str) -> Result<Option<i64>, AppError> {
+/// What a player may still put in today, and win.
+#[derive(Clone, Copy)]
+struct Room {
+    /// Points to stake: their balance, less what today's guess costs until
+    /// they have made it.
+    points: i64,
+    /// What their bets on the round may still win together, under the cap.
+    profit: i64,
+}
+
+/// None for a visitor who cannot bet.
+async fn stake_room(state: &AppState, base: &Base, viewer: Option<&db::Viewer>, open: &str) -> Result<Option<Room>, AppError> {
     let Some(v) = viewer.filter(|v| v.account.verified) else {
         return Ok(None);
     };
     let balance = db::balance(&state.db, v.account.id).await?;
     let guessed = db::my_guess(&state.db, Pool::Global, open, v.account.id).await?.is_some();
-    Ok(Some(balance - if guessed { 0 } else { crate::economy::GUESS_STAKE }))
+    Ok(Some(Room {
+        points: balance - if guessed { 0 } else { crate::economy::GUESS_STAKE },
+        profit: db::profit_room(&state.db, v.account.id, open, base.max_profit()).await?,
+    }))
 }
 
-fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market], room: Option<i64>) -> QuoteView {
+fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market], room: Option<Room>) -> QuoteView {
     let qt = odds::quote(base, book, m);
-    let worth = qt.odds_x100.map_or(0, |o| odds::max_stake(o, base.max_profit()));
-    let room = room.unwrap_or(i64::MAX).max(0);
+    let room = room.unwrap_or(Room { points: i64::MAX, profit: base.max_profit() });
+    let by_cap = qt.odds_x100.map_or(0, |o| odds::max_stake(o, room.profit.max(0)));
+    let points = room.points.max(0);
     QuoteView {
         key: m.key(),
         label: m.label(),
@@ -162,9 +177,10 @@ fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market], 
         odds_x100: qt.odds_x100.unwrap_or(0),
         bp: qt.chance_bp,
         max_profit: base.max_profit(),
-        max_stake: worth.min(room),
+        profit_left: room.profit.max(0),
+        max_stake: if room.profit <= 0 { 0 } else { by_cap.min(points) },
         // Held back by the guess still to make, not by the cap.
-        keeping: room < worth,
+        keeping: points < by_cap,
         players: base.players,
         taken: taken.contains(&m),
     }
@@ -201,7 +217,7 @@ pub async fn page(
 
     let base = todays_base(&state).await?;
     let book = parse_book(&db::book(&state.db, &open).await?);
-    let room = stake_room(&state, viewer.as_ref(), &open).await?;
+    let room = stake_room(&state, &base, viewer.as_ref(), &open).await?;
     let quote = pick.market.map(|m| quote_view(&base, &book, m, &taken, room));
     let (lo, hi) = pick.inputs(&q);
     let notice = q
@@ -253,7 +269,7 @@ pub async fn quote(
         Some(m) => {
             let base = todays_base(&state).await?;
             let book = parse_book(&db::book(&state.db, &round.key()).await?);
-            let room = stake_room(&state, viewer.as_ref(), &round.key()).await?;
+            let room = stake_room(&state, &base, viewer.as_ref(), &round.key()).await?;
             Some(quote_view(&base, &book, m, &taken, room))
         }
         None => None,
@@ -313,8 +329,10 @@ pub async fn place(
     }
     let base = todays_base(&state).await?;
     // Past the cap a bigger stake only risks more: refused, at the odds the
-    // visitor saw (better odds only lower the limit, and the cap still holds).
-    if form.odds > 100 && stake > odds::max_stake(form.odds, base.max_profit()) {
+    // visitor saw (better odds only lower the limit, and the cap still holds
+    // in the bet's own transaction, with the account's other bets).
+    let left = db::profit_room(&state.db, viewer.account.id, &open, base.max_profit()).await?;
+    if form.odds > 100 && stake > odds::max_stake(form.odds, left) {
         return Ok(back("bet_over_cap", Some(market)));
     }
     crate::economy::collect(&state.db, viewer.account.id, &open).await?;
@@ -328,6 +346,7 @@ pub async fn place(
         Placed::BadStake => "bet_cap",
         Placed::Broke => "broke",
         Placed::KeepForGuess => "bet_keep",
+        Placed::OverRoundCap => "bet_round_cap",
         Placed::Closed => "bet_closed",
         Placed::Moved => "bet_odds",
     };
@@ -472,22 +491,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_win_is_capped_at_the_profit_locked_with_the_bet() {
+    async fn all_of_a_players_bets_on_a_round_share_one_cap() {
         let t = temp_db().await;
         let (ann, bob, cat) = (player(&t.db, "ann").await, player(&t.db, "bob").await, player(&t.db, "cat").await);
         plays(&t.db, ann, "2026-10-21", 60).await;
         plays(&t.db, bob, "2026-10-21", 2).await;
         plays(&t.db, cat, "2026-10-21", 2).await;
-        // 100 on a long shot at x50, with a cap of 300 over the stake.
-        assert_eq!(db::place_bet(&t.db, ann, "2026-10-21", "range:50:", 100, db::BetLimits { max_profit: 300, keep: 0 }, |_| Some(5000)).await.unwrap(), Placed::In);
-        let slip = &db::bets_of(&t.db, ann, "").await.unwrap()[0];
-        assert_eq!(slip.max_profit, Some(300));
-        assert_eq!(super::slip(slip.clone()).amount, 400, "the slip shows the capped amount");
+        let cap = db::BetLimits { max_profit: 300, keep: 0 };
+        let bet = |market: &'static str, stake: i64, odds: i64| db::place_bet(&t.db, ann, "2026-10-21", market, stake, cap, move |_| Some(odds));
+        // 100 on a long shot at x50 could win 4900: past a cap of 300, refused.
+        assert_eq!(bet("range:50:", 100, 5000).await.unwrap(), Placed::OverRoundCap);
+        // 6 at x50 wins 294: in, and 6 of the 300 is left for the day.
+        assert_eq!(bet("range:50:", 6, 5000).await.unwrap(), Placed::In);
+        assert_eq!(db::profit_room(&t.db, ann, "2026-10-21", 300).await.unwrap(), 6);
+        // An overlapping bet that would win at the same time shares the cap:
+        // 1 more at x50 (+49) is too much, 100 at x1.05 (+5) is not.
+        assert_eq!(bet("range:55:", 1, 5000).await.unwrap(), Placed::OverRoundCap);
+        assert_eq!(bet("range:40:", 100, 105).await.unwrap(), Placed::In);
         let a0 = db::balance(&t.db, ann).await.unwrap();
         settle_all(&t.db, "2026-10-22").await.unwrap();
-        // Ann's 60 is the only unique number: she wins the pot and the bet.
+        // Ann's 60 is the only unique number: she wins the pot and both bets.
         let pot = db::pot(&t.db, "2026-10-21").await.unwrap().unwrap();
-        assert_eq!(db::balance(&t.db, ann).await.unwrap(), a0 + pot.paid + 400, "400, not 5000");
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), a0 + pot.paid + 300 + 105, "294 + 5 over the stakes: under 300");
     }
 
     #[tokio::test]
@@ -787,7 +812,9 @@ mod tests {
         // The cap and the cut are said where a stake is typed.
         player(&state.db, "zed").await;
         let html = bets_page_q(&state, Some("zed"), picked("range:5:12")).await;
-        let warn = format!("wins are capped at <b class=\"win\">+{}</b> (19 players a day &times; 100) and the house keeps 8%", templates::points_label(&1900));
+        let warn = format!("your bets today win at most <b class=\"win\">+{}</b> together, 19 players a day &times; 1000 &middot; the house keeps 8%", templates::points_label(&19_000));
+        assert!(html.contains("you can stake up to <b>"), "says what is allowed, not what is worth it");
+        assert!(!html.contains("worth staking"));
         assert!(html.contains(&warn), "{html}");
 
         let (ann, bob) = (player(&state.db, "ann").await, player(&state.db, "bob").await);

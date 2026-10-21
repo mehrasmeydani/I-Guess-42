@@ -2459,6 +2459,9 @@ pub enum Placed {
     BadStake,
     /// Not enough points for the stake.
     Broke,
+    /// With the account's other bets on the round, it could win more than
+    /// the cap allows for all of them together.
+    OverRoundCap,
     /// Enough for the stake, but not for that and today's guess after it:
     /// the account has not guessed yet and must be able to.
     KeepForGuess,
@@ -2476,8 +2479,29 @@ pub enum Placed {
 /// (market, stake) as they stand inside the transaction, and returns the
 /// odds to place at, or None to refuse: so two bets at once each see the
 /// other, and nobody gets odds the book has already moved past.
-/// What a bet may not go past: its win over the stake, and the points to
-/// keep for a guess not made yet.
+/// What an account's open bets on a round could win together, over their
+/// stakes, each at most its own cap.
+async fn open_profit(conn: &mut sqlx::SqliteConnection, account_id: i64, round_date: &str) -> Result<i64> {
+    let bets: Vec<(i64, i64, Option<i64>)> = sqlx::query_as(
+        "SELECT stake, odds_x100, max_profit FROM bets WHERE account_id = ?1 AND round_date = ?2 AND result IS NULL",
+    )
+    .bind(account_id)
+    .bind(round_date)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(bets.into_iter().map(|(s, o, cap)| crate::odds::payout(s, o, cap) - s).sum())
+}
+
+/// What `account_id` could still win on `round_date` under a cap of
+/// `max_profit` for all its bets together.
+pub async fn profit_room(db: &Db, account_id: i64, round_date: &str, max_profit: i64) -> Result<i64> {
+    let mut conn = db.acquire().await?;
+    Ok((max_profit - open_profit(&mut conn, account_id, round_date).await?).max(0))
+}
+
+/// What a bet may not go past: what all the account's bets on the round may
+/// win together over their stakes, and the points to keep for a guess not
+/// made yet.
 #[derive(Debug, Clone, Copy)]
 pub struct BetLimits {
     pub max_profit: i64,
@@ -2537,6 +2561,12 @@ pub async fn place_bet(
     let Some(odds_x100) = price(&book) else {
         return Ok(Placed::Moved);
     };
+    // The cap is on all of the account's bets in the round together: many
+    // overlapping bets that would all win at once share one cap.
+    let room = limits.max_profit - open_profit(&mut tx, account_id, round_date).await?;
+    if crate::odds::payout(stake, odds_x100, None) - stake > room {
+        return Ok(Placed::OverRoundCap);
+    }
     let now = ts(Utc::now());
     let inserted: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO bets (account_id, round_date, market, stake, odds_x100, placed_at, max_profit)

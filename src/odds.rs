@@ -28,10 +28,11 @@ pub const HISTORY_DAYS: i64 = 30;
 /// The last this many days of it count twice: the month for breadth, the
 /// week so the odds follow how people pick now.
 pub const RECENT_DAYS: i64 = 7;
-/// The most a single bet can win, over its stake, per player a day: a bet in
-/// a round of 30 players a day wins 3000 at most, however long the odds or
-/// big the stake. The game's size, not a lucky few, sets what is at stake.
-pub const PROFIT_PER_PLAYER: i64 = 100;
+/// The most a player's bets on one round can win together, over their
+/// stakes, per player a day: in a round of 200 players a day, +200 000 at
+/// most, however long the odds, big the stakes or many the bets. Room for
+/// a hail mary; not for one lucky account to outweigh everyone's play.
+pub const PROFIT_PER_PLAYER: i64 = 1000;
 /// Below this many global picks last week, the 42 round's picks fill in.
 const MIN_PICKS: usize = 30;
 /// Players a round, at most.
@@ -263,8 +264,8 @@ pub struct Base {
 }
 
 impl Base {
-    /// The most one bet may win today over its stake: players a day times
-    /// `PROFIT_PER_PLAYER`.
+    /// The most a player's bets may win today over their stakes, all of them
+    /// together: players a day times `PROFIT_PER_PLAYER`.
     pub fn max_profit(&self) -> i64 {
         self.players.max(1) as i64 * PROFIT_PER_PLAYER
     }

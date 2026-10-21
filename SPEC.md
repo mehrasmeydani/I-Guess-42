@@ -677,14 +677,16 @@ payout         = floor(stake × odds_x100 / 100)     # includes the stake back
 - The 8% tax means every bet loses 8% on average. A near-certain range
   ("1 or more", p ≈ 0.95) would pay under ×1.00, so it is refused: no free
   points for betting on the obvious.
-- **Capped by the size of the game.** One bet wins at most n × 100 over its
-  stake (n = players a day, as in 9.2): with 25 players a day, +2 500, however
-  long the odds or big the stake. Otherwise one player with a lucky long shot
-  out-earns everyone who plays for a month. The cap is locked with the bet
-  (`bets.max_profit`, migration 0012); bets from before it pay in full.
-  No stake past the one that reaches the cap is taken (`odds::max_stake`):
-  it could only lose more. The stake box stops there as you type, the
-  quote says why, and the server refuses it (`bet_over_cap`).
+- **Capped by the size of the game.** All of a player's bets on one round
+  together win at most n × 1000 over their stakes (n = players a day, as in
+  9.2): with 200 players a day, +200 000 - room for a hail mary at long odds,
+  not for one lucky account to outweigh a month of everyone's play. Per
+  player and round, not per bet, so fifty overlapping bets that would all
+  win at once share one cap. Checked in the bet's transaction against the
+  account's other open bets (`Placed::OverRoundCap`); each bet's own share
+  is locked with it (`bets.max_profit`, migration 0012); bets from before
+  caps pay in full. The quote box says the most that can be staked and why,
+  and the stake box stops there.
 - **Locked at placement.** The form carries the odds shown. The bet is
   priced again inside the write transaction, against the book as it stands
   then: placed at those odds or better, else refused with "odds moved". Two

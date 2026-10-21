@@ -585,6 +585,8 @@ pub struct QuoteView {
     /// The most a bet on it can win over its stake today, and the stake that
     /// reaches it: the stake box takes no more.
     pub max_profit: i64,
+    /// What the visitor's bets today may still win, under that cap.
+    pub profit_left: i64,
     pub max_stake: i64,
     /// The stake is held to `max_stake` by the 10 kept for today's guess.
     pub keeping: bool,
