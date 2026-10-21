@@ -522,7 +522,7 @@ mod tests {
         assert!(!out.contains(r#"action="/g/bet""#), "signed out: no forms");
         let html = bets_page(&state, Some("ann"), None).await;
         assert!(!html.contains(r#"action="/g/bet""#), "nothing picked yet");
-        assert!(html.contains("200 left to stake this round"));
+        assert!(html.contains("200 of 200 left to stake"));
 
         let html = bets_page_q(&state, Some("ann"), picked("range:5:12")).await;
         assert_eq!(html.matches(r#"action="/g/bet""#).count(), 1);
@@ -534,9 +534,9 @@ mod tests {
         let html = bets_page_q(&state, Some("ann"), BetsQuery { msg: Some("bet_placed".into()), m: Some("range:5:12".into()), ..Default::default() }).await;
         assert!(html.contains("bet placed · settled at 12:42"));
         assert!(html.contains("your bets today"));
-        assert!(html.contains("160 left to stake this round"));
+        assert!(html.contains("160 of 200 left to stake"));
         assert!(html.contains("placed &middot; one bet per range a round") && !html.contains(r#"action="/g/bet""#));
-        assert!(html.contains("on the book today: 40 points, 1 bet"));
+        assert!(html.contains("on the book: 40 pts, 1 bet"));
         assert!(html.contains(&format!("<td class=\"num b\">{}</td>", odds::payout(40, o))));
     }
 
@@ -620,7 +620,7 @@ mod tests {
         let base = todays_base(&state).await.unwrap();
         assert_eq!((base.picks, base.players, base.sims > 0), (140, 20, true));
         let html = bets_page(&state, None, None).await;
-        assert!(html.contains("last week&rsquo;s picks replayed"));
+        assert!(html.contains("from last week&rsquo;s picks, replayed 4000&times;"));
 
         let (ann, bob) = (player(&state.db, "ann").await, player(&state.db, "bob").await);
         let (mid, high) = ("range:5:12", "range:1:4");

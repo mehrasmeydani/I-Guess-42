@@ -32,12 +32,14 @@
   --state: #16c60c;
   --loss: #e74856;
   --env: #c19c00;
-  --rule-color: var(--edge);
+  /* The original's separating lines: thick and light, so sections read as
+     boxes rather than text floating on black. */
+  --rule-color: #cccccc;
   /* The platform's own monospace first: SF Mono on Apple devices, Cascadia
      on Windows, then the rest. */
   --font: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, "Ubuntu Mono",
     "DejaVu Sans Mono", monospace;
-  --rule: 1px solid var(--rule-color);
+  --rule: 2px solid var(--rule-color);
   --fs-1: 0.8125rem;   /* 13 */
   --fs-2: 1rem;        /* 16 */
   --fs-3: 1.25rem;     /* 20 */
@@ -179,7 +181,8 @@ footer .ver { margin-left: auto; }
 
 /* A section header is its name, then a thick rule running to the edge,
    then an optional tag on the right. */
-.rule {
+.rule,
+.section-title {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -188,9 +191,13 @@ footer .ver { margin-left: auto; }
   font-size: var(--fs-2);
   font-weight: 700;
 }
-.rule::after { content: ""; order: 1; flex: 1; border-top: var(--rule); }
+.rule::after,
+.section-title::after { content: ""; order: 1; flex: 1 1 24px; border-top: var(--rule); }
 .rule .tag,
-.rule .ranges { order: 2; }
+.rule .ranges,
+.section-title .ranges,
+.section-title .scope-inline { order: 2; }
+.section-title { flex-wrap: wrap; row-gap: 4px; }
 .tag { color: var(--dim); font-weight: 400; text-decoration: none; }
 a.tag { color: var(--fg); text-decoration: underline; }
 .tag.live { color: var(--fg); font-weight: 700; }
@@ -232,6 +239,7 @@ a.tag { color: var(--fg); text-decoration: underline; }
 .status .pts:hover { background: none; color: var(--hi); text-decoration: underline; }
 
 .section-title { margin: 0 0 16px; color: var(--hi); font-size: var(--fs-3); font-weight: 700; }
+.section-title .scope-inline { margin-left: 0; color: var(--dim); }
 .section-title label { cursor: pointer; }
 .play .hint { max-width: 60ch; margin-top: 12px; }
 .locked-line { margin: 16px 0 0; color: var(--fg); }
@@ -674,7 +682,7 @@ details[open] summary { margin-bottom: 12px; }
 .testbanner {
   margin: 0;
   padding: 8px 20px;
-  border-bottom: 1px solid var(--rule-color);
+  border-bottom: 1px solid var(--edge);
   color: var(--dim);
   font-size: var(--fs-1);
 }
@@ -987,7 +995,7 @@ details.expand[open] summary .when-open { display: inline; }
   .split.duo { grid-template-columns: 1fr 1fr; gap: 0 20px; }
   .duo .ranked b { font-size: var(--fs-3); }
   .privacy-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-  .privacy-table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--rule-color); }
+  .privacy-table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--edge); }
   .privacy-table td { display: grid; grid-template-columns: 7ch minmax(0, 1fr); gap: 12px; padding: 6px 0; border: 0; }
   .privacy-table td::before { content: attr(data-label); color: var(--dim); }
   .kv { grid-template-columns: 1fr; gap: 0; }
@@ -1059,7 +1067,7 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 
 /* Bets: pick a range (two boxes, a button), then its quote with a stake
    box. The board below links each ready-made range to its quote. */
-.pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 16px; }
+.pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .pick input[type="text"], .betform input[type="text"] { flex: none; width: 8ch; padding: 8px; background: var(--bg); border: 1px solid var(--edge-strong); border-radius: 0; color: var(--hi); font: 400 var(--fs-2)/1 var(--font); }
 .pick input:focus-visible, .betform input:focus-visible { border-color: var(--hi); }
 .pick button, .betform button { padding: 8px 16px; }
@@ -1068,7 +1076,10 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .pick.live button { display: none; }
 .quote-error { margin-top: 16px; }
 .pick-none.on { background: var(--hi); color: var(--bg); padding: 0 8px; }
-.quote { margin-top: 16px; padding: 16px; border: 1px solid var(--edge-strong); max-width: 560px; }
+.betbox { padding: 16px; border: var(--rule); background: var(--panel); }
+.betbox .hint { margin-top: 8px; }
+.sec .hint { font-size: var(--fs-1); }
+.quote { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--edge-strong); }
 .quote-label { color: var(--hi); font-weight: 700; }
 .quote-figures { display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 8px 0 0; }
 .quote-figures dt { color: var(--dim); font-size: var(--fs-1); }

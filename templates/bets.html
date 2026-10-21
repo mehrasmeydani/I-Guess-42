@@ -8,30 +8,30 @@
 
 {% block content %}
 <section class="sec" style="--b: 0" aria-labelledby="bets-h">
-  <h2 class="section-title" id="bets-h">today's bets <span class="dim scope-inline">round {{ crate::templates::eu(round_key) }} &middot; close {{ close_time }} &middot; odds locked when you bet</span></h2>
+  <h2 class="section-title" id="bets-h">today's bets <span class="dim scope-inline">close {{ close_time }}{% if can_bet %} &middot; {{ room }} of {{ crate::odds::MAX_BETS_PER_ROUND }} left to stake{% endif %}</span></h2>
   {% include "_notice.html" %}
+
+  {# One box: pick a range, its odds under it. Picking is a plain GET, so it
+     works without scripts; app.js swaps the quote in as you type. #}
+  <div class="betbox">
+    <form class="pick" method="get" action="/g/bets" data-quote="/g/bets/quote">
+      <label for="lo">winner from</label>
+      <input id="lo" name="lo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="5" value="{{ lo }}" autocomplete="off" required>
+      <label for="hi">to</label>
+      <input id="hi" name="hi" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="any" value="{{ hi }}" autocomplete="off">
+      <button type="submit">see odds</button>
+      <a class="pick-none{% if nobody_picked %} on{% endif %}" href="/g/bets?m=none">or: nobody wins</a>
+    </form>
+    <p class="hint">empty &ldquo;to&rdquo; = or more &middot; same number twice = exactly that number</p>
+    <div id="quote" aria-live="polite">{% include "_quote.html" %}</div>
+  </div>
   {% if !signed_in %}
-    <p class="dim"><a href="/login">sign in</a> to bet &middot; points only, never money</p>
+    <p class="hint"><a href="/login">sign in</a> to bet &middot; points only, never money</p>
   {% else if !can_bet %}
-    <p class="dim">confirm your email to bet</p>
+    <p class="hint">confirm your email to bet</p>
   {% else %}
-    <p class="dim">stake 1&ndash;{{ max_bet }} a bet &middot; {{ room }} left to stake this round &middot; points only, never money</p>
+    <p class="hint">1&ndash;{{ max_bet }} a bet &middot; odds locked when you bet &middot; points only, never money</p>
   {% endif %}
-
-  {# Step one, a plain GET so it works without scripts: pick a range, see its odds. #}
-  <form class="pick" method="get" action="/g/bets" data-quote="/g/bets/quote">
-    <label for="lo">winner from</label>
-    <input id="lo" name="lo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="5" value="{{ lo }}" autocomplete="off" required>
-    <label for="hi">to</label>
-    <input id="hi" name="hi" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="any" value="{{ hi }}" autocomplete="off">
-    <button type="submit">see odds</button>
-    <a class="pick-none{% if nobody_picked %} on{% endif %}" href="/g/bets?m=none">or: nobody wins</a>
-  </form>
-  <p class="dim">empty &ldquo;to&rdquo; = or more &middot; same number twice = exactly that number</p>
-
-  {# The quote: filled in by the server on a full load, and swapped in as
-     you type (app.js fetches just this part from /g/bets/quote). #}
-  <div id="quote" aria-live="polite">{% include "_quote.html" %}</div>
 </section>
 
 <section class="sec" style="--b: 1" aria-labelledby="board-h">
@@ -50,8 +50,7 @@
     </tbody>
   </table>
   </div>
-  <p class="dim">{% if sims > 0 %}odds: last week&rsquo;s picks replayed {{ sims }} times{% else %}no picks last week &middot; odds are a rough guess{% endif %} &middot; they move as people bet &middot; the house keeps {{ tax }} &middot; on the book today: {{ book_total }} points, {{ book_bets }} {% if book_bets == 1 %}bet{% else %}bets{% endif %}</p>
-  <p class="dim">winner = the round&rsquo;s winning number &middot; ranges lose if nobody wins &middot; settled at {{ close_time }} with the pot</p>
+  <p class="hint">{% if sims > 0 %}from last week&rsquo;s picks, replayed {{ sims }}&times;{% else %}no picks last week &middot; a rough guess{% endif %} &middot; moves as people bet &middot; house keeps {{ tax }} &middot; on the book: {{ book_total }} pts, {{ book_bets }} {% if book_bets == 1 %}bet{% else %}bets{% endif %} &middot; ranges lose if nobody wins</p>
 </section>
 
 {% if !mine.is_empty() %}
