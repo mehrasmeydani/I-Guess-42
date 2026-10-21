@@ -115,11 +115,15 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .top nav a:hover { background: var(--hi); color: var(--bg); }
 .top nav a.on:hover { background: var(--hi); }
 /* The pool switch: one box, two halves, the one you are in inverted. */
-/* The pool switch, on the round's status line: "42 vienna / global", the
-   round you are in shown as where you are (white inversion). */
-.pools { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; color: var(--dim); white-space: nowrap; }
-.pools a { color: var(--fg); padding: 0 4px; }
-.pools a.on, .pools a.on:hover { background: var(--hi); color: var(--bg); text-decoration: none; font-weight: 700; }
+/* The round switch, for 42 students: one box, two halves, the round you
+   are in inverted. A fixed size, so the header is the same in both rounds. */
+.pools { display: inline-flex; flex: none; border: 1px solid var(--edge-strong); font-size: var(--fs-1); white-space: nowrap; }
+.pools a { padding: 4px 10px; color: var(--fg); text-decoration: none; }
+.pools a + a { border-left: 1px solid var(--edge-strong); }
+.pools a:hover { background: var(--hi); color: var(--bg); }
+.pools a.on, .pools a.on:hover { background: var(--hi); color: var(--bg); font-weight: 700; }
+/* Not the tabs' inversion, which reaches past its text: this one fills its half exactly. */
+.top .pools a, .top .pools a.on { margin: 0; padding: 4px 10px; }
 
 .status { display: flex; align-items: center; gap: 16px; margin-left: auto; color: var(--dim); white-space: nowrap; }
 .status .who { text-decoration: none; }
@@ -955,7 +959,11 @@ details.expand[open] summary .when-open { display: inline; }
   /* "42 / global" and a username cut short, so the top row fits a phone. */
   .top { gap: 12px; }
   .status .who { max-width: 12ch; overflow: hidden; text-overflow: ellipsis; }
-  .pools { margin-left: 0; }
+  /* The switch gets its own line under the logo on a phone, in both rounds,
+     rather than squeezing the top row. */
+  .top { flex-wrap: wrap; }
+  .top .pools { order: 3; flex: 1 1 100%; }
+  .top .pools a, .top .pools a.on { flex: 1; text-align: center; padding: 8px 0; }
   .brand { font-size: var(--fs-2); }
   .statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .daynav { grid-template-columns: 1fr 1fr; }

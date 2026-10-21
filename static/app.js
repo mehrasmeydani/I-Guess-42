@@ -295,3 +295,18 @@
     setTimeout(function () { wrap.parentNode.removeChild(wrap); }, left * 1000);
   }
 })();
+
+// The round switch keeps you on the same kind of page: results to results,
+// trends to trends. Bets exist only in the global round, so from there the
+// 42 side goes to its round page.
+(function () {
+  var nav = document.querySelector('nav.pools[data-here]');
+  if (!nav) return;
+  var here = nav.dataset.here || '/';
+  var links = nav.querySelectorAll('a[data-pool]');
+  for (var i = 0; i < links.length; i++) {
+    var base = links[i].dataset.pool;
+    var path = (here === '/bets' && base === '') ? '/' : base + here;
+    links[i].setAttribute('href', path === '/g/' || path === '/g' ? '/g/' : path);
+  }
+})();

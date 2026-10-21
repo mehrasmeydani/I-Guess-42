@@ -361,7 +361,11 @@ async fn results_in(
         latest,
         chart,
         data_source: data_source(&state, pool).await?,
-        first_close: Round::current(state.now()).deadline_human(),
+        first_close: Round::current(state.now())
+            .deadline
+            .with_timezone(&crate::round::TZ)
+            .format("%H:%M")
+            .to_string(),
         rounds,
         total_rounds,
         q,
@@ -1869,17 +1873,29 @@ mod tests {
                 assert!(html.contains(r#"href="/g/results""#));
             }
 
-            // A student sees the switch beside the countdown, on whichever side they are.
+            // A student sees the switch in the header, on whichever side they are.
             let global = global_page(&state, Some("s")).await;
-            assert!(global.contains(r#"<a class="on" aria-current="true" href="/g/">global</a>"#));
+            assert!(global.contains(r#"<a class="on" aria-current="true" href="/g/" data-pool="/g">global</a>"#));
             let vienna = body(
                 handlers::index(State(state.clone()), jar("s"), Query(handlers::IndexQuery { msg: None, n: None }))
                     .await
                     .unwrap(),
             )
             .await;
-            assert!(vienna.contains(r#"<a class="on" aria-current="true" href="/">42 vienna</a>"#));
+            assert!(vienna.contains(r#"<a class="on" aria-current="true" href="/" data-pool="">42 vienna</a>"#));
             assert!(vienna.contains(r#"href="/results""#));
+            // And on every page, saying which page it is, so switching keeps you on it.
+            let results = body(
+                handlers::global_results(
+                    State(state.clone()),
+                    jar("s"),
+                    Query(ResultsQuery { q: None, show: None, date: None }),
+                )
+                .await
+                .unwrap(),
+            )
+            .await;
+            assert!(results.contains(r#"<nav class="pools" aria-label="which round" data-here="/results">"#));
         }
 
         #[tokio::test]

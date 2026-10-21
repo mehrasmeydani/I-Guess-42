@@ -56,6 +56,14 @@
       <a {% block nav_trends %}{% endblock %} href="{{ pool.base() }}/trends">trends</a>
       {% if pool.is_global() %}<a {% block nav_bets %}{% endblock %} href="/g/bets">bets</a>{% endif %}
     </nav>
+    {# Two games, one site - but only 42 students ever learn there are two.
+       The switch keeps you on the same kind of page (app.js reads where
+       from data-here); without the script it goes to the other round. #}
+    {% if crate::templates::sees_42(user) %}
+    <nav class="pools" aria-label="which round" data-here="{% block here %}/{% endblock %}">
+      <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/" data-pool="">42 vienna</a><a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/" data-pool="/g">global</a>
+    </nav>
+    {% endif %}
     <div class="status">
       {# The spinner glyphs are decoration; only the one-off message is read out. #}
       <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>

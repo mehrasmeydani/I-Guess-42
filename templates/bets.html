@@ -4,6 +4,8 @@
 {% block nav_bets %}class="on" aria-current="page"{% endblock %}
 {% block path %}/g/bets{% endblock %}
 
+{% block here %}/bets{% endblock %}
+
 {% block content %}
 <section class="sec" style="--b: 0" aria-labelledby="bets-h">
   <h2 class="section-title" id="bets-h">today's bets <span class="dim scope-inline">round {{ crate::templates::eu(round_key) }} &middot; close {{ close_time }} &middot; odds locked when you bet</span></h2>

@@ -46,13 +46,6 @@
     <p class="state-line">
       <span class="pill" id="round-h">round {{ crate::templates::eu(round_key) }} &middot; <span class="state">[open]</span></span>
       <span class="closes-at">closes {{ close_time }} vienna</span>
-      {# Two games, one site - but only 42 students ever learn there are two,
-         and they switch here, where they play. #}
-      {% if crate::templates::sees_42(user) %}
-      <span class="pools" role="navigation" aria-label="which round">
-        <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/">42 vienna</a><span aria-hidden="true">/</span><a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/">global</a>
-      </span>
-      {% endif %}
     </p>
     <p class="closes-in">closes in</p>
     {# Text only: the time is in aria-label, refreshed once a minute, and

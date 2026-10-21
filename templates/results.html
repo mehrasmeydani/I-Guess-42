@@ -4,6 +4,8 @@
 {% block nav_results %}class="on" aria-current="page"{% endblock %}
 {% block path %}{{ pool.base() }}/results{% endblock %}
 
+{% block here %}/results{% endblock %}
+
 {% block content %}
 <section class="sec" style="--b: 0">
   <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; all-time</p>
