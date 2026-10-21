@@ -1048,3 +1048,23 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
   .diff tbody td:first-child { grid-column: 1 / -1; margin-bottom: 4px; }
   .diff .change { min-width: 0; }
 }
+
+/* Bets: a stake box and a button in the last column of each market. */
+.markets td { vertical-align: middle; }
+.betcell { width: 1%; white-space: nowrap; }
+.betform { display: flex; gap: 8px; margin: 0; }
+.betform input { width: 6ch; padding: 4px 8px; background: var(--bg); border: 1px solid var(--edge-strong); border-radius: 0; color: var(--hi); font: 400 var(--fs-2)/1.4 var(--font); }
+.betform input:focus-visible { border-color: var(--hi); }
+.betform button { padding: 4px 12px; }
+.teaser { margin-top: 24px; }
+
+/* On a phone each market is two lines: the bet, its chance and odds, then
+   the stake box and button across the width. */
+@media (max-width: 640px) {
+  .markets thead tr, .markets tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) 5ch 8ch; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--edge); }
+  .markets th, .markets td { padding: 0 0 0 8px; border: 0; }
+  .markets th:first-child, .markets td:first-child { padding-left: 0; }
+  .markets thead th:nth-child(4) { display: none; }
+  .markets .betcell { grid-column: 1 / -1; width: auto; padding: 8px 0 0; }
+  .betform input { flex: 1; width: auto; }
+}

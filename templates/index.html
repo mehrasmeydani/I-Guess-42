@@ -125,6 +125,11 @@
   {% endmatch %}
 </section>
 
+{% match bet_teaser %}
+  {% when Some with (t) %}<p class="teaser"><span class="dim">bets on the winner</span> {{ t }} &middot; <a href="/g/bets">all bets &rarr;</a></p>
+  {% when None %}
+{% endmatch %}
+
 <section class="sec" style="--b: 2">
   <h2 class="section-title">rules</h2>
   <ol class="rules">

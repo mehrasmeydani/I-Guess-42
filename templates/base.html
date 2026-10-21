@@ -54,6 +54,7 @@
       <a {% block nav_round %}{% endblock %} href="{{ pool.base() }}/">round</a>
       <a {% block nav_results %}{% endblock %} href="{{ pool.base() }}/results">results</a>
       <a {% block nav_trends %}{% endblock %} href="{{ pool.base() }}/trends">trends</a>
+      {% if pool.is_global() %}<a {% block nav_bets %}{% endblock %} href="/g/bets">bets</a>{% endif %}
     </nav>
     <div class="status">
       {# The spinner glyphs are decoration; only the one-off message is read out. #}

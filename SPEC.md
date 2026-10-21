@@ -1,6 +1,6 @@
 # Spec: open to everyone — global pool, logins, points and betting
 
-Status: **Phases 1–3 built** (on the `global` branch, not deployed); phase 4 (bets) not started. This is the plan the next releases follow.
+Status: **All four phases built** (on the `global` branch, not deployed). What is left before v2.0.0 is in TODO.md. This is the plan the next releases follow.
 Where it disagrees with the code, the code describes what runs today and this
 file describes what is meant to run next.
 
@@ -1001,7 +1001,22 @@ Built as planned (`migrations/0009_points.sql`, `src/economy.rs`,
 - Balance in the header, `/g/points`, `/g/leaderboard`, `/mod/adjust`,
   `/mod/void`.
 
-### Phase 4 — bets and odds
+### Phase 4 — bets and odds — **done**
+
+Built as planned (`migrations/0010_bets.sql`, `src/odds.rs`, `src/bets.rs`),
+with these details settled in building:
+
+- A market is "winner under N" / "winner N or more" for N in 5, 10, 20, 50,
+  and "nobody wins"; under and over lose when nobody wins.
+- Odds are worked out once per open round and cached; a bet carries the odds
+  shown on the page it was placed from, and is refused ("odds changed") if
+  they no longer match. Nothing about the open round feeds the odds.
+- Bets settle in the same transaction as the round's pot. A round nobody
+  played, a called-off round, and a ban void the open bets and refund them.
+- `bets` is a tab in the global round only; the round page shows three
+  markets' odds with a link.
+- Smoothing works as specified, which means 90 days of history weigh about
+  20 days of evidence against the prior's 4 (the half-life is 14 days).
 
 - Migration `0009`, `odds.rs`, the bets page, settlement extended to bets,
   odds cache.

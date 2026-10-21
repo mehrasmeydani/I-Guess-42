@@ -5,8 +5,8 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 
 ## 1. Release scope
 
-- [ ] Ship v2.0.0 only once all four phases of SPEC.md are built (accounts,
-      global round, points, bets), or decide to ship earlier.
+- [x] All four phases of SPEC.md are built (accounts, global round, points,
+      bets). v2.0.0 can ship once the items below are done.
 
 ## 2. Production `.env`
 

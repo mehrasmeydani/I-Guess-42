@@ -12,6 +12,9 @@ use crate::limits::Limits;
 use crate::mail::Mailer;
 use crate::templates::{self, ErrorTemplate};
 
+/// Betting odds and the open round they were worked out for.
+pub type TodaysOffers = (String, Vec<crate::odds::Offer>);
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
@@ -24,6 +27,8 @@ pub struct AppState {
     pub held: Arc<HeldGuesses>,
     /// Rendered link-preview images of closed rounds.
     pub og: Arc<crate::og::Cache>,
+    /// Today's betting odds, by the open round they were worked out for.
+    pub offers: Arc<std::sync::Mutex<Option<TodaysOffers>>>,
     /// Seconds added to the wall clock, so a test instance can be pushed past
     /// a 12:42 deadline without waiting for one. Always zero unless an admin
     /// moved it, and it only affects which round is open - never session
@@ -38,6 +43,7 @@ impl AppState {
             limits: Arc::new(Limits::default()),
             held: Arc::new(HeldGuesses::default()),
             og: Arc::new(crate::og::Cache::default()),
+            offers: Arc::new(std::sync::Mutex::new(None)),
             db,
             cfg,
             http,

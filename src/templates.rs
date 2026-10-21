@@ -325,6 +325,8 @@ pub struct IndexTemplate {
     pub carried_label: Option<String>,
     /// What a guess costs, in the global round.
     pub stake_label: Option<String>,
+    /// A few of today's odds, for the line that leads to the bets page.
+    pub bet_teaser: Option<String>,
     pub guess_count: i64,
     pub last_round: Option<RoundView>,
     /// How much of the announcement window is left, in seconds, or `None`
@@ -528,6 +530,53 @@ pub struct WelcomeTemplate {
     pub username: String,
     pub then: String,
     pub error: Option<&'static str>,
+}
+
+/// A market on the bets page.
+pub struct OfferView {
+    pub key: String,
+    pub label: String,
+    pub chance: i64,
+    pub odds: String,
+    pub odds_x100: i64,
+    /// Bet on already today.
+    pub taken: bool,
+}
+
+/// A bet, open or settled.
+pub struct SlipView {
+    pub date: String,
+    pub market: String,
+    pub stake: i64,
+    pub odds: String,
+    /// "open", "won", "lost" or "void".
+    pub result: String,
+    /// What it pays (open) or paid (settled), stake included.
+    pub amount: i64,
+    /// Settled: what it won or lost, net.
+    pub net: Option<i64>,
+}
+
+#[derive(Template)]
+#[template(path = "bets.html")]
+pub struct BetsTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub notice: Option<Notice>,
+    pub round_key: String,
+    pub close_time: String,
+    pub signed_in: bool,
+    pub can_bet: bool,
+    pub offers: Vec<OfferView>,
+    pub mine: Vec<SlipView>,
+    pub past: Vec<SlipView>,
+    /// How much more may be staked on bets this round.
+    pub room: i64,
+    pub max_bet: i64,
+    /// Net over the listed past slips, "+40" or "-25".
+    pub net_label: String,
 }
 
 /// A line of points history.

@@ -1,5 +1,6 @@
 mod account;
 mod app;
+mod bets;
 mod auth;
 mod config;
 mod copy;
@@ -14,6 +15,7 @@ mod limits;
 mod mail;
 mod moderation;
 mod oauth;
+mod odds;
 mod og;
 mod platform;
 mod points;
@@ -120,6 +122,8 @@ async fn main() -> Result<()> {
         .route("/g/trends", get(handlers::global_trends))
         .route("/g/me", get(handlers::global_me))
         .route("/g/points", get(points_pages::points))
+        .route("/g/bets", get(bets::page))
+        .route("/g/bet", post(bets::place))
         .route("/g/leaderboard", get(points_pages::leaderboard))
         .route("/me", get(handlers::me))
         .route("/g/guess", post(handlers::global_submit_guess))

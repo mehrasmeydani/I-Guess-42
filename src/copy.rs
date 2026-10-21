@@ -44,6 +44,14 @@ pub fn notice(code: &str) -> Option<(&'static str, &'static str)> {
         "unbanned" => ("ok", "unbanned"),
         "adjusted" => ("ok", "points adjusted"),
         "called_off" => ("ok", "round called off · stakes refunded"),
+        // bets
+        "bet_placed" => ("ok", "bet placed · settled at 12:42"),
+        "bet_twice" => ("error", "one bet per market a round"),
+        "bet_cap" => ("error", "bets: 1 to 100 each, 200 a round"),
+        "bet_closed" => ("error", "bets closed · round over"),
+        "bet_odds" => ("error", "odds changed · check and bet again"),
+        "bet_market" => ("error", "no such bet"),
+        "bet_slow" => ("error", "too many bets · wait a minute"),
         "added" => ("ok", "added · counts"),
         "added_ghost" => ("ok", "added as ghost · can't win"),
         "cleared" => ("ok", "round cleared"),
@@ -157,7 +165,8 @@ mod tests {
             "resend_wait", "mail_failed", "signed_out", "deleted", "linked", "already_linked",
             "linked_elsewhere", "unlinked", "renamed", "password_changed", "password_added", "banned",
             "unbanned", "adjusted", "called_off", "added", "added_ghost", "cleared", "not_demo",
-            "bad_login", "bad_guess",
+            "bad_login", "bad_guess", "bet_placed", "bet_twice", "bet_cap", "bet_closed", "bet_odds",
+            "bet_market", "bet_slow",
         ];
         let mut all: Vec<String> = codes.iter().map(|c| notice(c).expect(c).1.to_string()).collect();
         all.extend([

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}bets &middot; i guess low{% endblock %}
+{% block h1 %}bets{% endblock %}
+{% block nav_bets %}class="on" aria-current="page"{% endblock %}
+{% block path %}/g/bets{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0" aria-labelledby="bets-h">
+  <h2 class="section-title" id="bets-h">today's bets <span class="dim scope-inline">round {{ crate::templates::eu(round_key) }} &middot; close {{ close_time }} &middot; odds locked when you bet</span></h2>
+  {% include "_notice.html" %}
+  {% if !signed_in %}
+    <p class="dim"><a href="/login">sign in</a> to bet &middot; points only, never money</p>
+  {% else if !can_bet %}
+    <p class="dim">confirm your email to bet</p>
+  {% else %}
+    <p class="dim">stake 1&ndash;{{ max_bet }} a bet &middot; {{ room }} left to stake this round &middot; points only, never money</p>
+  {% endif %}
+
+  <div class="table-wrap" tabindex="0" role="region" aria-label="today's markets">
+  <table class="grid markets">
+    <thead><tr><th scope="col">bet</th><th scope="col" class="num">chance</th><th scope="col" class="num">odds</th>{% if can_bet %}<th scope="col"><span class="sr">stake</span></th>{% endif %}</tr></thead>
+    <tbody>
+      {% for o in offers %}
+        <tr>
+          <td>{{ o.label }}</td>
+          <td class="num dim" title="from past rounds, recent ones counting more">{{ o.chance }}%</td>
+          <td class="num b">{{ o.odds }}</td>
+          {% if can_bet %}
+          <td class="betcell">
+            {% if o.taken %}<span class="dim">placed</span>
+            {% else if room > 0 %}
+            <form method="post" action="/g/bet" class="betform">
+              <input type="hidden" name="market" value="{{ o.key }}">
+              <input type="hidden" name="odds" value="{{ o.odds_x100 }}">
+              <input type="hidden" name="round" value="{{ round_key }}">
+              <input name="stake" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="10" aria-label="stake on {{ o.label }}" autocomplete="off" required>
+              <button type="submit">bet</button>
+            </form>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="dim">winner = the round's winning number &middot; under/over lose if nobody wins &middot; settled at {{ close_time }} with the pot</p>
+</section>
+
+{% if !mine.is_empty() %}
+<section class="sec" style="--b: 1">
+  <h2 class="section-title">your bets today</h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="your bets today">
+  <table class="grid">
+    <thead><tr><th scope="col">bet</th><th scope="col" class="num">stake</th><th scope="col" class="num">odds</th><th scope="col" class="num">pays</th></tr></thead>
+    <tbody>
+      {% for b in mine %}
+        <tr><td>{{ b.market }}</td><td class="num">{{ b.stake }}</td><td class="num">{{ b.odds }}</td><td class="num b">{{ b.amount }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+{% if !past.is_empty() %}
+<section class="sec" style="--b: 2">
+  <h2 class="section-title">past bets <span class="dim scope-inline">last 14 days &middot; net {{ net_label }}</span></h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="past bets">
+  <table class="grid">
+    <thead><tr><th scope="col">round</th><th scope="col">bet</th><th scope="col" class="num">stake</th><th scope="col" class="num">odds</th><th scope="col">result</th><th scope="col" class="num">net</th></tr></thead>
+    <tbody>
+      {% for b in past %}
+        <tr><td>{{ b.date }}</td><td>{{ b.market }}</td><td class="num">{{ b.stake }}</td><td class="num">{{ b.odds }}</td>
+          <td>{% if b.result == "won" %}<b class="win">won</b>{% else if b.result == "void" %}<span class="dim">refunded</span>{% else %}<span class="dim">{{ b.result }}</span>{% endif %}</td>
+          <td class="num">{% match b.net %}{% when Some with (n) %}{% if n.is_positive() %}<b class="win">+{{ n }}</b>{% else if n.is_negative() %}<span class="lose">{{ n }}</span>{% else %}0{% endif %}{% when None %}{% endmatch %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
