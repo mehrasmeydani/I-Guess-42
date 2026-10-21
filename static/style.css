@@ -119,7 +119,6 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
    are in inverted. A fixed size, so the header is the same in both rounds. */
 .pools { display: inline-flex; flex: none; border: 1px solid var(--edge-strong); font-size: var(--fs-1); white-space: nowrap; }
 .pools a { padding: 4px 10px; color: var(--fg); text-decoration: none; }
-.pools a + a { border-left: 1px solid var(--edge-strong); }
 .pools a:hover { background: var(--hi); color: var(--bg); }
 .pools a.on, .pools a.on:hover { background: var(--hi); color: var(--bg); font-weight: 700; }
 /* Not the tabs' inversion, which reaches past its text: this one fills its half exactly. */
