@@ -103,6 +103,11 @@ pub async fn run(state: AppState) {
         if let Err(err) = settle_all(&state.db, &open).await {
             tracing::error!(error = ?err, "settling global rounds failed");
         }
+        // The day's odds, worked out here as soon as a round opens, so no
+        // visitor waits for the simulation; cached until the next round.
+        if let Err(err) = crate::bets::todays_base(&state).await {
+            tracing::error!(error = ?err, "working out today's odds failed");
+        }
     }
 }
 

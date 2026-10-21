@@ -59,3 +59,13 @@ opt-level = 3
 # buys 3.8 MB off a 142 MB image - under 3% - and nothing measurable at
 # runtime for a server that spends its life waiting on SQLite and HTTP.
 lto = "thin"
+
+# Debug builds run the daily odds simulation (millions of random draws) and
+# hash passwords; unoptimised that takes seconds. Light optimisation for our
+# own code and full for dependencies keeps `cargo run` close to release
+# speed, for a little more compile time once.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
