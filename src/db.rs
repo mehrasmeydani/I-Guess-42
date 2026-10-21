@@ -821,6 +821,9 @@ pub async fn unban_account(db: &Db, account_id: i64) -> Result<()> {
 pub struct Cluster {
     pub why: String,
     pub usernames: Vec<String>,
+    /// A pattern that bends a round's result, not only a shared network:
+    /// listed first, and marked.
+    pub serious: bool,
 }
 
 /// Groups of at least `min` accounts that signed up from one address in the
@@ -850,6 +853,7 @@ pub async fn clusters(db: &Db, min: i64) -> Result<Vec<Cluster>> {
     out.extend(signups.into_iter().map(|(hash, names)| Cluster {
         why: format!("signed up from one address ({hash})"),
         usernames: split(names),
+        serious: false,
     }));
 
     let guesses: Vec<(String, String)> = sqlx::query_as(
@@ -865,6 +869,7 @@ pub async fn clusters(db: &Db, min: i64) -> Result<Vec<Cluster>> {
     out.extend(guesses.into_iter().map(|(hash, names)| Cluster {
         why: format!("guessed from one address this week ({hash})"),
         usernames: split(names),
+        serious: false,
     }));
 
     // Bursts, found in Rust: the timestamps are text, and a sliding window is
@@ -891,12 +896,86 @@ pub async fn clusters(db: &Db, min: i64) -> Result<Vec<Cluster>> {
             out.push(Cluster {
                 why: format!("signed up within ten minutes ({})", times[i].1.format("%Y-%m-%d %H:%M UTC")),
                 usernames: split(times[i..=j].iter().map(|t| t.0.clone()).collect::<Vec<_>>().join(",")),
+                serious: false,
             });
             i = j + 1;
         } else {
             i += 1;
         }
     }
+
+    // A winner helped by their own accounts: in a closed round, players on
+    // the winner's network took numbers below the winning one, so the
+    // winner's number was the lowest left unique. The trick a crowd of fake
+    // accounts exists for. Closed rounds only: today's guesses stay secret,
+    // from moderators too.
+    let blocked: Vec<(String, String, i64, String)> = sqlx::query_as(
+        "SELECT p.round_date, wa.username, w.value,
+                group_concat(ba.username || ' (' || b.value || ')', ', ')
+         FROM pots p
+         JOIN global_guesses w ON w.round_date = p.round_date AND w.user_id = p.winner_id
+         JOIN accounts wa ON wa.id = w.user_id
+         JOIN global_guesses b ON b.round_date = p.round_date AND b.user_id != w.user_id
+                              AND b.ip_hash = w.ip_hash AND b.value < w.value AND b.participates = 1
+         JOIN accounts ba ON ba.id = b.user_id
+         WHERE p.round_date >= ?1 AND p.voided = 0 AND w.ip_hash IS NOT NULL
+         GROUP BY p.round_date, wa.username, w.value
+         ORDER BY p.round_date DESC",
+    )
+    .bind(&month_ago[..10])
+    .fetch_all(db)
+    .await?;
+    for (round, winner, value, blockers) in blocked {
+        let mut names = vec![winner.clone()];
+        names.extend(blockers.split(", ").filter_map(|b| b.split(' ').next()).map(str::to_string));
+        out.push(Cluster {
+            why: format!("round {round}: {winner} won with {value}; on the same network, {blockers} took lower numbers"),
+            usernames: names,
+            serious: true,
+        });
+    }
+
+    // Accounts in lockstep: guessing within ten seconds of each other, round
+    // after round. People on one network play at their own times; a script
+    // driving several accounts does not.
+    let pairs: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT a1.username, a2.username, COUNT(*) AS rounds
+         FROM global_guesses g1
+         JOIN global_guesses g2 ON g2.round_date = g1.round_date AND g2.user_id > g1.user_id
+         JOIN accounts a1 ON a1.id = g1.user_id
+         JOIN accounts a2 ON a2.id = g2.user_id
+         WHERE g1.round_date >= ?1 AND g1.participates = 1 AND g2.participates = 1
+           AND abs(julianday(g1.submitted_at) - julianday(g2.submitted_at)) * 86400 <= 10
+         GROUP BY g1.user_id, g2.user_id
+         HAVING rounds >= ?2",
+    )
+    .bind(&month_ago[..10])
+    .bind(min)
+    .fetch_all(db)
+    .await?;
+    // Pairs joined up into groups: a, b and b, c are one group of three.
+    let mut groups: Vec<(Vec<String>, i64)> = Vec::new();
+    for (a, b, rounds) in pairs {
+        let hit: Vec<usize> = (0..groups.len()).filter(|&i| groups[i].0.contains(&a) || groups[i].0.contains(&b)).collect();
+        let mut merged = (vec![a, b], rounds);
+        for &i in hit.iter().rev() {
+            let (names, r) = groups.remove(i);
+            merged.0.extend(names);
+            merged.1 = merged.1.max(r);
+        }
+        merged.0.sort();
+        merged.0.dedup();
+        groups.push(merged);
+    }
+    for (names, rounds) in groups {
+        out.push(Cluster {
+            why: format!("guess within ten seconds of each other, in {rounds} rounds or more this month"),
+            usernames: names,
+            serious: true,
+        });
+    }
+
+    out.sort_by_key(|c| !c.serious);
     Ok(out)
 }
 

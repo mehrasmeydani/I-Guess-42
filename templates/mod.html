@@ -41,14 +41,27 @@
   {% if clusters.is_empty() %}
     <p class="dim">nothing stands out</p>
   {% else %}
-    <table class="history">
+    {# Serious first: patterns that bend a round, not only a shared network.
+       Each name can be banned from here, with the flag as the reason. #}
+    <table class="history flags">
       <tbody>
         {% for c in clusters %}
-          <tr><td class="dim">{{ c.why }}</td><td>{{ c.usernames.join(", ") }}</td></tr>
+          <tr{% if c.serious %} class="serious"{% endif %}>
+            <td>{% if c.serious %}<b class="lose">&#9650;</b> {% endif %}{{ c.why }}</td>
+            <td class="flag-names">
+              {% for name in c.usernames %}
+                <form method="post" action="/mod/ban" class="inline">
+                  <input type="hidden" name="username" value="{{ name }}">
+                  <input type="hidden" name="reason" value="{{ c.why }}">
+                  <span>{{ name }}</span> <button type="submit" class="ghost">ban</button>
+                </form>
+              {% endfor %}
+            </td>
+          </tr>
         {% endfor %}
       </tbody>
     </table>
-    <p class="hint">shared networks are common · hints, not proof</p>
+    <p class="hint">shared networks are common: a whole school or office can look like one person</p>
   {% endif %}
 </section>
 

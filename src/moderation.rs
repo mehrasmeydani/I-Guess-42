@@ -325,6 +325,53 @@ mod tests {
         assert_eq!(found.len(), 3, "two from one address is not a group: {found:?}");
     }
 
+    #[tokio::test]
+    async fn a_winner_helped_by_their_own_accounts_and_accounts_in_lockstep_are_flagged() {
+        let (t, _state) = setup(&["megardes"]).await;
+        let id = |name: &'static str| {
+            let db = t.db.clone();
+            async move {
+                sqlx::query("INSERT INTO accounts (username, created_at, last_seen_at) VALUES (?1, 'x', 'x')")
+                    .bind(name).execute(&db).await.unwrap();
+                let (id,): (i64,) = sqlx::query_as("SELECT id FROM accounts WHERE username = ?1").bind(name).fetch_one(&db).await.unwrap();
+                id
+            }
+        };
+        let day = |back: i64| (chrono::Utc::now() - chrono::Duration::days(back)).format("%Y-%m-%d").to_string();
+        let guess = |round: String, who: i64, value: i64, net: &'static str| {
+            let db = t.db.clone();
+            async move {
+                db::insert_guess(&db, Pool::Global, &round, who, value, true).await.unwrap();
+                db::set_guess_ip_hash(&db, &round, who, net).await.unwrap();
+            }
+        };
+        // Two accounts on the winner's network take 1 together, so the
+        // winner's 2 is the lowest left unique. Someone elsewhere picks 3.
+        let (w, x, y, z) = (id("winner").await, id("blockx").await, id("blocky").await, id("honest").await);
+        let round = day(2);
+        guess(round.clone(), x, 1, "nnnn").await;
+        guess(round.clone(), y, 1, "nnnn").await;
+        guess(round.clone(), w, 2, "nnnn").await;
+        guess(round.clone(), z, 3, "other").await;
+        db::settle_round(&t.db, &round).await.unwrap();
+
+        // Two accounts guessing together in three rounds.
+        let (l1, l2) = (id("lock1").await, id("lock2").await);
+        for back in 3..=5 {
+            guess(day(back), l1, 7, "l1").await;
+            guess(day(back), l2, 8, "l2").await;
+        }
+
+        let found = db::clusters(&t.db, 3).await.unwrap();
+        let serious: Vec<&db::Cluster> = found.iter().filter(|c| c.serious).collect();
+        let blocked = serious.iter().find(|c| c.why.contains("winner won with 2")).expect("the helped winner");
+        assert!(blocked.why.contains("blockx (1)") && blocked.why.contains("blocky (1)"), "{}", blocked.why);
+        assert_eq!(blocked.usernames.len(), 3);
+        assert!(!blocked.usernames.contains(&"honest".to_string()));
+        assert!(serious.iter().any(|c| c.usernames == ["lock1", "lock2"]), "{found:?}");
+        assert!(found.first().is_some_and(|c| c.serious), "serious ones first");
+    }
+
     async fn page_of(cfg: crate::config::Config, imprint_page: bool) -> String {
         let (_t, state, _) = app_with(cfg).await;
         let jar = axum_extra::extract::cookie::CookieJar::new();
