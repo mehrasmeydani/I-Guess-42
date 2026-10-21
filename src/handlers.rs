@@ -325,10 +325,16 @@ async fn results_in(
     let latest = all.first().cloned().map(|newest| RoundView::new(newest, named));
     // The last round's chart, as on its day page, with the visitor's own
     // pick marked if they played.
+    let mut analysis = None;
     let chart = match all.first() {
         Some(newest) => {
             let tallies = db::round_tallies(&state.db, pool, &newest.round_date).await?;
-            let mut chart = stats::day_chart(&tallies, &stats::analyse(&tallies));
+            let day = stats::analyse(&tallies);
+            // The day in two lines, as its day page has them: why the winner
+            // won, and the spread of picks in numbers.
+            let collided = stats::collided_below(&tallies, day.winner, 6);
+            analysis = Some((why_line(day.winner, &collided), chart_summary(&tallies, day.winner, newest.total)));
+            let mut chart = stats::day_chart(&tallies, &day);
             let player = viewer.as_ref().and_then(|v| player_in(pool, v));
             if let Some(p) = player {
                 if let Some(mine) = db::my_guess(&state.db, pool, &newest.round_date, p).await? {
@@ -374,6 +380,8 @@ async fn results_in(
         impersonating: auth::admin_return_token(&jar).is_some(),
         latest,
         chart,
+        why: analysis.as_ref().and_then(|a| a.0.clone()),
+        analysis: analysis.map(|a| a.1),
         data_source: data_source(&state, pool).await?,
         first_close: Round::current(state.now())
             .deadline
@@ -586,19 +594,23 @@ fn takeaway_line(winner: Option<i64>, players: i64, collided: &[i64]) -> String 
         None => "nobody won".to_string(),
     };
     let players = format!("{players} {}", if players == 1 { "player" } else { "players" });
-    let taken = match collided {
-        [] => None,
+    match why_line(winner, collided) {
+        Some(why) => format!("{who} · {players} · {why}"),
+        None => format!("{who} · {players}"),
+    }
+}
+
+/// Why the winner won: "1, 2 and 4 were all taken", or "nothing lower was
+/// picked". None when nobody won and nothing collided below.
+fn why_line(winner: Option<i64>, collided: &[i64]) -> Option<String> {
+    match collided {
+        [] => winner.map(|_| "nothing lower was picked".to_string()),
         [one] => Some(format!("{} was taken", group_digits(*one))),
         many => {
             let (last, rest) = many.split_last().expect("not empty");
             let rest: Vec<String> = rest.iter().map(|v| group_digits(*v)).collect();
             Some(format!("{} and {} were all taken", rest.join(", "), group_digits(*last)))
         }
-    };
-    match (winner, taken) {
-        (_, Some(t)) => format!("{who} · {players} · {t}"),
-        (None, None) => format!("{who} · {players}"),
-        (Some(_), None) => format!("{who} · {players} · nothing lower was picked"),
     }
 }
 

@@ -98,13 +98,12 @@
         </ol>
       </div>
     </div>
-    <p class="dim">% = share of all picks · single picks left out</p>
   {% endif %}
 </section>
 
 {# The crowd's favourites over the whole range. #}
 <section class="sec" style="--b: 5">
-  <h2 class="section-title">most picked <span class="dim scope-inline">{{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}</span></h2>
+  <h2 class="section-title">most picked</h2>
   <ol class="ranked">
     {% for t in most %}
       <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
@@ -133,7 +132,7 @@
 </section>
 
 <section class="sec" style="--b: 7">
-  <h2 class="section-title">day by day <span class="dim scope-inline">newest first</span></h2>
+  <h2 class="section-title">day by day</h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="day by day">
   <table class="grid">
     <thead><tr><th>date</th><th>players</th><th>winning number</th></tr></thead>

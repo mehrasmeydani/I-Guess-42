@@ -8,10 +8,11 @@
 
 {% block content %}
 <section class="sec" style="--b: 0">
-  <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; all-time</p>
+  {% if data_source == "seeded" %}<p class="scope"><span class="chip">demo data</span></p>{% endif %}
   {% match latest %}
     {% when Some with (r) %}
       <p class="lead">{{ crate::templates::eu(r.date_key) }} &middot; {{ r.total }} played &middot; {% match r.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
+      {% match why %}{% when Some with (w) %}<p class="why">{{ w }}</p>{% when None %}{% endmatch %}
       {% match chart %}
         {% when Some with (chart) %}
           <p class="legend">
@@ -22,6 +23,7 @@
           {% include "chart.html" %}
         {% when None %}
       {% endmatch %}
+      {% match analysis %}{% when Some with (a) %}<p class="chart-summary">{{ a }}</p>{% when None %}{% endmatch %}
       <p class="morelink"><a href="{{ pool.base() }}/day/{{ r.date_key }}">every pick &rarr;</a></p>
     {% when None %}
       <p class="lead">no rounds yet &middot; first reveal {{ first_close }}</p>
@@ -98,7 +100,7 @@
 </section>
 
 <section class="sec" style="--b: 2" aria-labelledby="leaders-h">
-  <h2 class="section-title" id="leaders-h">most days won <span class="dim scope-inline">all-time</span></h2>
+  <h2 class="section-title" id="leaders-h">most days won</h2>
   {% if leaders.is_empty() %}
     <p class="dim">no winners yet</p>
   {% else %}

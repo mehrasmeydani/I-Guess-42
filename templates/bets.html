@@ -8,7 +8,7 @@
 
 {% block content %}
 <section class="sec" style="--b: 0" aria-labelledby="bets-h">
-  <h2 class="section-title" id="bets-h">today's bets <span class="dim scope-inline">close {{ close_time }} &middot; odds locked when you bet</span></h2>
+  <h2 class="section-title" id="bets-h">today's bets <span class="dim scope-inline">close {{ close_time }}</span></h2>
   {% include "_notice.html" %}
 
   {# One box: pick a range, its odds under it. Picking is a plain GET, so it
@@ -26,20 +26,17 @@
       <button type="submit">see odds</button>
       <a class="pick-none{% if nobody_picked %} on{% endif %}" href="/g/bets?m=none">or: nobody wins</a>
     </form>
-    <p class="hint">empty &ldquo;to&rdquo; = or more &middot; same number twice = exactly that number</p>
     <div id="quote" aria-live="polite">{% include "_quote.html" %}</div>
   </div>
   {% if !signed_in %}
-    <p class="hint"><a href="/login">sign in</a> to bet &middot; points only, never money</p>
+    <p class="hint"><a href="/login">sign in</a> to bet</p>
   {% else if !can_bet %}
     <p class="hint">confirm your email to bet</p>
-  {% else %}
-    <p class="hint">stake as much as you like, up to your points &middot; points only, never money</p>
   {% endif %}
 </section>
 
 <section class="sec" style="--b: 1" aria-labelledby="board-h">
-  <h2 class="section-title" id="board-h">where the winner lands <span class="dim scope-inline">tap one to bet</span></h2>
+  <h2 class="section-title" id="board-h">where the winner lands</h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="where the winner lands">
   <table class="grid markets">
     <thead><tr><th scope="col">range</th><th scope="col">chance</th><th scope="col" class="num">odds</th></tr></thead>
@@ -54,11 +51,10 @@
     </tbody>
   </table>
   </div>
-  <p class="hint">{% if sims > 0 %}from last month&rsquo;s picks (the last week twice), replayed {{ sims }}&times;{% else %}no picks last month &middot; a rough guess{% endif %} &middot; moves as people bet &middot; house keeps {{ tax }} &middot; one bet wins at most <b class="win">+{{ max_profit }}</b> ({{ players }} players a day &times; {{ crate::odds::PROFIT_PER_PLAYER }}) &middot; on the book: {{ book_total }} pts, {{ book_bets }} {% if book_bets == 1 %}bet{% else %}bets{% endif %} &middot; ranges lose if nobody wins</p>
 </section>
 
 <section class="sec" style="--b: 2" aria-labelledby="most-h">
-  <h2 class="section-title" id="most-h">the most picked number <span class="dim scope-inline">tap one to bet</span></h2>
+  <h2 class="section-title" id="most-h">the most picked number</h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="the most picked number">
   <table class="grid markets">
     <thead><tr><th scope="col">range</th><th scope="col">chance</th><th scope="col" class="num">odds</th></tr></thead>
@@ -73,7 +69,6 @@
     </tbody>
   </table>
   </div>
-  <p class="hint">the number the most players pick &middot; on a tie, the lowest of them &middot; its own book</p>
 </section>
 
 {% if !mine.is_empty() %}
@@ -94,7 +89,7 @@
 
 {% if !past.is_empty() %}
 <section class="sec" style="--b: 4">
-  <h2 class="section-title">past bets <span class="dim scope-inline">last 14 days &middot; net {{ net_label }}</span></h2>
+  <h2 class="section-title">past bets <span class="dim scope-inline">net {{ net_label }}</span></h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="past bets">
   <table class="grid">
     <thead><tr><th scope="col">round</th><th scope="col">bet</th><th scope="col" class="num">stake</th><th scope="col" class="num">odds</th><th scope="col">result</th><th scope="col" class="num">net</th></tr></thead>

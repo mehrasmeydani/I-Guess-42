@@ -17,7 +17,6 @@
       <a class="{% if week %}on{% endif %}" {% if week %}aria-current="true"{% endif %} href="/g/leaderboard?show=week">this week</a>
     </span>
   </h2>
-  <p class="hint">{% if week %}won from playing over the last seven days: pots and bets, less stakes &middot; daily and welcome points don't count{% else %}everyone's balance &middot; points are just for fun{% endif %}</p>
   {% if rows.is_empty() %}
     <p class="dim">nobody yet</p>
   {% else %}
@@ -36,7 +35,7 @@
 {% endif %}
 
 <section class="sec" style="--b: 1" aria-labelledby="wins-h">
-  <h2 class="section-title" id="wins-h">most wins <span class="dim scope-inline">days won, all-time</span></h2>
+  <h2 class="section-title" id="wins-h">most wins</h2>
   {% if wins.is_empty() %}
     <p class="dim">no winners yet</p>
   {% else %}

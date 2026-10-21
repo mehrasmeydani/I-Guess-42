@@ -225,11 +225,6 @@ pub async fn page(
         on_most: pick.market.is_some_and(Market::is_most) || (pick.market.is_none() && q.on.as_deref() == Some("most")),
         board: offer_views(&base, &book, odds::board(), pick.market),
         board_most: offer_views(&base, &book, odds::board_most(), pick.market),
-        book_total: book.iter().map(|(_, s)| s).sum(),
-        book_bets: book.len(),
-        sims: base.sims,
-        players: base.players,
-        max_profit: templates::group_digits(base.max_profit()),
         tax: odds::tax_label(),
         mine: mine.into_iter().map(slip).collect(),
         past: past.into_iter().map(slip).collect(),
@@ -641,7 +636,7 @@ mod tests {
         assert!(!out.contains(r#"action="/g/bet""#), "signed out: no forms");
         let html = bets_page(&state, Some("ann"), None).await;
         assert!(!html.contains(r#"action="/g/bet""#), "nothing picked yet");
-        assert!(html.contains("stake as much as you like, up to your points"));
+        assert!(!html.contains("stake as much as you like") && !html.contains("tap one to bet"), "no filler");
 
         let html = bets_page_q(&state, Some("ann"), picked("range:5:12")).await;
         assert_eq!(html.matches(r#"action="/g/bet""#).count(), 1);
@@ -653,8 +648,7 @@ mod tests {
         let html = bets_page_q(&state, Some("ann"), BetsQuery { msg: Some("bet_placed".into()), m: Some("range:5:12".into()), ..Default::default() }).await;
         assert!(html.contains("bet placed · settled at 12:42"));
         assert!(html.contains("your bets today"));
-        assert!(html.contains("placed &middot; one bet per range a round") && !html.contains(r#"action="/g/bet""#));
-        assert!(html.contains("on the book: 40 pts, 1 bet"));
+        assert!(html.contains(r#"<p class="dim">placed</p>"#) && !html.contains(r#"action="/g/bet""#));
         assert!(html.contains(&format!("<td class=\"num b win\">{}</td>", odds::payout(40, o, None))));
     }
 
@@ -758,9 +752,12 @@ mod tests {
         assert_eq!((base.picks, base.players, base.sims > 0), (290, 19, true));
         assert_eq!(base.max_profit(), 19 * odds::PROFIT_PER_PLAYER);
         let html = bets_page(&state, None, None).await;
-        assert!(html.contains("from last month&rsquo;s picks (the last week twice), replayed 40000&times;"));
-        let most = format!("one bet wins at most <b class=\"win\">+{}</b> (19 players a day &times; 100)", templates::group_digits(1900));
-        assert!(html.contains(&most), "{html}");
+        assert!(!html.contains("replayed") && !html.contains("on the book"), "no footnotes under the board");
+        // The cap and the cut are said where a stake is typed.
+        player(&state.db, "zed").await;
+        let html = bets_page_q(&state, Some("zed"), picked("range:5:12")).await;
+        let warn = format!("wins are capped at <b class=\"win\">+{}</b> (19 players a day &times; 100) and the house keeps 8%", templates::points_label(&1900));
+        assert!(html.contains(&warn), "{html}");
 
         let (ann, bob) = (player(&state.db, "ann").await, player(&state.db, "bob").await);
         let (mid, high) = ("range:5:12", "range:1:4");

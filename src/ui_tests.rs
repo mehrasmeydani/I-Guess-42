@@ -88,7 +88,7 @@ async fn a_day_page_says_who_won_and_why_in_a_line_and_in_words() {
     assert!(html.contains("view as table &middot; 3 numbers"));
     assert!(html.contains("hide table"));
     assert!(html.contains("<caption class=\"sr\">every number picked in round"));
-    assert!(html.contains(r#"<span class="chip">historical</span> &middot; this round"#), "a live site's closed rounds are historical");
+    assert!(!html.contains("historical") && !html.contains("demo data"), "only demo data is labelled; real rounds need no note");
     // Its own preview picture and description.
     assert!(html.contains(&format!(r#"content="http://localhost:3000/g/day/{day}/og.png""#)));
     assert!(html.contains(r#"<meta property="og:description" content="3 won · 5 players · 1 and 2 were all taken">"#));
@@ -170,7 +170,6 @@ async fn results_list_the_rounds_first_then_the_top_ten() {
     assert_eq!(shown.matches("<tr title=").count(), 10);
     assert!(html.contains("show all 12"));
     assert!(html.contains("show top 10"));
-    assert!(html.contains("&middot; all-time"));
     assert!(html.contains(r#"aria-current="true" href="/g/results">7</a>"#));
 }
 
@@ -212,6 +211,10 @@ async fn usernames_are_public_on_every_results_view() {
 async fn the_leaderboard_ranks_points_first_then_wins() {
     let (_t, state) = app(&[]).await;
     a_played_day(&state).await;
+    // The results page opens with the last round analysed, as its day page does.
+    let results = results_page(&state, None).await;
+    assert!(results.contains(r#"<p class="why">1 and 2 were all taken</p>"#), "{results}");
+    assert!(results.contains(r#"<p class="chart-summary">5 players · 3 numbers · 2 shared numbers · most: 1 (2×) · winner: 3</p>"#));
     crate::economy::collect(&state.db, db::viewer_for_session(&state.db, "ann").await.unwrap().unwrap().account.id, "2026-10-21").await.unwrap();
     let board = |pool: Pool, token: Option<&str>| {
         let state = state.clone();

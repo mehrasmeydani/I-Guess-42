@@ -1167,6 +1167,8 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .markets tr.on td { background: var(--panel); }
 .markets tr.on a { background: var(--hi); color: var(--bg); padding: 0 8px; margin-left: -8px; }
 .teaser { margin-top: 24px; }
+/* Results: why the last round's winner won, under its headline. */
+.why { margin: 4px 0 0; color: var(--hi); }
 
 @media (max-width: 640px) {
   .pick input[type="text"] { flex: 1 1 6ch; width: 6ch; }

@@ -402,6 +402,9 @@ pub struct ResultsTemplate {
     /// The last round's chart; `Some` exactly when `latest` is. Named
     /// `chart` because chart.html reads that binding.
     pub chart: Option<Chart>,
+    /// The last round analysed: why the winner won, and the picks in numbers.
+    pub why: Option<String>,
+    pub analysis: Option<String>,
     /// The rounds to list: the most recent few, or every match of a search.
     pub rounds: Vec<RoundView>,
     /// How many closed rounds exist in all.
@@ -634,15 +637,6 @@ pub struct BetsTemplate {
     pub board_most: Vec<OfferView>,
     /// The boxes are about the most picked number, not the winner.
     pub on_most: bool,
-    /// Points on the book today, and how many bets.
-    pub book_total: i64,
-    pub book_bets: usize,
-    /// Made-up rounds behind the odds; 0 if there were no picks to replay.
-    pub sims: u32,
-    /// Players a day on average, and so the most one bet can win over its
-    /// stake ("3 000").
-    pub players: usize,
-    pub max_profit: String,
     /// "8%".
     pub tax: String,
     pub mine: Vec<SlipView>,

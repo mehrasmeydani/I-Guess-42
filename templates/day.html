@@ -21,7 +21,7 @@
 </nav>
 
 <section class="sec" style="--b: 0">
-  <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; this round</p>
+  {% if data_source == "seeded" %}<p class="scope"><span class="chip">demo data</span></p>{% endif %}
   <p class="lead">{{ crate::templates::eu(round.date_key) }} &middot; {{ round.total }} played &middot; {% match round.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
   {% match my_pick %}{% when Some with (p) %}<p class="dim">your pick: <b class="mine-text">{{ p }}</b></p>{% when None %}{% endmatch %}
 </section>
