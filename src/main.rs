@@ -123,6 +123,7 @@ async fn main() -> Result<()> {
         .route("/g/me", get(handlers::global_me))
         .route("/g/points", get(points_pages::points))
         .route("/g/bets", get(bets::page))
+        .route("/g/bets/quote", get(bets::quote))
         .route("/g/bet", post(bets::place))
         .route("/g/leaderboard", get(points_pages::leaderboard))
         .route("/me", get(handlers::me))

@@ -22,7 +22,7 @@ use crate::handlers::current_viewer;
 use crate::limits;
 use crate::odds::{self, Base, Market, Quote, Week};
 use crate::round::Round;
-use crate::templates::{self, BetsTemplate, Notice, OfferView, QuoteView, SlipView, UserView};
+use crate::templates::{self, BetsTemplate, Notice, OfferView, QuoteTemplate, QuoteView, SlipView, UserView};
 
 /// How far back the page lists settled slips.
 const SLIP_DAYS: i64 = 14;
@@ -95,6 +95,67 @@ fn slip(b: db::Bet) -> SlipView {
     }
 }
 
+/// What the visitor picked: a board link (`m`), or the two boxes.
+struct Pick {
+    market: Option<Market>,
+    /// Something was asked for, picked or typed.
+    asked: bool,
+    typed: bool,
+}
+
+impl Pick {
+    fn from_query(q: &BetsQuery) -> Pick {
+        let filled = |s: &Option<String>| s.as_deref().is_some_and(|s| !s.trim().is_empty());
+        let typed = filled(&q.lo) || filled(&q.hi);
+        let market = match (&q.m, typed) {
+            (Some(key), _) => Market::parse(key),
+            (None, true) => Market::from_inputs(q.lo.as_deref().unwrap_or(""), q.hi.as_deref().unwrap_or("")),
+            (None, false) => None,
+        };
+        Pick { market, asked: q.m.is_some() || typed, typed }
+    }
+
+    /// Why nothing could be quoted, if something was asked for.
+    fn error(&self) -> Option<&'static str> {
+        (self.asked && self.market.is_none()).then(|| crate::copy::notice("bet_market").map_or("", |(_, t)| t))
+    }
+
+    /// What the two boxes show: the range picked, or what was typed.
+    fn inputs(&self, q: &BetsQuery) -> (String, String) {
+        match (self.market, self.typed) {
+            (Some(m), _) => m.inputs(),
+            (None, true) => (q.lo.clone().unwrap_or_default(), q.hi.clone().unwrap_or_default()),
+            (None, false) => (String::new(), String::new()),
+        }
+    }
+}
+
+fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market]) -> QuoteView {
+    let qt = odds::quote(base, book, m);
+    QuoteView {
+        key: m.key(),
+        label: m.label(),
+        chance: qt.chance_pct,
+        odds: qt.odds_x100.map(odds::odds_label),
+        odds_x100: qt.odds_x100.unwrap_or(0),
+        pays_on_10: qt.odds_x100.map(|o| odds::payout(10, o)).unwrap_or(0),
+        taken: taken.contains(&m),
+    }
+}
+
+/// An account's bets: on the open round, and settled ones from the last
+/// fortnight. Collects today's points first, so the stake room is right.
+async fn slips(state: &AppState, viewer: Option<&db::Viewer>, round: &Round) -> Result<(Vec<db::Bet>, Vec<db::Bet>), AppError> {
+    let Some(v) = viewer.filter(|v| v.account.verified) else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let open = round.key();
+    crate::economy::collect(&state.db, v.account.id, &open).await?;
+    let since = (round.date - chrono::Duration::days(SLIP_DAYS)).format("%Y-%m-%d").to_string();
+    let all = db::bets_of(&state.db, v.account.id, &since).await?;
+    Ok(all.into_iter().partition(|b| b.round_date == open))
+}
+
 pub async fn page(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -104,54 +165,22 @@ pub async fn page(
     let round = Round::current(state.now());
     let open = round.key();
 
-    // What the visitor picked: a board link, or the two boxes.
-    let typed = q.lo.as_deref().is_some_and(|s| !s.trim().is_empty()) || q.hi.as_deref().is_some_and(|s| !s.trim().is_empty());
-    let picked = match (&q.m, typed) {
-        (Some(key), _) => Market::parse(key),
-        (None, true) => Market::from_inputs(q.lo.as_deref().unwrap_or(""), q.hi.as_deref().unwrap_or("")),
-        (None, false) => None,
-    };
-    let bad_pick = picked.is_none() && (q.m.is_some() || typed);
+    let pick = Pick::from_query(&q);
 
     let can_bet = viewer.as_ref().is_some_and(|v| v.account.verified);
-    let (mine, past) = match viewer.as_ref().filter(|v| v.account.verified) {
-        Some(v) => {
-            crate::economy::collect(&state.db, v.account.id, &open).await?;
-            let since = (round.date - chrono::Duration::days(SLIP_DAYS)).format("%Y-%m-%d").to_string();
-            let all = db::bets_of(&state.db, v.account.id, &since).await?;
-            let (today, before): (Vec<_>, Vec<_>) = all.into_iter().partition(|b| b.round_date == open);
-            (today, before)
-        }
-        None => (Vec::new(), Vec::new()),
-    };
+    let (mine, past) = slips(&state, viewer.as_ref(), &round).await?;
     let taken: Vec<Market> = mine.iter().filter_map(|b| Market::parse(&b.market)).collect();
     let staked: i64 = mine.iter().filter(|b| b.result.is_none()).map(|b| b.stake).sum();
     let net: i64 = past.iter().filter_map(|b| b.payout.map(|p| p - b.stake)).sum();
 
     let base = todays_base(&state).await?;
     let book = parse_book(&db::book(&state.db, &open).await?);
-    let quote = picked.map(|m| {
-        let qt = odds::quote(&base, &book, m);
-        QuoteView {
-            key: m.key(),
-            label: m.label(),
-            chance: qt.chance_pct,
-            odds: qt.odds_x100.map(odds::odds_label),
-            odds_x100: qt.odds_x100.unwrap_or(0),
-            pays_on_10: qt.odds_x100.map(|o| odds::payout(10, o)).unwrap_or(0),
-            taken: taken.contains(&m),
-        }
-    });
-    let (lo, hi) = match (picked, typed) {
-        (Some(m), _) => m.inputs(),
-        (None, true) => (q.lo.clone().unwrap_or_default(), q.hi.clone().unwrap_or_default()),
-        (None, false) => (String::new(), String::new()),
-    };
+    let quote = pick.market.map(|m| quote_view(&base, &book, m, &taken));
+    let (lo, hi) = pick.inputs(&q);
     let notice = q
         .msg
         .as_deref()
         .and_then(crate::copy::notice)
-        .or(bad_pick.then(|| crate::copy::notice("bet_market")).flatten())
         .map(|(kind, text)| if kind == "ok" { Notice::ok(text) } else { Notice::error(text) });
     // Re-read, so the header shows any points just collected.
     let viewer = current_viewer(&state, &jar).await?;
@@ -167,8 +196,9 @@ pub async fn page(
         can_bet,
         lo,
         hi,
-        nobody_picked: picked == Some(Market::Nobody),
+        nobody_picked: pick.market == Some(Market::Nobody),
         quote,
+        pick_error: pick.error(),
         board: odds::board()
             .into_iter()
             .map(|m| {
@@ -178,7 +208,7 @@ pub async fn page(
                     label: m.label(),
                     chance: qt.chance_pct,
                     odds: qt.odds_x100.map(odds::odds_label),
-                    on: picked == Some(m),
+                    on: pick.market == Some(m),
                 }
             })
             .collect(),
@@ -193,6 +223,40 @@ pub async fn page(
         net_label: if net > 0 { format!("+{net}") } else { net.to_string() },
         user: viewer.map(UserView::from),
     }))
+}
+
+/// `/g/bets/quote`: just the quote box for what is typed, for app.js to
+/// swap in while the visitor types. Same query as the page.
+pub async fn quote(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(q): Query<BetsQuery>,
+) -> Result<Response, AppError> {
+    let viewer = current_viewer(&state, &jar).await?;
+    let round = Round::current(state.now());
+    let pick = Pick::from_query(&q);
+    let (mine, _) = slips(&state, viewer.as_ref(), &round).await?;
+    let taken: Vec<Market> = mine.iter().filter_map(|b| Market::parse(&b.market)).collect();
+    let staked: i64 = mine.iter().filter(|b| b.result.is_none()).map(|b| b.stake).sum();
+    let quote = match pick.market {
+        Some(m) => {
+            let base = todays_base(&state).await?;
+            let book = parse_book(&db::book(&state.db, &round.key()).await?);
+            Some(quote_view(&base, &book, m, &taken))
+        }
+        None => None,
+    };
+    let mut resp = templates::render(&QuoteTemplate {
+        quote,
+        pick_error: pick.error(),
+        can_bet: viewer.as_ref().is_some_and(|v| v.account.verified),
+        room: odds::MAX_BETS_PER_ROUND - staked,
+        round_key: round.key(),
+        tax: odds::tax_label(),
+    });
+    // The odds move with every bet: never from a cache.
+    resp.headers_mut().insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store"));
+    Ok(resp)
 }
 
 #[derive(Deserialize)]
@@ -492,6 +556,32 @@ mod tests {
         // Any winner at all: so likely that after the cut it pays less than it costs.
         let html = bets_page_q(&state, Some("ann"), typed("1", "")).await;
         assert!(html.contains("too safe to bet on") && !html.contains(r#"action="/g/bet""#));
+    }
+
+    #[tokio::test]
+    async fn the_quote_box_alone_follows_what_is_typed() {
+        let (_t, state) = app(&[]).await;
+        player(&state.db, "ann").await;
+        let ask = |lo: &str, hi: &str, token: Option<&str>| {
+            let q = BetsQuery { lo: Some(lo.into()), hi: Some(hi.into()), ..Default::default() };
+            let jar = token.map(jar).unwrap_or_default();
+            quote(State(state.clone()), jar, Query(q))
+        };
+        let resp = ask("5", "12", Some("ann")).await.unwrap();
+        assert_eq!(resp.headers()["cache-control"], "no-store", "odds move: never cached");
+        let html = body(resp).await;
+        assert!(html.contains("winner 5 to 12") && html.contains(r#"action="/g/bet""#));
+        assert!(!html.contains("<header") && !html.contains("<html"), "just the box");
+        let o = odds_for(&state, "range:5:12").await;
+        assert!(html.contains(&format!(r#"name="odds" value="{o}""#)));
+        // Signed out: the odds, no form.
+        let html = body(ask("5", "12", None).await.unwrap()).await;
+        assert!(html.contains("winner 5 to 12") && !html.contains(r#"action="/g/bet""#));
+        // Half typed or backwards: said so. Nothing typed: nothing.
+        let html = body(ask("12", "5", Some("ann")).await.unwrap()).await;
+        assert!(html.contains("pick a range: whole numbers from 1, low to high"));
+        assert!(body(ask("", "", Some("ann")).await.unwrap()).await.trim().is_empty());
+        assert!(body(ask("1", "", Some("ann")).await.unwrap()).await.contains("too safe to bet on"));
     }
 
     #[tokio::test]

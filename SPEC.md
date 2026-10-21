@@ -684,8 +684,11 @@ the next person. Ann's 50 pays **157** if W lands in 5–12 (net +107), 0 if not
  YOUR BETS TODAY / PAST BETS (last 14 days, won/lost/refunded, net)
 ```
 
-Picking is a plain GET (`?lo=5&hi=12`, or `?m=range:5:12` from the board),
-so it works without scripts. The round page shows a line of odds (1 to 9,
+The quote follows the two boxes as you type: 150 ms after the last key,
+app.js fetches just the quote box from `/g/bets/quote?lo=5&hi=12` (never
+cached, since odds move with every bet) and swaps it in. Without scripts,
+picking is a plain GET (`?lo=5&hi=12`, or `?m=range:5:12` from the board)
+behind a "see odds" button, which the script hides. The round page shows a line of odds (1 to 9,
 10 or more, nobody wins - whichever are offered) linking here.
 
 ### 9.7 Code layout

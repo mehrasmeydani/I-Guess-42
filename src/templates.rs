@@ -571,6 +571,18 @@ pub struct SlipView {
     pub net: Option<i64>,
 }
 
+/// Just the quote box, swapped into the bets page as the visitor types.
+#[derive(Template)]
+#[template(path = "_quote.html")]
+pub struct QuoteTemplate {
+    pub quote: Option<QuoteView>,
+    pub pick_error: Option<&'static str>,
+    pub can_bet: bool,
+    pub room: i64,
+    pub round_key: String,
+    pub tax: String,
+}
+
 #[derive(Template)]
 #[template(path = "bets.html")]
 pub struct BetsTemplate {
@@ -588,6 +600,8 @@ pub struct BetsTemplate {
     pub hi: String,
     pub nobody_picked: bool,
     pub quote: Option<QuoteView>,
+    /// Why what was typed is not a range.
+    pub pick_error: Option<&'static str>,
     pub board: Vec<OfferView>,
     /// Points on the book today, and how many bets.
     pub book_total: i64,

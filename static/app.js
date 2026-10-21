@@ -310,3 +310,37 @@
     links[i].setAttribute('href', path === '/g/' || path === '/g' ? '/g/' : path);
   }
 })();
+
+// Bets: the quote follows the two boxes as you type, without the button.
+// Each change asks the server for just the quote box (odds move with every
+// bet, so they are never worked out here); an older answer arriving late
+// is dropped. Without the script the button still does it as a page load.
+(function () {
+  var form = document.querySelector('form.pick[data-quote]');
+  var box = document.getElementById('quote');
+  if (!form || !box || !window.fetch) return;
+  form.classList.add('live');
+  var lo = form.elements.lo, hi = form.elements.hi;
+  var timer = null, asked = 0;
+
+  function update() {
+    var q = 'lo=' + encodeURIComponent(lo.value.trim()) + '&hi=' + encodeURIComponent(hi.value.trim());
+    var n = ++asked;
+    // Reloading or sharing the page keeps the range.
+    try { history.replaceState(null, '', lo.value.trim() || hi.value.trim() ? '/g/bets?' + q : '/g/bets'); } catch (e) {}
+    fetch(form.dataset.quote + '?' + q, { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (html) { if (html !== null && n === asked) box.innerHTML = html; })
+      .catch(function () { /* offline: the button still works */ });
+    var none = form.querySelector('.pick-none.on');
+    if (none) none.classList.remove('on');
+  }
+
+  function soon() {
+    clearTimeout(timer);
+    timer = setTimeout(update, 150);
+  }
+  lo.addEventListener('input', soon);
+  hi.addEventListener('input', soon);
+  form.addEventListener('submit', function (e) { e.preventDefault(); clearTimeout(timer); update(); });
+})();

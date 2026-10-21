@@ -1064,6 +1064,9 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .pick input:focus-visible, .betform input:focus-visible { border-color: var(--hi); }
 .pick button, .betform button { padding: 8px 16px; }
 .pick-none { margin-left: 8px; }
+/* With the script the quote follows the boxes, so the button is not needed. */
+.pick.live button { display: none; }
+.quote-error { margin-top: 16px; }
 .pick-none.on { background: var(--hi); color: var(--bg); padding: 0 8px; }
 .quote { margin-top: 16px; padding: 16px; border: 1px solid var(--edge-strong); max-width: 560px; }
 .quote-label { color: var(--hi); font-weight: 700; }
