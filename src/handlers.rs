@@ -1390,6 +1390,8 @@ pub async fn admin_demo_remove(
         return Ok(admin_gone());
     }
     db::remove_demo(&state.db).await?;
+    // The rounds the bots were in, settled again without them.
+    crate::economy::settle_all(&state.db, &Round::current(state.now()).key()).await?;
     Ok(Redirect::to("/admin").into_response())
 }
 

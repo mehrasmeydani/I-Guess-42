@@ -1686,12 +1686,48 @@ pub async fn insert_demo(db: &Db, pool: Pool, guesses: &[DemoGuess]) -> Result<u
     Ok(added)
 }
 
-/// Deletes every bot, and with them (ON DELETE CASCADE) every guess they made.
+/// Deletes every bot, and with them (ON DELETE CASCADE) every guess they
+/// made. In the global round bots also hold points, bets and won pots,
+/// which point at their accounts and do not cascade; and every round they
+/// played was decided partly by them. So from the first round a bot played,
+/// what was settled is undone (pots, winnings, bet results - rounds called
+/// off stay as they are), the bots' own points and bets go, and the rounds
+/// settle again with the real players alone.
 pub async fn remove_demo(db: &Db) -> Result<u64> {
+    const BOTS: &str = "SELECT a.id FROM accounts a JOIN users u ON u.id = a.intra_id
+                        WHERE u.id < 0 AND u.login LIKE 'bot-%'";
+    let mut tx = write_tx(db).await?;
+    let first: Option<String> = sqlx::query_scalar(&format!(
+        "SELECT MIN(round_date) FROM global_guesses WHERE user_id IN ({BOTS})"
+    ))
+    .fetch_one(&mut *tx)
+    .await?;
+    if let Some(from) = first {
+        const CALLED_OFF: &str = "SELECT round_date FROM pots WHERE voided = 1";
+        for sql in [
+            format!(
+                "DELETE FROM ledger WHERE round_date >= ?1 AND round_date NOT IN ({CALLED_OFF})
+                   AND (kind IN ('pot', 'bet_win') OR (kind = 'refund' AND ref LIKE 'bet:%'))"
+            ),
+            format!(
+                "UPDATE bets SET result = NULL, payout = NULL, settled_at = NULL
+                 WHERE round_date >= ?1 AND round_date NOT IN ({CALLED_OFF})"
+            ),
+            "DELETE FROM pots WHERE round_date >= ?1 AND voided = 0".to_string(),
+        ] {
+            sqlx::query(&sql).bind(&from).execute(&mut *tx).await?;
+        }
+    }
+    for table in ["ledger", "bets"] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE account_id IN ({BOTS})"))
+            .execute(&mut *tx)
+            .await?;
+    }
     let n = sqlx::query("DELETE FROM users WHERE id < 0 AND login LIKE 'bot-%'")
-        .execute(db)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
+    tx.commit().await?;
     Ok(n)
 }
 

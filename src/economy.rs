@@ -171,6 +171,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn clearing_the_bots_settles_their_rounds_again_without_them() {
+        let t = temp_db().await;
+        let (ann, bob) = (player(&t.db, "ann").await, player(&t.db, "bob").await);
+        // A round where a bot's 1 wins and the real players' 5s collide.
+        plays(&t.db, ann, "2026-10-20", 5).await;
+        plays(&t.db, bob, "2026-10-20", 5).await;
+        db::insert_demo(&t.db, Pool::Global, &[crate::demo::DemoGuess { round_date: "2026-10-20".into(), bot: 0, value: 1 }])
+            .await
+            .unwrap();
+        // ...and a later round with no bots in it, where ann wins.
+        plays(&t.db, ann, "2026-10-21", 3).await;
+        plays(&t.db, bob, "2026-10-21", 4).await;
+        settle_all(&t.db, "2026-10-22").await.unwrap();
+        let bot_pot = db::pot(&t.db, "2026-10-20").await.unwrap().unwrap();
+        assert!(bot_pot.winner_id.is_some_and(|w| w != ann && w != bob), "a bot took the first pot");
+        let ann_before = db::balance(&t.db, ann).await.unwrap();
+
+        // Cleared: no foreign key in the way, and the bot's round is decided
+        // again by the real players alone - both had 5, so nobody wins and
+        // the pot rolls into the next round, which ann wins.
+        db::remove_demo(&t.db).await.unwrap();
+        settle_all(&t.db, "2026-10-22").await.unwrap();
+        let first = db::pot(&t.db, "2026-10-20").await.unwrap().unwrap();
+        assert_eq!(first.winner_id, None);
+        let second = db::pot(&t.db, "2026-10-21").await.unwrap().unwrap();
+        assert_eq!(second.winner_id, Some(ann));
+        assert_eq!(second.carried_in, 2 * GUESS_STAKE, "the bot-free first pot rolled over");
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), ann_before + 2 * GUESS_STAKE, "and ann gets it");
+        assert_eq!(rows(&t.db, "SELECT COUNT(*) FROM accounts WHERE intra_id < 0").await, 0);
+        assert_eq!(rows(&t.db, "SELECT COUNT(*) FROM ledger WHERE kind = 'pot'").await, 1, "paid once, to ann");
+    }
+
+    #[tokio::test]
     async fn the_welcome_and_daily_points_come_once_each() {
         let t = temp_db().await;
         let ann = player(&t.db, "ann").await;
