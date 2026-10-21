@@ -43,13 +43,15 @@ const NOBODY_PRIOR: f64 = 0.05;
 /// How many points the starting chances are worth against bets: 1000 points
 /// staked on a range move it as far as the whole simulation pulls.
 const LIQUIDITY: f64 = 1000.0;
-/// No bet is ever certain.
-const P_MIN: f64 = 0.01;
+/// No bet is ever certain, nor ever impossible: a long shot is 0.1% at
+/// least, which pays about ×920.
+const P_MIN: f64 = 0.001;
 const P_MAX: f64 = 0.99;
 /// Odds are offered between these, in hundredths. Anything that would pay
-/// less than ×1.05 is too safe to bet on.
+/// less than ×1.05 is too safe to bet on; the top is out of reach of
+/// `P_MIN`, there only so no number can run away.
 const ODDS_MIN: i64 = 105;
-const ODDS_MAX: i64 = 5000;
+const ODDS_MAX: i64 = 100_000;
 /// The largest number a range may name.
 pub const MAX_LINE: i64 = 1_000_000_000;
 
@@ -359,7 +361,7 @@ pub fn chance(base: &Base, book: &[(Market, i64)], market: Market) -> f64 {
 }
 
 /// Decimal odds offered for chance `p`, in hundredths: fair odds less the
-/// tax, rounded down to the nearest 0.05, at most 50.00. None when that is
+/// tax, rounded down to the nearest 0.05, at most 1000.00. None when that is
 /// under 1.05: too safe to bet on.
 pub fn offered_odds_x100(p: f64) -> Option<i64> {
     let fair = (100 - MARGIN_PCT) as f64 / p; // in hundredths
@@ -386,15 +388,25 @@ pub fn tax_label() -> String {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Quote {
     pub market: Market,
-    /// The chance, in whole percent, at least 1.
-    pub chance_pct: i64,
+    /// The chance in tenths of a percent, at least 1 (0.1%).
+    pub chance_permille: i64,
     /// None: too safe to offer.
     pub odds_x100: Option<i64>,
 }
 
 pub fn quote(base: &Base, book: &[(Market, i64)], market: Market) -> Quote {
     let p = chance(base, book, market);
-    Quote { market, chance_pct: ((p * 100.0).round() as i64).max(1), odds_x100: offered_odds_x100(p) }
+    Quote { market, chance_permille: ((p * 1000.0).round() as i64).max(1), odds_x100: offered_odds_x100(p) }
+}
+
+/// A chance as the page shows it: "0.4%" and "7.5%" with a decimal under 10%,
+/// where it matters; whole percent above.
+pub fn chance_label(permille: i64) -> String {
+    if permille < 100 {
+        format!("{}.{}%", permille / 10, permille % 10)
+    } else {
+        format!("{}%", (permille + 5) / 10)
+    }
 }
 
 #[cfg(test)]
@@ -569,7 +581,7 @@ mod tests {
     fn near_certain_ranges_are_not_offered() {
         let b = crowd();
         let any = quote(&b, &[], r(1, None));
-        assert!(any.chance_pct >= 90, "{any:?}");
+        assert!(any.chance_permille >= 900, "{any:?}");
         assert_eq!(any.odds_x100, None, "the tax makes it pay less than it costs");
         let narrow = quote(&b, &[], r(6, Some(9)));
         assert!(narrow.odds_x100.is_some());
@@ -603,7 +615,13 @@ mod tests {
         assert_eq!(offered_odds_x100(0.5), Some(180));
         assert_eq!(offered_odds_x100(0.87), Some(105));
         assert_eq!(offered_odds_x100(0.9), None, "1.02 is too safe");
-        assert_eq!(offered_odds_x100(0.001), Some(5000), "never above 50");
+        assert_eq!(offered_odds_x100(0.001), Some(92_000), "a 0.1% shot pays ×920");
+        assert_eq!(offered_odds_x100(0.005), Some(18_400), "0.5%: ×184, no longer capped at ×50");
+        assert_eq!(offered_odds_x100(0.0001), Some(100_000), "never above 1000");
+        assert_eq!(chance_label(4), "0.4%");
+        assert_eq!(chance_label(75), "7.5%");
+        assert_eq!(chance_label(100), "10%");
+        assert_eq!(chance_label(274), "27%");
         for p in [0.02, 0.1, 0.33, 0.5, 0.8] {
             let o = offered_odds_x100(p).unwrap();
             assert_eq!(o % 5, 0);

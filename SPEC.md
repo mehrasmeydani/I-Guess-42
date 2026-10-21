@@ -638,7 +638,7 @@ betting exchange. With L = 1000 points of liquidity behind the simulation:
 
 ```
 backed(R) = Σ over open bets b: stake_b × p0(R ∩ b) / p0(b)
-p(R)      = (L × p0(R) + backed(R)) / (L + Σ stake_b),  clamped to [0.01, 0.99]
+p(R)      = (L × p0(R) + backed(R)) / (L + Σ stake_b),  clamped to [0.001, 0.99]
 ```
 
 and then **p(R) = max(p(R), p0(R))**: a bet on 5–12 makes 5–12 (and ranges
@@ -653,7 +653,8 @@ choice to make.
 ### 9.4 From chance to odds: the tax
 
 ```
-offered odds   = (1 − 0.08) / p, rounded *down* to the nearest 0.05, at most 50.00
+offered odds   = (1 − 0.08) / p, rounded *down* to the nearest 0.05, at most 1000.00
+               (so a 0.5% range pays ×184 and the 0.1% floor ×920)
                not offered at all below 1.05 ("too safe to bet on")
 stored as      odds_x100 (integer)
 payout         = floor(stake × odds_x100 / 100)     # includes the stake back
@@ -687,7 +688,7 @@ the next person. Ann's 50 pays **157** if W lands in 5–12 (net +107), 0 if not
  WHERE THE WINNER LANDS        chance   odds
  winner exactly 1                 22%   ×4.15   (each row links to its quote)
  ...
- nobody wins                       1%  ×50.00
+ nobody wins                     0.8% ×115.00
  odds: last week's picks replayed 4000 times · they move as people bet ·
  the house keeps 8% · on the book today: 50 points, 1 bet
  YOUR BETS TODAY / PAST BETS (last 14 days, won/lost/refunded, net)
@@ -1088,10 +1089,10 @@ for UI rules.
   and no winner.
 - `probability()`: no history → equals prior; long constant history → close to
   the observed rate; recent days weigh more than old ones.
-- `offered_odds_x100()`: margin applied, rounding down to 0.05, clamps at 1.05
-  and 50.00.
+- `offered_odds_x100()`: margin applied, rounding down to 0.05, refused
+  below 1.05, at most 1000.00.
 - Odds locked at placement survive a recompute.
-- Bet caps: over `MAX_BET`, over the per-round total and over balance are all
+- Bet stakes: under 1 and over the balance are
   refused.
 
 ---

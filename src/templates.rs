@@ -539,7 +539,8 @@ pub struct WelcomeTemplate {
 pub struct OfferView {
     pub key: String,
     pub label: String,
-    pub chance: i64,
+    /// "27%", or "0.4%" under ten.
+    pub chance: String,
     /// None: too safe to offer.
     pub odds: Option<String>,
     /// The one picked above.
@@ -552,10 +553,13 @@ pub struct OfferView {
 pub struct QuoteView {
     pub key: String,
     pub label: String,
-    pub chance: i64,
+    /// "27%", or "0.4%" under ten.
+    pub chance: String,
     /// None: too safe to offer.
     pub odds: Option<String>,
     pub odds_x100: i64,
+    /// The chance in tenths of a percent, for its bar.
+    pub permille: i64,
     /// Bet on already today.
     pub taken: bool,
 }

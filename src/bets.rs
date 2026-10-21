@@ -136,16 +136,16 @@ impl Pick {
 
 fn offer_views(base: &Base, book: &[(Market, i64)], markets: Vec<Market>, picked: Option<Market>) -> Vec<OfferView> {
     let quotes: Vec<Quote> = markets.iter().map(|m| odds::quote(base, book, *m)).collect();
-    let top = quotes.iter().map(|q| q.chance_pct).max().unwrap_or(1).max(1);
+    let top = quotes.iter().map(|q| q.chance_permille).max().unwrap_or(1).max(1);
     quotes
         .into_iter()
         .map(|qt| OfferView {
             key: qt.market.key(),
             label: qt.market.label(),
-            chance: qt.chance_pct,
+            chance: odds::chance_label(qt.chance_permille),
             odds: qt.odds_x100.map(odds::odds_label),
             on: picked == Some(qt.market),
-            pct: qt.chance_pct * 100 / top,
+            pct: qt.chance_permille * 100 / top,
         })
         .collect()
 }
@@ -155,9 +155,10 @@ fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market]) 
     QuoteView {
         key: m.key(),
         label: m.label(),
-        chance: qt.chance_pct,
+        chance: odds::chance_label(qt.chance_permille),
         odds: qt.odds_x100.map(odds::odds_label),
         odds_x100: qt.odds_x100.unwrap_or(0),
+        permille: qt.chance_permille,
         taken: taken.contains(&m),
     }
 }
