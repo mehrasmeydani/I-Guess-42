@@ -620,7 +620,7 @@ Once per open round:
    the page).
 2. Players per round n = last week's global average (else the 42 round's,
    else 10), between 2 and 1000.
-3. Simulate 4000 rounds: n players each draw one of those picks at random;
+3. Simulate 40 000 rounds: n players each draw one of those picks at random;
    the lowest number drawn exactly once wins, or nobody does. The seed is the
    round's date, so a day's numbers are the same on every restart.
 4. A range's starting chance p0 = 0.95 × (share of simulated rounds it wins)
@@ -638,7 +638,7 @@ betting exchange. With L = 1000 points of liquidity behind the simulation:
 
 ```
 backed(R) = Σ over open bets b: stake_b × p0(R ∩ b) / p0(b)
-p(R)      = (L × p0(R) + backed(R)) / (L + Σ stake_b),  clamped to [0.001, 0.99]
+p(R)      = (L × p0(R) + backed(R)) / (L + Σ stake_b),  clamped to [0.0001, 0.99]
 ```
 
 and then **p(R) = max(p(R), p0(R))**: a bet on 5–12 makes 5–12 (and ranges
@@ -653,8 +653,8 @@ choice to make.
 ### 9.4 From chance to odds: the tax
 
 ```
-offered odds   = (1 − 0.08) / p, rounded *down* to the nearest 0.05, at most 1000.00
-               (so a 0.5% range pays ×184 and the 0.1% floor ×920)
+offered odds   = (1 − 0.08) / p, rounded *down* to the nearest 0.05, at most 10000.00
+               (so a 0.5% range pays ×184 and the 0.01% floor ×9200)
                not offered at all below 1.05 ("too safe to bet on")
 stored as      odds_x100 (integer)
 payout         = floor(stake × odds_x100 / 100)     # includes the stake back
@@ -689,7 +689,7 @@ the next person. Ann's 50 pays **157** if W lands in 5–12 (net +107), 0 if not
  winner exactly 1                 22%   ×4.15   (each row links to its quote)
  ...
  nobody wins                     0.8% ×115.00
- odds: last week's picks replayed 4000 times · they move as people bet ·
+ odds: last week's picks replayed 40000 times · they move as people bet ·
  the house keeps 8% · on the book today: 50 points, 1 bet
  YOUR BETS TODAY / PAST BETS (last 14 days, won/lost/refunded, net)
 ```
@@ -1090,7 +1090,7 @@ for UI rules.
 - `probability()`: no history → equals prior; long constant history → close to
   the observed rate; recent days weigh more than old ones.
 - `offered_odds_x100()`: margin applied, rounding down to 0.05, refused
-  below 1.05, at most 1000.00.
+  below 1.05, at most 10000.00.
 - Odds locked at placement survive a recompute.
 - Bet stakes: under 1 and over the balance are
   refused.

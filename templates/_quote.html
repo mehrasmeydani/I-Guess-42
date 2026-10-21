@@ -12,7 +12,7 @@
     {% if can_bet && !q.taken %}<div><dt>if it wins</dt><dd class="pays" data-odds="{{ q.odds_x100 }}">&ndash;</dd></div>{% endif %}
     {% when None %}{% endmatch %}
   </dl>
-  <span class="quote-chance" aria-hidden="true"><i style="--w: calc({{ q.permille }} * 0.1%)"></i></span>
+  <span class="quote-chance" aria-hidden="true"><i style="--w: calc({{ q.bp }} * 0.01%)"></i></span>
   {% match q.odds %}
   {% when None %}
     <p class="lose">too safe to bet on &middot; after the {{ tax }} cut it pays less than it costs</p>

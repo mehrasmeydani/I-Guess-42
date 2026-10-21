@@ -573,8 +573,8 @@ pub struct QuoteView {
     /// None: too safe to offer.
     pub odds: Option<String>,
     pub odds_x100: i64,
-    /// The chance in tenths of a percent, for its bar.
-    pub permille: i64,
+    /// The chance in hundredths of a percent, for its bar.
+    pub bp: i64,
     /// Bet on already today.
     pub taken: bool,
 }

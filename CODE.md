@@ -1610,9 +1610,9 @@ another writer commits in between, instead of waiting.
 
 A bet is on the winning number landing in a range the player picks, or on
 nobody winning. `odds.rs` is pure: ranges and their keys, whether one won,
-the replay of last week's picks (4000 made-up rounds) that gives each range
+the replay of last week's picks (40 000 made-up rounds) that gives each range
 its starting chance, the book that moves it with the points already bet,
-and odds as fair odds less an 8% tax, rounded down to 0.05, at most 1000, and
+and odds as fair odds less an 8% tax, rounded down to 0.05, at most 10000, and
 not offered below 1.05. Points stay integers: odds are stored in hundredths,
 payouts rounded down.
 
