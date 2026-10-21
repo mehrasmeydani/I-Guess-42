@@ -182,7 +182,7 @@ async fn before_any_round_closes_results_look_ahead_and_filters_wait() {
     assert!(html.contains(r#"id="q" name="q" type="search""#));
     assert_eq!(html.matches(" disabled>").count() + html.matches(" disabled ").count(), 4, "search, date and both buttons");
     let trends = body(
-        handlers::global_trends(State(state.clone()), CookieJar::new(), Query(TrendsQuery { days: None }))
+        handlers::global_trends(State(state.clone()), CookieJar::new(), Query(TrendsQuery { days: None, ..Default::default() }))
             .await
             .unwrap(),
     )
@@ -209,7 +209,7 @@ async fn usernames_are_public_on_every_results_view() {
 }
 
 #[tokio::test]
-async fn trends_open_with_an_answer_and_show_no_timing() {
+async fn trends_open_with_the_ranges_and_show_no_timing() {
     // A test instance: the only place the timing appears at all.
     let (_t, state) = app(&["megardes"]).await;
     a_played_day(&state).await;
@@ -217,23 +217,24 @@ async fn trends_open_with_an_answer_and_show_no_timing() {
         let state = state.clone();
         let days = Some(days.to_string());
         async move {
-            body(handlers::global_trends(State(state), CookieJar::new(), Query(TrendsQuery { days })).await.unwrap())
+            body(handlers::global_trends(State(state), CookieJar::new(), Query(TrendsQuery { days, ..Default::default() })).await.unwrap())
                 .await
         }
     };
     let html = page("7").await;
-    // Won with 9, then 3: the middle of the two, taken as the upper.
-    assert!(html.contains("2 rounds · median winner 9 · most crowded: 1"), "{html}");
+    // Only the ranges up top: no scope line, no summary sentence.
+    assert!(!html.contains("median winner") && !html.contains("demo data"), "{html}");
+    assert!(html.contains(r#"href="/g/trends?days=custom">custom</a>"#));
     assert!(html.contains(r#"aria-current="true" href="/g/trends?days=7">7d</a>"#));
     assert!(!html.contains("analysing"), "no staged progress");
     assert!(!html.contains("test details") && !html.contains(" ms"), "no timing, even on a test instance");
-    assert!(page("all").await.contains("median winner 9"));
+    assert!(page("all").await.contains("what changed"));
 
     // A live site does not show it at all.
     let mut cfg = config(&[]);
     cfg.environment = Some("production".into());
     let (_t2, live, _) = app_with(cfg).await;
-    let html = body(handlers::global_trends(State(live), CookieJar::new(), Query(TrendsQuery { days: None })).await.unwrap()).await;
+    let html = body(handlers::global_trends(State(live), CookieJar::new(), Query(TrendsQuery { days: None, ..Default::default() })).await.unwrap()).await;
     assert!(!html.contains("test details"));
     assert!(!html.contains(" ms."));
 }
@@ -444,4 +445,97 @@ async fn a_day_is_found_by_its_european_date() {
     assert!(search(&eu).await.contains(&format!(r#"href="/g/day/{day}">{eu}</a>"#)));
     let month = &eu[3..];
     assert!(search(month).await.contains(&format!(r#"href="/g/day/{day}""#)));
+}
+
+async fn trends_with(state: &AppState, q: TrendsQuery) -> String {
+    body(handlers::global_trends(State(state.clone()), CookieJar::new(), Query(q)).await.unwrap()).await
+}
+
+#[tokio::test]
+async fn two_spans_of_your_choosing_are_compared() {
+    let (_t, state) = app(&[]).await;
+    let a = player(&state.db, "ann").await;
+    let b = player(&state.db, "bob").await;
+    // Span 1: three days with 2 players each; span 2: two days with 4.
+    for n in [20, 19, 18] {
+        let d = days_ago(&state, n);
+        guess(&state.db, &d, a, 1).await;
+        guess(&state.db, &d, b, 2).await;
+    }
+    let extra: Vec<i64> = futures_join(&state, 2).await;
+    for n in [3, 2] {
+        let d = days_ago(&state, n);
+        for (i, who) in [a, b].into_iter().chain(extra.iter().copied()).enumerate() {
+            guess(&state.db, &d, who, 10 + i as i64).await;
+        }
+    }
+    // A day in neither span, which must not count.
+    let lonely = player(&state.db, "zed").await;
+    guess(&state.db, &days_ago(&state, 10), lonely, 1).await;
+
+    let eu = |n| crate::templates::eu(&days_ago(&state, n));
+    let html = trends_with(&state, TrendsQuery {
+        days: Some("custom".into()),
+        a_from: Some(eu(20)),
+        a_to: Some(eu(18)),
+        // Typed back to front: still the same span.
+        b_from: Some(eu(2)),
+        b_to: Some(eu(3)),
+    })
+    .await;
+    assert!(html.contains("span 1<span class=\"when\">"), "{html}");
+    assert!(html.contains("span 2<span class=\"when\">"));
+    assert!(html.contains(&crate::templates::eu_span(&days_ago(&state, 20), &days_ago(&state, 18))));
+    assert!(html.contains(&crate::templates::eu_span(&days_ago(&state, 3), &days_ago(&state, 2))));
+    // Players per day: 2 against 4, so up by 2.
+    let row = &html[html.find("players per day").unwrap()..];
+    let row = &row[..row.find("</tr>").unwrap()];
+    assert!(row.contains(">2</td>") && row.contains(">4</td>") && row.contains("+2"), "{row}");
+    // The form keeps what was typed, European dates.
+    assert!(html.contains(&format!(r#"name="a_from" type="text" inputmode="numeric" placeholder="01.10.2026" value="{}""#, eu(20))));
+    // Five rounds analysed: the day in neither span is left out.
+    assert!(html.contains(r#"<a href="/g/day/"#) && !html.contains(&format!(r#"href="/g/day/{}""#, days_ago(&state, 10))));
+}
+
+/// Two more players, verified, for a busier span.
+async fn futures_join(state: &AppState, n: usize) -> Vec<i64> {
+    let mut ids = vec![];
+    for i in 0..n {
+        ids.push(player(&state.db, &format!("extra{i}")).await);
+    }
+    ids
+}
+
+#[tokio::test]
+async fn custom_with_nothing_typed_compares_last_months_first_week_with_the_last_week() {
+    let (_t, state) = app(&[]).await;
+    let html = trends_with(&state, TrendsQuery { days: Some("custom".into()), ..Default::default() }).await;
+    use chrono::Datelike;
+    let last = Round::current(state.now()).previous_date();
+    let first_of_last = (last.with_day(1).unwrap() - chrono::Duration::days(1)).with_day(1).unwrap();
+    assert!(html.contains(&format!(r#"value="{}""#, first_of_last.format("%d.%m.%Y"))), "{html}");
+    assert!(html.contains(&format!(r#"value="{}""#, last.format("%d.%m.%Y"))));
+    assert!(html.contains("no rounds in these spans"));
+}
+
+#[tokio::test]
+async fn a_bad_custom_date_is_said_and_kept_for_fixing() {
+    let (_t, state) = app(&[]).await;
+    let html = trends_with(&state, TrendsQuery {
+        days: Some("custom".into()),
+        a_from: Some("yesterday".into()),
+        ..Default::default()
+    })
+    .await;
+    assert!(html.contains("dates look like 21.10.2026"));
+    assert!(html.contains(r#"value="yesterday""#));
+}
+
+#[tokio::test]
+async fn the_results_page_shows_the_last_rounds_chart() {
+    let (_t, state) = app(&[]).await;
+    a_played_day(&state).await;
+    let html = results_page(&state, Some("ann")).await;
+    assert!(html.contains(r#"<div class="chart""#));
+    assert!(html.contains("col many mine"), "ann's own pick is marked");
 }

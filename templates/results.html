@@ -10,7 +10,17 @@
   {% match latest %}
     {% when Some with (r) %}
       <p class="lead">{{ crate::templates::eu(r.date_key) }} &middot; {{ r.total }} played &middot; {% match r.winner %}{% when Some with (w) %}{{ w.login }} won with <b class="win">{{ w.value_label }}</b>{% when None %}<b class="lose">nobody won</b>{% endmatch %}</p>
-      <p><a href="{{ pool.base() }}/day/{{ r.date_key }}">every pick &rarr;</a></p>
+      {% match chart %}
+        {% when Some with (chart) %}
+          <p class="legend">
+            <span><i class="win">&#9608;</i> winner</span>
+            <span><i class="once">&#9608;</i> picked by one player</span>
+            <span><i class="many">&#9608;</i> shared</span>
+          </p>
+          {% include "chart.html" %}
+        {% when None %}
+      {% endmatch %}
+      <p class="morelink"><a href="{{ pool.base() }}/day/{{ r.date_key }}">every pick &rarr;</a></p>
     {% when None %}
       <p class="lead">no rounds yet &middot; first reveal {{ first_close }}</p>
   {% endmatch %}

@@ -421,7 +421,20 @@ fn avg(xs: impl Iterator<Item = i64>) -> Option<i64> {
     (n > 0).then(|| i64::try_from(total * 100 / n).unwrap_or(i64::MAX))
 }
 
+/// How a range is split for "what changed".
+pub enum Split<'a> {
+    /// Older half against newer half; an odd middle day goes to the newer.
+    Halves,
+    /// Two spans picked by a visitor: days from the first to the last date
+    /// of the first span (inclusive) against every other day given.
+    First(&'a str, &'a str),
+}
+
 pub fn trend(rows: &[DayTally]) -> Trend {
+    trend_split(rows, Split::Halves)
+}
+
+pub fn trend_split(rows: &[DayTally], split: Split) -> Trend {
     let days = by_day(rows);
     let stats: Vec<DayStats> = days.iter().map(|(_, t)| analyse(t)).collect();
 
@@ -445,10 +458,20 @@ pub fn trend(rows: &[DayTally]) -> Trend {
         .collect();
     let wins = sum(&[&won_days]);
 
-    // Split into an older and a newer half; an odd middle day goes to the
-    // newer one.
+    // Which days are compared against which: see `Split`.
     let mid = days.len() / 2;
-    let (old, new) = days.split_at(mid);
+    let in_first: Vec<bool> = days
+        .iter()
+        .enumerate()
+        .map(|(i, (date, _))| match split {
+            Split::Halves => i < mid,
+            Split::First(from, to) => date.as_str() >= from && date.as_str() <= to,
+        })
+        .collect();
+    let pick = |want: bool| -> Vec<&(String, Vec<Tally>)> {
+        days.iter().zip(&in_first).filter(|(_, f)| **f == want).map(|(d, _)| d).collect()
+    };
+    let (old, new) = (pick(true), pick(false));
     let old_totals = sum(&old.iter().map(|(_, t)| t).collect::<Vec<_>>());
     let new_totals = sum(&new.iter().map(|(_, t)| t).collect::<Vec<_>>());
     let old_n: i64 = old_totals.iter().map(|t| t.count).sum();
@@ -496,17 +519,18 @@ pub fn trend(rows: &[DayTally]) -> Trend {
     most.sort_by(|a, b| b.count.cmp(&a.count).then(a.value.cmp(&b.value)));
     most.truncate(TOP);
 
-    let halves = (days.len() >= 2).then(|| {
-        let (a, b) = lines.split_at(mid);
-        let span = |part: &[DayLine]| {
+    let a: Vec<&DayLine> = lines.iter().zip(&in_first).filter(|(_, f)| **f).map(|(l, _)| l).collect();
+    let b: Vec<&DayLine> = lines.iter().zip(&in_first).filter(|(_, f)| !**f).map(|(l, _)| l).collect();
+    let halves = (!a.is_empty() && !b.is_empty()).then(|| {
+        let span = |part: &[&DayLine]| {
             (
                 part.first().map(|d| d.date.clone()).unwrap_or_default(),
                 part.last().map(|d| d.date.clone()).unwrap_or_default(),
             )
         };
         Halves {
-            older: span(a),
-            newer: span(b),
+            older: span(&a),
+            newer: span(&b),
             players: (
                 avg(a.iter().map(|d| d.players)).unwrap_or(0),
                 avg(b.iter().map(|d| d.players)).unwrap_or(0),

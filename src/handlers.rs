@@ -296,6 +296,22 @@ async fn results_in(
     // The round that closed most recently, said in one line: it is what
     // most people open /results for. Its chart is on its day page.
     let latest = all.first().cloned().map(|newest| RoundView::new(newest, named));
+    // The last round's chart, as on its day page, with the visitor's own
+    // pick marked if they played.
+    let chart = match all.first() {
+        Some(newest) => {
+            let tallies = db::round_tallies(&state.db, pool, &newest.round_date).await?;
+            let mut chart = stats::day_chart(&tallies, &stats::analyse(&tallies));
+            let player = viewer.as_ref().and_then(|v| player_in(pool, v));
+            if let Some(p) = player {
+                if let Some(mine) = db::my_guess(&state.db, pool, &newest.round_date, p).await? {
+                    chart.mark_mine(mine);
+                }
+            }
+            Some(chart)
+        }
+        None => None,
+    };
     let q = query.q.unwrap_or_default().trim().to_string();
     let show: &'static str = match query.show.as_deref() {
         Some("30") => "30",
@@ -328,6 +344,7 @@ async fn results_in(
         test_mode: state.cfg.test_env(),
         impersonating: auth::admin_return_token(&jar).is_some(),
         latest,
+        chart,
         data_source: data_source(&state, pool).await?,
         first_close: Round::current(state.now()).deadline_human(),
         rounds,
@@ -607,9 +624,64 @@ async fn player_record(
     Ok((stats::player_stats(&dated, guessed_open, last_closed), history))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct TrendsQuery {
+    /// "7" (default), "30", "all" or "custom".
     pub days: Option<String>,
+    /// The two spans a custom comparison sets side by side, typed the
+    /// European way (21.10.2026); ISO works too.
+    #[serde(default)]
+    pub a_from: Option<String>,
+    #[serde(default)]
+    pub a_to: Option<String>,
+    #[serde(default)]
+    pub b_from: Option<String>,
+    #[serde(default)]
+    pub b_to: Option<String>,
+}
+
+/// A span of days, first and last.
+type Span = (chrono::NaiveDate, chrono::NaiveDate);
+
+/// A date typed into the trends form: 21.10.2026, or ISO.
+fn typed_date(raw: Option<&str>) -> Option<chrono::NaiveDate> {
+    let raw = raw?.trim();
+    chrono::NaiveDate::parse_from_str(raw, "%d.%m.%Y")
+        .or_else(|_| chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d"))
+        .ok()
+}
+
+/// The two spans of a custom comparison: what was typed, else the first
+/// week of last month against the last seven closed days. Each span runs
+/// from its first date to its last, in whichever order they were typed,
+/// and stops at the last closed round. `Err` names what was wrong.
+fn custom_spans(
+    q: &TrendsQuery,
+    last_closed: chrono::NaiveDate,
+) -> Result<(Span, Span), &'static str> {
+    use chrono::Datelike;
+    let first_of_this = last_closed.with_day(1).expect("day 1 exists");
+    let first_of_last = (first_of_this - chrono::Duration::days(1)).with_day(1).expect("day 1 exists");
+    let defaults = [
+        first_of_last,
+        first_of_last + chrono::Duration::days(6),
+        last_closed - chrono::Duration::days(6),
+        last_closed,
+    ];
+    let typed = [&q.a_from, &q.a_to, &q.b_from, &q.b_to];
+    let mut dates = defaults;
+    for (i, raw) in typed.iter().enumerate() {
+        match raw.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+            None => {}
+            Some(r) => dates[i] = typed_date(Some(r)).ok_or("dates look like 21.10.2026")?,
+        }
+    }
+    let span = |a: chrono::NaiveDate, b: chrono::NaiveDate| (a.min(b), a.max(b).min(last_closed));
+    let (a, b) = (span(dates[0], dates[1]), span(dates[2], dates[3]));
+    if a.0 > last_closed || b.0 > last_closed {
+        return Err("a span starts after the last closed round");
+    }
+    Ok((a, b))
 }
 
 /// Several closed rounds taken together: the last 7 or 30 days, or all of them.
@@ -639,24 +711,70 @@ async fn trends_in(
     if let Some(away) = outside_42(pool, viewer.as_ref(), "/g/trends") {
         return Ok(away);
     }
+    let round = Round::current(state.now());
+    let open_round = round.key();
+    let iso = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
+
+    // Two spans of the visitor's choosing, set side by side.
+    if query.days.as_deref() == Some("custom") {
+        let spans = custom_spans(&query, round.previous_date());
+        let ((a_from, a_to), (b_from, b_to)) = spans.unwrap_or_else(|_| {
+            let d = round.previous_date();
+            ((d, d), (d, d))
+        });
+        let (trend, error) = match spans {
+            Ok(_) => {
+                let start = iso(a_from.min(b_from));
+                let rows: Vec<stats::DayTally> = db::range_tallies(&state.db, pool, &start, &open_round)
+                    .await?
+                    .into_iter()
+                    .filter(|r| {
+                        let d = r.round_date.as_str();
+                        (d >= iso(a_from).as_str() && d <= iso(a_to).as_str())
+                            || (d >= iso(b_from).as_str() && d <= iso(b_to).as_str())
+                    })
+                    .collect();
+                let (af, at) = (iso(a_from), iso(a_to));
+                (stats::trend_split(&rows, stats::Split::First(&af, &at)), None)
+            }
+            Err(why) => (stats::trend(&[]), Some(why)),
+        };
+        let mut page = TrendsTemplate::build(
+            pool,
+            viewer.map(UserView::from),
+            state.cfg.test_env(),
+            auth::admin_return_token(&jar).is_some(),
+            "custom",
+            &trend,
+        );
+        page.span_inputs = [a_from, a_to, b_from, b_to].map(|d| templates::eu(&iso(d)));
+        // What was typed, if it did not parse, so it can be corrected.
+        if error.is_some() {
+            page.span_inputs = [&query.a_from, &query.a_to, &query.b_from, &query.b_to]
+                .map(|v| v.clone().unwrap_or_default());
+        }
+        page.span_error = error;
+        page.older_label = "span 1";
+        page.newer_label = "span 2";
+        page.first_close = round.deadline_human();
+        return Ok(templates::render(&page));
+    }
+
     let (range, days) = match query.days.as_deref() {
         Some("30") => ("30", Some(30)),
         Some("all") => ("all", None),
         _ => ("7", Some(7)),
     };
-
-    let round = Round::current(state.now());
-    let open_round = round.key();
     // The range counts back from the most recent closed round.
     let from = match days {
-        Some(n) => (round.previous_date() - chrono::Duration::days(n - 1))
-            .format("%Y-%m-%d")
-            .to_string(),
+        Some(n) => iso(round.previous_date() - chrono::Duration::days(n - 1)),
         None => String::new(), // sorts before every date
     };
 
     let rows = db::range_tallies(&state.db, pool, &from, &open_round).await?;
     let trend = stats::trend(&rows);
+    // The form starts from the defaults, for switching to custom.
+    let defaults = custom_spans(&query, round.previous_date()).ok();
     let mut page = TrendsTemplate::build(
         pool,
         viewer.map(UserView::from),
@@ -665,8 +783,10 @@ async fn trends_in(
         range,
         &trend,
     );
-    page.data_source = data_source(&state, pool).await?;
     page.first_close = round.deadline_human();
+    if let Some(((a1, a2), (b1, b2))) = defaults {
+        page.span_inputs = [a1, a2, b1, b2].map(|d| templates::eu(&iso(d)));
+    }
     Ok(templates::render(&page))
 }
 
@@ -1558,7 +1678,7 @@ mod tests {
                     .await
                     .unwrap();
                 assert_eq!(location(&day), "/g/");
-                let trends = handlers::trends(State(state.clone()), jar, Query(handlers::TrendsQuery { days: None }))
+                let trends = handlers::trends(State(state.clone()), jar, Query(handlers::TrendsQuery { days: None, ..Default::default() }))
                     .await
                     .unwrap();
                 assert_eq!(location(&trends), "/g/trends");

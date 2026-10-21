@@ -11,37 +11,65 @@
       <a class="{% if range == "7" %}on{% endif %}" {% if range == "7" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=7">7d</a>
       <a class="{% if range == "30" %}on{% endif %}" {% if range == "30" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=30">30d</a>
       <a class="{% if range == "all" %}on{% endif %}" {% if range == "all" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=all">all</a>
+      <a class="{% if range == "custom" %}on{% endif %}" {% if range == "custom" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=custom">custom</a>
     </span>
   </h2>
-  <p class="scope"><span class="chip">{% if data_source == "seeded" %}demo data{% else %}{{ data_source }}{% endif %}</span> &middot; {{ rounds }} rounds &middot; {{ picks }} picks</p>
-  {% if rounds > 0 %}<p class="lead">{{ answer }}</p>{% endif %}
+  {% if range == "custom" %}
+  {# Two spans side by side: everything below compares span 1 with span 2. #}
+  <form class="spans" method="get" action="{{ pool.base() }}/trends">
+    <input type="hidden" name="days" value="custom">
+    <fieldset>
+      <legend>span 1</legend>
+      <input name="a_from" type="text" inputmode="numeric" placeholder="01.10.2026" value="{{ span_inputs[0] }}" aria-label="span 1 from" autocomplete="off">
+      <span aria-hidden="true">to</span>
+      <input name="a_to" type="text" inputmode="numeric" placeholder="07.10.2026" value="{{ span_inputs[1] }}" aria-label="span 1 to" autocomplete="off">
+    </fieldset>
+    <fieldset>
+      <legend>span 2</legend>
+      <input name="b_from" type="text" inputmode="numeric" placeholder="15.10.2026" value="{{ span_inputs[2] }}" aria-label="span 2 from" autocomplete="off">
+      <span aria-hidden="true">to</span>
+      <input name="b_to" type="text" inputmode="numeric" placeholder="21.10.2026" value="{{ span_inputs[3] }}" aria-label="span 2 to" autocomplete="off">
+    </fieldset>
+    <button type="submit">compare</button>
+  </form>
+  {% match span_error %}{% when Some with (e) %}<p class="notice error" role="alert"><b>error</b> {{ e }}</p>{% when None %}{% endmatch %}
+  {% endif %}
 </section>
 
 {% if rounds == 0 %}
   <section class="sec" style="--b: 1">
-    <p class="lead">no data yet &middot; check back after 12:42</p>
+    <p class="lead">{% if range == "custom" %}no rounds in these spans{% else %}no data yet &middot; check back after 12:42{% endif %}</p>
   </section>
 {% else %}
 
 <section class="sec" style="--b: 1">
   <h2 class="section-title">what changed</h2>
   {% if changes.is_empty() %}
-    <p class="dim">one round · pick a longer range</p>
+    <p class="dim">{% if range == "custom" %}no rounds in one of the spans{% else %}one round · pick a longer range{% endif %}</p>
   {% else %}
-    <p class="explain">{{ older_range }} vs {{ newer_range }} &middot; daily averages</p>
+    {# Averages per day, each side headed by what it is and when. #}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="what changed">
     <table class="grid diff">
+      <thead>
+        <tr>
+          <th scope="col">per day</th>
+          <th scope="col" class="num">{{ older_label }}<span class="when">{{ older_range }}</span></th>
+          <th scope="col" class="num">{{ newer_label }}<span class="when">{{ newer_range }}</span></th>
+          <th scope="col" class="num">change</th>
+        </tr>
+      </thead>
       <tbody>
         {% for c in changes %}
           <tr class="{{ c.dir }}" title="{{ c.explain }}">
             <td class="b">{{ c.label }}</td>
-            <td class="num">
-              <span class="dim">{{ c.before }} &rarr;</span> <span class="after">{{ c.after }}</span>
-              <span class="change">{% if c.dir == "up" %}&#9650;{% else if c.dir == "down" %}&#9660;{% else %}={% endif %}{% if !c.delta.is_empty() %} {{ c.delta }}{% endif %}</span>
-            </td>
+            <td class="num dim">{{ c.before }}</td>
+            <td class="num after">{{ c.after }}</td>
+            <td class="num change">{% if c.dir == "up" %}&#9650;{% else if c.dir == "down" %}&#9660;{% else %}={% endif %}{% if !c.delta.is_empty() %} {{ c.delta }}{% endif %}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
 
     <div class="split pair">
       <div>

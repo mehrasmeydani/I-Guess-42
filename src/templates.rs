@@ -143,11 +143,22 @@ pub fn eu(iso: &str) -> String {
     }
 }
 
-/// The same without the year, where the year is obvious: "21.10.".
-pub fn eu_short(iso: &str) -> String {
-    match chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d") {
-        Ok(d) => d.format("%d.%m.").to_string(),
-        Err(_) => iso.to_string(),
+/// A span of days, short: "14.–16.10.", "28.09.–03.10.", or "14.10." for
+/// one day; with years when the span crosses one.
+pub fn eu_span(from: &str, to: &str) -> String {
+    let parse = |d: &str| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok();
+    let (Some(a), Some(b)) = (parse(from), parse(to)) else {
+        return format!("{from}–{to}");
+    };
+    use chrono::Datelike;
+    if a == b {
+        a.format("%d.%m.").to_string()
+    } else if a.year() != b.year() {
+        format!("{}–{}", a.format("%d.%m.%Y"), b.format("%d.%m.%Y"))
+    } else if a.month() == b.month() {
+        format!("{}–{}", a.format("%d."), b.format("%d.%m."))
+    } else {
+        format!("{}–{}", a.format("%d.%m."), b.format("%d.%m."))
     }
 }
 
@@ -368,6 +379,9 @@ pub struct ResultsTemplate {
     pub data_source: &'static str,
     /// When the open round closes, for the page before any round has.
     pub first_close: String,
+    /// The last round's chart; `Some` exactly when `latest` is. Named
+    /// `chart` because chart.html reads that binding.
+    pub chart: Option<Chart>,
     /// The rounds to list: the most recent few, or every match of a search.
     pub rounds: Vec<RoundView>,
     /// How many closed rounds exist in all.
@@ -631,7 +645,6 @@ pub struct TrendsTemplate {
     /// "7", "30" or "all", as in the query string.
     pub range: &'static str,
     pub rounds: usize,
-    pub picks: i64,
     pub chart: Chart,
     /// Every value picked in the range with its summed count, lowest first.
     pub totals: Vec<TallyView>,
@@ -645,37 +658,15 @@ pub struct TrendsTemplate {
     pub falling: Vec<MoverView>,
     /// The most picked numbers of the whole range.
     pub most: Vec<TallyView>,
-    /// What the range answers, in a sentence (R13.1).
-    pub answer: String,
-    /// Where the numbers come from: test, seeded or historical.
-    pub data_source: &'static str,
     /// When the open round closes, for a range with nothing in it yet.
     pub first_close: String,
-}
-
-/// What a range of rounds answers, as the trends page opens with it.
-pub fn trends_answer(_range: &str, trend: &Trend) -> String {
-    let rounds = trend.days.len();
-    if rounds == 0 {
-        return String::new();
-    }
-    let mut winners: Vec<i64> = trend
-        .days
-        .iter()
-        .filter(|d| !d.winner_outlier)
-        .filter_map(|d| d.winner)
-        .collect();
-    winners.sort_unstable();
-    let won = match winners.len() {
-        0 => "no winners".to_string(),
-        n => format!("median winner {}", group_digits(winners[n / 2])),
-    };
-    let crowd = trend
-        .most
-        .first()
-        .map(|m| format!(" · most crowded: {}", group_digits(m.value)))
-        .unwrap_or_default();
-    format!("{rounds} {} · {won}{crowd}", if rounds == 1 { "round" } else { "rounds" })
+    /// The custom form's four dates, as shown: span 1 from/to, span 2 from/to.
+    pub span_inputs: [String; 4],
+    /// Why the custom dates could not be used.
+    pub span_error: Option<&'static str>,
+    /// What the two sides of "what changed" are called.
+    pub older_label: &'static str,
+    pub newer_label: &'static str,
 }
 
 impl TrendsTemplate {
@@ -695,12 +686,7 @@ impl TrendsTemplate {
         };
         let date_span = |(from, to): &(String, String)| {
             // The year is the same on both sides almost always; leave it out.
-            let short = |d: &str| eu_short(d);
-            if from == to {
-                short(from)
-            } else {
-                format!("{}→{}", short(from), short(to))
-            }
+            eu_span(from, to)
         };
         let (older_range, newer_range) = trend
             .halves
@@ -752,7 +738,6 @@ impl TrendsTemplate {
             impersonating,
             range,
             rounds: trend.days.len(),
-            picks: trend.totals.iter().map(|t| t.count).sum(),
             chart: stats::range_chart(trend),
             totals: trend.totals.iter().map(Into::into).collect(),
             days: trend
@@ -774,9 +759,11 @@ impl TrendsTemplate {
             rising: trend.rising.iter().map(mover).collect(),
             falling: trend.falling.iter().map(mover).collect(),
             most: trend.most.iter().map(Into::into).collect(),
-            answer: trends_answer(range, trend),
-            data_source: "test",
             first_close: String::new(),
+            span_inputs: Default::default(),
+            span_error: None,
+            older_label: "first half",
+            newer_label: "second half",
         }
     }
 }
@@ -1108,10 +1095,13 @@ mod tests {
 
     #[test]
     fn dates_are_shown_the_european_way() {
-        use super::{eu, eu_short, iso_prefix};
+        use super::{eu, eu_span, iso_prefix};
+        assert_eq!(eu_span("2026-10-14", "2026-10-16"), "14.–16.10.");
+        assert_eq!(eu_span("2026-09-28", "2026-10-03"), "28.09.–03.10.");
+        assert_eq!(eu_span("2026-12-30", "2027-01-02"), "30.12.2026–02.01.2027");
+        assert_eq!(eu_span("2026-10-14", "2026-10-14"), "14.10.");
         assert_eq!(eu("2026-10-21"), "21.10.2026");
         assert_eq!(eu("2026-01-05"), "05.01.2026");
-        assert_eq!(eu_short("2026-10-21"), "21.10.");
         assert_eq!(eu("not a date"), "not a date");
         assert_eq!(iso_prefix("21.10.2026"), "2026-10-21");
         assert_eq!(iso_prefix("5.1.2026"), "2026-01-05");
