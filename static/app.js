@@ -113,15 +113,17 @@
 // header must agree with the round it shows. The test banner says so.
 (function () {
   var el = document.querySelector('.clock');
-  if (!el || !window.Intl) return;
-  var fmt = new Intl.DateTimeFormat('en-GB', {
+  var fmt = window.Intl && new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Vienna', hour: '2-digit', minute: '2-digit'
   });
   var offset = 0;
-  function tick() { el.textContent = fmt.format(new Date(Date.now() + offset)) + ' vienna'; }
+  function tick() {
+    if (el && fmt) el.textContent = fmt.format(new Date(Date.now() + offset)) + ' vienna';
+  }
   tick();
-  setInterval(tick, 10 * 1000);
-  if (!window.fetch) return;
+  if (el) setInterval(tick, 10 * 1000);
+  // Only a moved test clock needs the server's time here.
+  if (!window.fetch || !document.querySelector('.testbanner .shifted')) return;
   fetch('/api/round', { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (now) {

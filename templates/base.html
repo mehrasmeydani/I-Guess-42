@@ -59,22 +59,17 @@
     {# Two games, one site - but only 42 students ever learn there are two. #}
     {% if crate::templates::sees_42(user) %}
     <nav class="pools" aria-label="pool">
-      <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/">42 vienna</a>
-      <a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/">global</a>
+      <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/">42<span class="long"> vienna</span></a><span aria-hidden="true">/</span><a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/">global</a>
     </nav>
     {% endif %}
     <div class="status">
       {# The spinner glyphs are decoration; only the one-off message is read out. #}
       <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>
-      <span class="clock"></span>
       {% match user %}
         {% when Some with (u) %}
-          {# Your login is only your name; logging out is its own button. #}
+          {# Points and your name; logging out is on the account page. #}
           {% if pool.is_global() %}{% match u.points %}{% when Some with (p) %}<a class="pts" href="/g/points" title="your points">{{ crate::templates::points_label(p) }}</a>{% when None %}{% endmatch %}{% endif %}
           <a class="who" href="/account" title="your account: {{ u.display_name }}">{{ u.login }}</a>
-          <form method="post" action="/logout" class="inline">
-            <button class="linkish out" type="submit" aria-label="log out {{ u.login }}">log out</button>
-          </form>
         {% when None %}
           {% block signin_link %}<a class="signin" href="/login">sign in</a>{% endblock %}
       {% endmatch %}

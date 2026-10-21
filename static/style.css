@@ -93,9 +93,11 @@ b, .b { color: var(--hi); font-weight: 700; }
 main,
 footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 
+/* One row at every width: logo, tabs, the pool switch, then points and
+   your name at the far end. Nothing else lives up here. */
 .top {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px 32px;
   padding-block: 16px;
@@ -106,18 +108,22 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .brand b { padding: 0 8px; margin-left: 2px; background: var(--state); color: var(--bg); }
 .brand:hover { background: none; color: var(--hi); }
 
-.top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.top nav { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px 16px; white-space: nowrap; }
 .top nav a { color: var(--fg); text-decoration: none; }
 /* Where you are: a white inversion, not blue - location is not an action. */
 .top nav a.on { background: var(--hi); color: var(--bg); padding: 0 8px; margin: 0 -8px; }
 .top nav a:hover { background: var(--hi); color: var(--bg); }
 .top nav a.on:hover { background: var(--hi); }
 /* The pool switch: one box, two halves, the one you are in inverted. */
-.top nav.pools { gap: 0; border: 1px solid var(--edge-strong); }
-.top nav.pools a { padding: 0 8px; }
-.top nav.pools a.on { margin: 0; background: var(--hi); color: var(--bg); }
+/* The pool switch: quiet text, "42 vienna / global", the one you are in bright. */
+.top nav.pools { gap: 8px; color: var(--dim); font-size: var(--fs-1); white-space: nowrap; }
+.top nav.pools a { color: var(--dim); }
+.top nav.pools a.on, .top nav.pools a.on:hover { margin: 0; padding: 0; background: none; color: var(--hi); font-weight: 700; }
+.top nav.pools a:not(.on):hover { background: none; color: var(--hi); text-decoration: underline; }
 
 .status { display: flex; align-items: center; gap: 16px; margin-left: auto; color: var(--dim); white-space: nowrap; }
+.status .who { text-decoration: none; }
+.status .who:hover { text-decoration: underline; background: none; color: var(--hi); }
 .status form { margin: 0; }
 .busy { color: var(--dim); }
 .spin:empty { display: none; }
@@ -192,7 +198,8 @@ a.tag { color: var(--fg); text-decoration: underline; }
 /* The premise, then the status block: state, close time, the countdown and
    a progress bar, grouped as one thing. */
 .premise { margin: 0 0 24px; color: var(--hi); font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); font-weight: 700; line-height: 1.25; max-width: 32ch; text-wrap: balance; }
-.roundstatus { padding: 24px; border: 1px solid var(--edge); }
+/* A shade lighter than the page, so the round's clock is where the eye goes. */
+.roundstatus { padding: 24px; background: #171717; border: 1px solid #2c2c2c; }
 .state-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0; color: var(--dim); }
 .pill { padding: 2px 8px; border: 1px solid var(--edge-strong); color: var(--fg); }
 .closes-in { margin: 24px 0 0; color: var(--dim); font-size: var(--fs-1); letter-spacing: 0.08em; text-transform: uppercase; }
@@ -908,19 +915,16 @@ details.expand[open] summary .when-open { display: inline; }
 /* Tablets: the desktop layout, a little tighter (R18.1). */
 @media (min-width: 641px) and (max-width: 1024px) {
   .top, main, footer { padding-inline: 24px; }
+  .top { gap: 8px 20px; }
   .statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .finders { gap: 16px; }
 }
 
-@media (max-width: 640px) {
-  /* A phone keeps a 16px gutter: text running into the bezel reads as a page
-     that does not fit. */
-  .top, main, footer { padding-inline: 16px; }
-  .status .clock { display: none; }
-  /* One row on top: the logo and the account. The page's own navigation is
-     a bar of tabs along the bottom edge, where a thumb is, and it never
-     wraps (R20.3). */
-  .top { display: flex; flex-wrap: nowrap; gap: 8px; }
+/* Below 800px the four tabs do not fit beside everything else, so they move
+   to a bar along the bottom edge, where a thumb is; the top row keeps the
+   logo, the pool switch and the account, and never wraps (R20.3). */
+@media (max-width: 800px) {
+  .top { gap: 16px; }
   .top nav.mainnav {
     position: fixed;
     left: 0;
@@ -940,9 +944,22 @@ details.expand[open] summary .when-open { display: inline; }
   .top nav.mainnav a.on { margin: 0; padding: 0; }
   body { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
   .announce-card { bottom: calc(64px + env(safe-area-inset-bottom)); }
-  .top nav.pools { margin-left: auto; font-size: var(--fs-1); }
+  .top nav.pools { margin-left: auto; }
+  .status { margin-left: 0; }
+}
+
+@media (max-width: 640px) {
+  /* A phone keeps a 16px gutter: text running into the bezel reads as a page
+     that does not fit. */
+  .top, main, footer { padding-inline: 16px; }
   .status { gap: 8px; font-size: var(--fs-1); }
-  .status .out { padding: 2px 8px; }
+  /* "42 / global" and a username cut short, so the top row fits a phone. */
+  .pools .long { display: none; }
+  /* On a phone the top row is logo, pool switch and points; your name and
+     account are a tap away under the "me" tab. */
+  .status .who { display: none; }
+  .top { gap: 12px; }
+  .brand { font-size: var(--fs-2); }
   .statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .daynav { grid-template-columns: 1fr 1fr; }
   .daynav-here { grid-column: 1 / -1; grid-row: 1; }
