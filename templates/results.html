@@ -107,7 +107,7 @@
       <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="num">days won</th></tr></thead>
       <tbody>
         {% for l in leaders %}
-          <tr title="{{ l.display_name }}"><td class="num dim">{{ "{:02}"|format(loop.index) }}</td><td>{{ l.login }}</td><td class="num b">{{ l.wins }}</td></tr>
+          <tr title="{{ l.display_name }}"><td class="num dim">{{ "{:02}"|format(l.rank) }}</td><td>{{ l.login }}</td><td class="num b">{{ l.wins }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -121,7 +121,7 @@
           <tbody>
             {% for l in rest %}
               <tr title="{{ l.display_name }}">
-                <td class="num dim">{{ "{:02}"|format(loop.index + 10) }}</td>
+                <td class="num dim">{{ "{:02}"|format(l.rank) }}</td>
                 <td>{{ l.login }}</td>
                 <td class="num b">{{ l.wins }}</td>
               </tr>

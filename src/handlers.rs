@@ -358,10 +358,12 @@ async fn results_in(
         .map(|r| RoundView::new(r, named))
         .collect();
 
-    let mut leaders: Vec<templates::LeaderView> = db::leaderboard(&state.db, pool, &round_key, LEADERBOARD_LIMIT)
-        .await?
+    let board = db::leaderboard(&state.db, pool, &round_key, LEADERBOARD_LIMIT).await?;
+    let places = templates::ranks(&board.iter().map(|r| r.wins).collect::<Vec<_>>());
+    let mut leaders: Vec<templates::LeaderView> = board
         .into_iter()
-        .map(|r| templates::LeaderView::new(r, named))
+        .zip(places)
+        .map(|(r, rank)| templates::LeaderView { rank, ..templates::LeaderView::new(r, named) })
         .collect();
     let rest = leaders.split_off(leaders.len().min(PODIUM));
 

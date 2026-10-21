@@ -254,6 +254,20 @@ pub struct LeaderView {
     pub login: String,
     pub display_name: String,
     pub wins: i64,
+    /// Place in the ranking; ties share it (see [`ranks`]).
+    pub rank: i64,
+}
+
+/// Places for scores in descending order, the way sport ranks them: equal
+/// scores share a place and the next place skips past them, so nine players
+/// tied first are all 1 and the next is 10.
+pub fn ranks(scores: &[i64]) -> Vec<i64> {
+    let mut out = Vec::with_capacity(scores.len());
+    for (i, s) in scores.iter().enumerate() {
+        let rank = if i > 0 && scores[i - 1] == *s { out[i - 1] } else { i as i64 + 1 };
+        out.push(rank);
+    }
+    out
 }
 
 impl LeaderView {
@@ -264,6 +278,7 @@ impl LeaderView {
             login: named(r.login, Some(r.id), reveal),
             display_name: named(r.display_name, Some(r.id), reveal),
             wins: r.wins,
+            rank: 0,
         }
     }
 }
@@ -659,6 +674,8 @@ pub struct PointsBoardRow {
     pub pct: i64,
     /// The visitor's own row.
     pub me: bool,
+    /// Place in the ranking; ties share it.
+    pub rank: i64,
 }
 
 #[derive(Template)]
@@ -1203,6 +1220,15 @@ mod tests {
             2,
             "a normal day keeps both"
         );
+    }
+
+    #[test]
+    fn ties_share_a_place_and_the_next_place_skips_past_them() {
+        use super::ranks;
+        assert_eq!(ranks(&[5, 3, 3, 1]), vec![1, 2, 2, 4]);
+        assert_eq!(ranks(&[2; 9].iter().copied().chain([1]).collect::<Vec<_>>()), vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 10]);
+        assert_eq!(ranks(&[7, 7, 6, 6, 6, 2]), vec![1, 1, 3, 3, 3, 6]);
+        assert!(ranks(&[]).is_empty());
     }
 
     #[test]

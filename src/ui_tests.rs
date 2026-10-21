@@ -231,6 +231,11 @@ async fn the_leaderboard_ranks_points_first_then_wins() {
     assert!(html.contains(r#"href="/g/leaderboard">leaders</a>"#), "a tab in the header");
     assert!(html.contains(r#"class="on" aria-current="page" href="/g/leaderboard">leaders</a>"#));
 
+    // Everyone with one win shares first place; nobody is "02" for a tie.
+    let wins_part = &html[wins..];
+    assert!(wins_part.contains(r#"<tr class="r1" title="cat"><td class="num place">01</td>"#), "{wins_part}");
+    assert!(!wins_part.contains(">02<"));
+
     // The 42 round: wins only, and only for 42 students.
     student(&state.db, 1001, "megardes", "s").await;
     let html = body(board(Pool::Vienna, Some("s")).await).await;

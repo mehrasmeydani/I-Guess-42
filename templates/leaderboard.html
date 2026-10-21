@@ -26,7 +26,7 @@
       <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="score">points</th></tr></thead>
       <tbody>
         {% for r in rows %}
-          <tr class="r{{ loop.index }}{% if r.me %} me{% endif %}" title="{{ r.title }}"><td class="num place">{{ "{:02}"|format(loop.index) }}</td><td class="who">{{ r.name }}{% if r.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score pts"><span class="minibar" style="--w: {{ r.pct }}%"></span><b>{{ r.points }}</b></td></tr>
+          <tr class="r{{ r.rank }}{% if r.me %} me{% endif %}" title="{{ r.title }}"><td class="num place">{{ "{:02}"|format(r.rank) }}</td><td class="who">{{ r.name }}{% if r.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score pts"><span class="minibar" style="--w: {{ r.pct }}%"></span><b>{{ r.points }}</b></td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -45,7 +45,7 @@
       <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="score">days won</th></tr></thead>
       <tbody>
         {% for l in wins %}
-          <tr class="r{{ loop.index }}{% if l.me %} me{% endif %}" title="{{ l.title }}"><td class="num place">{{ "{:02}"|format(loop.index) }}</td><td class="who">{{ l.name }}{% if l.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score wins"><span class="minibar" style="--w: {{ l.pct }}%"></span><b>{{ l.points }}</b></td></tr>
+          <tr class="r{{ l.rank }}{% if l.me %} me{% endif %}" title="{{ l.title }}"><td class="num place">{{ "{:02}"|format(l.rank) }}</td><td class="who">{{ l.name }}{% if l.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score wins"><span class="minibar" style="--w: {{ l.pct }}%"></span><b>{{ l.points }}</b></td></tr>
         {% endfor %}
       </tbody>
     </table>

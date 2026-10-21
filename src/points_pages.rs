@@ -110,19 +110,22 @@ async fn leaderboard_in(
     let me_42 = viewer.as_ref().and_then(|v| v.intra.as_ref().map(|u| u.login.clone()));
     let wins: Vec<db::LeaderboardRow> = db::leaderboard(&state.db, pool, &open, BOARD).await?;
     let top_wins = wins.first().map_or(1, |r| r.wins.max(1));
+    let win_ranks = templates::ranks(&wins.iter().map(|r| r.wins).collect::<Vec<_>>());
     let wins = wins
         .into_iter()
-        .map(|r| {
+        .zip(win_ranks)
+        .map(|(r, rank)| {
             let me = match pool {
                 Pool::Global => me_global.as_deref() == Some(r.login.as_str()),
                 Pool::Vienna => me_42.as_deref() == Some(r.login.as_str()),
             };
             let pct = r.wins * 100 / top_wins;
             let l = templates::LeaderView::new(r, named);
-            PointsBoardRow { name: l.login, title: l.display_name, points: l.wins.to_string(), pct, me }
+            PointsBoardRow { name: l.login, title: l.display_name, points: l.wins.to_string(), pct, me, rank }
         })
         .collect();
     let top_points = rows.first().map_or(1, |r| r.points.max(1));
+    let point_ranks = templates::ranks(&rows.iter().map(|r| r.points).collect::<Vec<_>>());
     Ok(templates::render(&BoardTemplate {
         pool,
         test_mode: state.cfg.test_env(),
@@ -131,7 +134,9 @@ async fn leaderboard_in(
         wins,
         rows: rows
             .into_iter()
-            .map(|r| PointsBoardRow {
+            .zip(point_ranks)
+            .map(|(r, rank)| PointsBoardRow {
+                rank,
                 me: me_global.as_deref() == Some(r.username.as_str()),
                 pct: (r.points.max(0) * 100 / top_points).clamp(0, 100),
                 title: r.username.clone(),
