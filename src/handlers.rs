@@ -1676,8 +1676,8 @@ mod tests {
                     .unwrap(),
             )
             .await;
-            assert!(vienna.contains("locked: <b>4</b>"));
-            assert!(global_page(&state, Some("s")).await.contains("locked: <b>9</b>"));
+            assert!(vienna.contains(r#"<p class="sealed-value">4</p>"#));
+            assert!(global_page(&state, Some("s")).await.contains(r#"<p class="sealed-value">9</p>"#));
         }
 
         #[tokio::test]
@@ -2086,13 +2086,16 @@ mod round_page_tests {
 
         let html = page(&state, jar(&session), Some("saved")).await;
         assert!(html.contains("you're in"));
-        assert!(html.contains("locked: <b>7</b> &middot; reveal 12:42 &middot; <span class=\"countdown-mirror\">"), "{html}");
+        assert!(html.contains(r#"<div class="sealed fresh">"#), "stamped on just now");
+        assert!(html.contains(r#"<span class="stamp">sealed</span>"#));
+        assert!(html.contains("reveal 12:42 &middot; <span class=\"countdown-mirror\">"), "{html}");
         assert!(html.contains(&format!(r#"<a href="/g/round/{round}.ics" download>add to calendar</a>"#)));
         assert!(!html.contains(r#"id="guess""#), "no input once locked");
 
-        // Back later: the same line, from what the server holds.
+        // Back later: the same box, from what the server holds, no slam.
         let html = page(&state, jar(&session), None).await;
-        assert!(html.contains("locked: <b>7</b>"));
+        assert!(html.contains(r#"<div class="sealed">"#));
+        assert!(html.contains(r#"<p class="sealed-value">7</p>"#));
     }
 
     #[tokio::test]

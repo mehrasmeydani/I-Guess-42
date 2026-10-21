@@ -47,6 +47,9 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
       both on every page. The spec accepts this (R21.8, R21.9). If you want AA:
       `--dim: #8a8a8a` (5.2:1) and button text in `--bg` (5:1) - two lines in
       static/style.css.
+- [x] **Departures from the spec, by request:** blue only on the lock-in
+      button and the charts (not links, nav or focus); the sealed box and
+      stamp kept for a locked number; no grey panel behind the status block.
 - [ ] **Username prompt (Q4).** Done for new GitHub / Google / other-campus 42
       sign-ups only; existing SSO accounts are not asked retroactively.
 - [ ] **Range control:** R13.4 asks for `aria-pressed`, which is only valid

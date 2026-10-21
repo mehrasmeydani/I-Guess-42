@@ -12,10 +12,8 @@
 
   var DAY = 24 * 60 * 60 * 1000;
   var bar = document.querySelector('.progress');
-  var fill = document.querySelector('.progress-fill');
-  var empty = document.querySelector('.progress-empty');
+  var cells = document.querySelectorAll('.progress .cells i');
   var pctLabel = document.querySelector('.progress-pct');
-  var CELLS = 24; // as templates::progress_cells
   var mirrors = document.querySelectorAll('.countdown-mirror');
   var stateEl = document.querySelector('.roundstatus .state');
   var closesIn = document.querySelector('.closes-in');
@@ -53,13 +51,13 @@
     if (minute !== lastMinute) {
       lastMinute = minute;
       el.setAttribute('aria-label', 'closes in ' + spoken(ms));
-      if (bar && fill) {
+      if (bar && cells.length) {
         var pct = Math.min(100, Math.max(0, Math.floor((DAY - ms) * 100 / DAY)));
         bar.setAttribute('aria-valuenow', pct);
         bar.setAttribute('aria-valuetext', pct + '% of the round gone');
-        var filled = Math.floor(pct * CELLS / 100);
-        fill.textContent = new Array(filled + 1).join('█');
-        if (empty) empty.textContent = new Array(CELLS - filled + 1).join('░');
+        // As templates::progress_cells: floor(pct * cells / 100) filled.
+        var filled = Math.floor(pct * cells.length / 100);
+        for (var c = 0; c < cells.length; c++) cells[c].className = c < filled ? 'on' : '';
         if (pctLabel) pctLabel.textContent = pct + '%';
       }
     }

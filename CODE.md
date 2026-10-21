@@ -1538,10 +1538,13 @@ by themselves.
 v2.0 replaced v1.1's look and voice; the files are kept in `docs/ui-spec/`.
 The rules that live in code:
 
-- **Colour roles** (`static/style.css` header): `--action` blue for anything
-  clickable or focused, `--state` green for status and wins, `--loss` red,
-  `--env` amber, white inversion for "you are here". Buttons are outlined;
-  `.primary` is the only solid block.
+- **Colour roles** (`static/style.css` header), as changed after review:
+  blue only on the one primary button (lock it in) and the chart bars;
+  links, tabs, other buttons and focus are white on black, inverting on
+  hover. Green is status and wins, red losses, amber the test line. No grey
+  panels: the status block is outlined on the page's black.
+- **The sealed box** is back for a locked number: green frame, red "sealed"
+  stamp, slammed on when the number was locked just now (`.sealed.fresh`).
 - **Copy** (`src/copy.rs`): every message the server writes, as lowercase
   fragments. Templates follow the same register; privacy and imprint keep
   full sentences.

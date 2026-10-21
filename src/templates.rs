@@ -126,12 +126,11 @@ impl From<Viewer> for UserView {
     }
 }
 
-/// The progress bar's cells as text (D10): filled blocks, then empty ones.
-/// 24 cells, so the bar and its percentage fit a 320px screen.
-pub fn progress_cells(pct: &i64) -> (String, String) {
+/// The progress bar's cells (D10): true for each filled one, of 24.
+pub fn progress_cells(pct: &i64) -> Vec<bool> {
     const CELLS: i64 = 24;
-    let filled = (pct.clamp(&0, &100) * CELLS / 100) as usize;
-    ("█".repeat(filled), "░".repeat(CELLS as usize - filled))
+    let filled = pct.clamp(&0, &100) * CELLS / 100;
+    (0..CELLS).map(|i| i < filled).collect()
 }
 
 /// "1 250 pts".

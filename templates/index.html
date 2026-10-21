@@ -52,11 +52,15 @@
        nothing is announced on its own (no aria-live, no role=timer). #}
     <p class="countdown" data-closes-at="{{ closes_at }}" data-server-now="{{ server_now }}"
        aria-label="closes in {{ time_left_spoken }}">{{ time_left }}</p>
-    {# Terminal blocks, drawn as text: filled in green, empty in the edge
-       grey, with the share beside it (D10). #}
-    <p class="progress" role="progressbar" aria-label="round gone by"
-       aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress_pct }}"
-       aria-valuetext="{{ progress_pct }}% of the round gone"><span class="progress-fill" aria-hidden="true">{{ crate::templates::progress_cells(progress_pct).0 }}</span><span class="progress-empty" aria-hidden="true">{{ crate::templates::progress_cells(progress_pct).1 }}</span> <span class="progress-pct" aria-hidden="true">{{ progress_pct }}%</span></p>
+    {# Terminal blocks across the whole box: filled in green, empty in a grey
+       that still reads on the panel (D10). Real boxes, not glyphs, so every
+       font draws them the same. #}
+    <div class="progress" role="progressbar" aria-label="round gone by"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress_pct }}"
+         aria-valuetext="{{ progress_pct }}% of the round gone">
+      <span class="cells" aria-hidden="true">{% for on in crate::templates::progress_cells(progress_pct) %}<i{% if on %} class="on"{% endif %}></i>{% endfor %}</span>
+      <span class="progress-pct" aria-hidden="true">{{ progress_pct }}%</span>
+    </div>
     <p class="facts">
       <span><b>{{ guess_count }}</b> {% if guess_count == 1 %}player{% else %}players{% endif %} this round</span>
       {% match pot_label %}{% when Some with (pot) %}<span class="pot">pot <b class="win">{{ pot }}</b>{% match carried_label %}{% when Some with (c) %} <span class="dim">· {{ c }} rolled over</span>{% when None %}{% endmatch %}</span>{% when None %}{% endmatch %}
@@ -84,9 +88,14 @@
 
   {% match my_guess_label %}
     {% when Some with (g) %}
-      {# In place of the input, from what the server holds (R8.1, R10.2). #}
-      <h2 class="locked-line"{% if just_locked %} role="status"{% endif %}>locked: <b>{{ g }}</b> &middot; reveal {{ close_time }} &middot; <span class="countdown-mirror">{{ time_left }}</span></h2>
-      <p><a href="{{ calendar_href }}" download>add to calendar</a></p>
+      {# In place of the input, from what the server holds: the number in
+         its sealed box, stamped on the moment it is locked. #}
+      <h2 class="section-title"{% if just_locked %} role="status"{% endif %}>locked: your number</h2>
+      <div class="sealed{% if just_locked %} fresh{% endif %}">
+        <p class="sealed-value">{{ g }}</p>
+        <span class="stamp">sealed</span>
+      </div>
+      <p class="locked-line">reveal {{ close_time }} &middot; <span class="countdown-mirror">{{ time_left }}</span> &middot; <a href="{{ calendar_href }}" download>add to calendar</a></p>
     {% when None %}
       {% if signed_in && !can_play %}
         <h2 class="section-title">confirm your email to play</h2>

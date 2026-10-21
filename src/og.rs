@@ -1,6 +1,6 @@
 //! The link-preview image of a round (R12.2, D7): 1200x630, the day's picks
 //! as columns in the site's colours - winner green, numbers taken by more
-//! than one player in red, the rest grey - under the name and the date, in a
+//! than one player in blue, the rest grey - under the name and the date, in a
 //! pixel font drawn here so the image needs no font files. Nothing personal
 //! is in it. Rendered on first request and kept.
 
@@ -15,7 +15,7 @@ const BG: [u8; 3] = [0x0c, 0x0c, 0x0c];
 const FG: [u8; 3] = [0xf2, 0xf2, 0xf2];
 const DIM: [u8; 3] = [0x8f, 0x8f, 0x8f];
 const GREEN: [u8; 3] = [0x16, 0xc6, 0x0c];
-const RED: [u8; 3] = [0xe7, 0x48, 0x56];
+const BLUE: [u8; 3] = [0x3b, 0x78, 0xff];
 const GREY: [u8; 3] = [0x5a, 0x5a, 0x5a];
 const RULE: [u8; 3] = [0x2a, 0x2a, 0x2a];
 
@@ -130,7 +130,7 @@ pub fn round_image(date: &str, tallies: &[Tally], winner: Option<i64>, players: 
         let colour = if Some(t.value) == winner {
             GREEN
         } else if t.count > 1 {
-            RED
+            BLUE
         } else {
             GREY
         };

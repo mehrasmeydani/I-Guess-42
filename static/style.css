@@ -7,13 +7,13 @@
  *   measure (72ch) and spacing, not through a second font.
  * - Sizes come from one scale: 13 / 16 / 20 / 28 / 48 px (--fs-1 ... --fs-5).
  * - Spacing is a multiple of 8 px (half steps of 4 for the tightest gaps).
- * - Colours are named for what they mean, never for their hue, so a meaning
- *   cannot end up in the wrong place (spec R21 / D7):
- *     --action  blue   anything clickable or focused: links, buttons, focus
+ * - Colour is kept for what matters, and named for what it means:
+ *     --action  blue   the one button to press (lock it in) and the charts
  *     --state   green  status and outcome: open, the "low" chip, progress, wins
- *     --loss    red    taken numbers, losses, errors
+ *     --loss    red    losses and errors
  *     --env     amber  the test-instance line, nothing else
- *   Where you are (the active tab) is a white inversion: location, not action.
+ *   Everything else - links, tabs, other buttons, focus - is white on black,
+ *   inverting on hover, so the blue button is the only blue thing to press.
  * - Three greys, far enough apart to read as three priorities: --hi for
  *   emphasis, --fg for body text, --dim for short labels only (3.9:1, too
  *   faint for paragraphs).
@@ -77,9 +77,9 @@ body {
 
 p, ol, pre, table, h2 { margin: 0; }
 
-/* Clickable is blue, everywhere (R21.2); hover fills it (R16.6). */
-a { color: var(--action); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-a:hover { background: var(--action-hi); color: var(--bg); text-decoration: none; }
+/* Links are white and underlined; hover inverts them. */
+a { color: var(--hi); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { background: var(--hi); color: var(--bg); text-decoration: none; }
 
 b, .b { color: var(--hi); font-weight: 700; }
 .dim { color: var(--dim); }
@@ -107,10 +107,10 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .brand:hover { background: none; color: var(--hi); }
 
 .top nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
-.top nav a { color: var(--action); text-decoration: none; }
+.top nav a { color: var(--fg); text-decoration: none; }
 /* Where you are: a white inversion, not blue - location is not an action. */
 .top nav a.on { background: var(--hi); color: var(--bg); padding: 0 8px; margin: 0 -8px; }
-.top nav a:hover { background: var(--action-hi); color: var(--bg); }
+.top nav a:hover { background: var(--hi); color: var(--bg); }
 .top nav a.on:hover { background: var(--hi); }
 /* The pool switch: one box, two halves, the one you are in inverted. */
 .top nav.pools { gap: 0; border: 1px solid var(--edge-strong); }
@@ -128,11 +128,11 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
   display: inline-block;
   padding: 2px 8px;
   border: 1px solid var(--edge-strong);
-  color: var(--action);
+  color: var(--hi);
   font-weight: 400;
   text-decoration: none;
 }
-.status .out:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
+.status .out:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
 /* Your login, next to the log out button: readable, not a control. */
 .status .who { color: var(--fg); }
 /* Signing in from the header is a plain link: the round page's own button
@@ -142,12 +142,12 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
   align-items: center;
   min-height: 32px;
   padding: 2px 8px;
-  border: 1px solid var(--action);
-  color: var(--action);
+  border: 1px solid var(--edge-strong);
+  color: var(--hi);
   text-decoration: none;
   transition: background 120ms, color 120ms;
 }
-.status .signin:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
+.status .signin:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
 
 main { flex: 1; padding-block: 8px 64px; }
 
@@ -192,7 +192,7 @@ a.tag { color: var(--fg); text-decoration: underline; }
 /* The premise, then the status block: state, close time, the countdown and
    a progress bar, grouped as one thing. */
 .premise { margin: 0 0 24px; color: var(--hi); font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); font-weight: 700; line-height: 1.25; max-width: 32ch; text-wrap: balance; }
-.roundstatus { padding: 24px; background: var(--panel); border: 1px solid var(--edge); }
+.roundstatus { padding: 24px; border: 1px solid var(--edge); }
 .state-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0; color: var(--dim); }
 .pill { padding: 2px 8px; border: 1px solid var(--edge-strong); color: var(--fg); }
 .closes-in { margin: 24px 0 0; color: var(--dim); font-size: var(--fs-1); letter-spacing: 0.08em; text-transform: uppercase; }
@@ -207,20 +207,45 @@ a.tag { color: var(--fg); text-decoration: underline; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.progress { margin: 16px 0 0; font-size: var(--fs-1); line-height: 1; white-space: nowrap; letter-spacing: 0; }
-.progress-fill { color: var(--state); }
-.progress-empty { color: var(--edge-strong); }
-.progress-pct { color: var(--dim); }
+/* The round's progress: a full-width row of blocks, then the share. Empty
+   blocks are #4d4d4d, 3:1 against the panel, so the unfilled part reads. */
+.progress { display: flex; align-items: center; gap: 12px; margin: 16px 0 0; }
+.cells { flex: 1; display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; }
+.cells i { height: 12px; background: #4d4d4d; }
+.cells i.on { background: var(--state); }
+.progress-pct { color: var(--fg); font-size: var(--fs-1); font-variant-numeric: tabular-nums; min-width: 4ch; text-align: right; }
 .facts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; margin: 16px 0 0; color: var(--dim); }
 .facts b { color: var(--hi); }
 .facts .pot b { color: var(--state); }
-.status .pts { color: var(--action); text-decoration: none; font-weight: 700; }
+.status .pts { color: var(--state); text-decoration: none; font-weight: 700; }
 .status .pts:hover { background: none; color: var(--hi); text-decoration: underline; }
 
 .section-title { margin: 0 0 16px; color: var(--hi); font-size: var(--fs-3); font-weight: 700; }
 .section-title label { cursor: pointer; }
 .play .hint { max-width: 60ch; margin-top: 12px; }
-.locked-line { margin: 0 0 8px; color: var(--fg); font-size: var(--fs-4); font-weight: 400; line-height: var(--lh-tight); }
+.locked-line { margin: 16px 0 0; color: var(--fg); }
+
+/* The locked number: a sealed box, red stamp on its corner, slammed on in
+   three frames when the number has just been locked. */
+.sealed { position: relative; display: inline-block; min-width: 200px; margin-top: 8px; padding: 24px 32px; border: 2px solid var(--state); }
+.sealed-value { margin: 0; color: var(--hi); font-size: clamp(2.6rem, 10vw, 5rem); font-weight: 700; line-height: 1; word-break: break-all; }
+.stamp {
+  position: absolute;
+  top: -14px;
+  right: -12px;
+  padding: 2px 8px;
+  background: var(--loss);
+  color: var(--bg);
+  font-weight: 700;
+  transform: rotate(4deg);
+}
+.sealed.fresh .stamp { animation: stamp 300ms steps(3) 350ms both; }
+@keyframes stamp {
+  0% { visibility: hidden; }
+  1% { visibility: visible; transform: rotate(4deg) scale(2.2); }
+  50% { transform: rotate(4deg) scale(0.9); }
+  100% { transform: rotate(4deg); }
+}
 .locked-line b { color: var(--hi); }
 .secondary .verdict b { font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); }
 
@@ -252,31 +277,31 @@ input[type="text"] {
   border-radius: 0;
   color: var(--hi);
   font: 700 var(--fs-4)/1 var(--font);
-  caret-color: var(--action);
+  caret-color: var(--hi);
   transition: border-color 120ms;
 }
 input::placeholder { color: var(--dim); }
 input[type="text"]:hover { border-color: var(--dim); }
 /* Every field takes the one focus ring (R17.4). */
-input[type="text"]:focus-visible { border-color: var(--action); }
+input[type="text"]:focus-visible { border-color: var(--hi); }
 
-/* Buttons are outlined in blue; only .primary is a solid block, so each page
-   has one obvious thing to press (R4.1), recognisable by shape alone. */
+/* Buttons are outlined in grey; only .primary is a solid blue block, so each
+   page has one obvious thing to press, recognisable by shape alone. */
 button,
 .btn {
   display: inline-block;
   padding: 12px 20px;
   background: transparent;
-  border: 1px solid var(--action);
+  border: 1px solid var(--edge-strong);
   border-radius: 0;
-  color: var(--action);
+  color: var(--hi);
   font: 700 var(--fs-2)/1.5 var(--font);
   text-decoration: none;
   cursor: pointer;
   white-space: nowrap;
 }
 button:hover,
-.btn:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
+.btn:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
 button:active,
 .btn:active { translate: 0 1px; }
 button:disabled,
@@ -304,11 +329,11 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; translate: none; }
   border-radius: 0;
   color: var(--hi);
   font: 400 var(--fs-2)/1 var(--font);
-  caret-color: var(--action);
+  caret-color: var(--hi);
   transition: border-color 120ms, box-shadow 120ms;
 }
 .authform input:hover { border-color: var(--dim); }
-.authform input:focus-visible { border-color: var(--action); }
+.authform input:focus-visible { border-color: var(--hi); }
 .authform input[aria-invalid="true"] { border-color: var(--loss); }
 .authform input:disabled { color: var(--dim); border-color: var(--edge); }
 .authform .hint { margin: 2px 0 0; font-size: var(--fs-1); }
@@ -353,13 +378,13 @@ button.primary:focus-visible,
   gap: 12px;
   height: 46px;
   background: transparent;
-  border: 1px solid var(--action);
-  color: var(--action);
+  border: 1px solid var(--edge-strong);
+  color: var(--hi);
   font-weight: 700;
   text-decoration: none;
   transition: border-color 120ms, background 120ms;
 }
-.provider:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
+.provider:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
 .provider-mark { width: 18px; height: 18px; flex: none; }
 .mark-42 {
   display: grid;
@@ -376,13 +401,13 @@ button.primary:focus-visible,
 
 /* A ghost is the plain outlined button; kept as a name for clarity. */
 .btn.ghost,
-button.ghost { background: transparent; color: var(--action); border-color: var(--action); }
+button.ghost { background: transparent; color: var(--hi); border-color: var(--edge-strong); }
 
 .linkish {
   padding: 0;
   background: none;
   border: 0;
-  color: var(--action);
+  color: var(--hi);
   font: inherit;
   font-weight: 400;
   text-decoration: underline;
@@ -390,7 +415,7 @@ button.ghost { background: transparent; color: var(--action); border-color: var(
   text-decoration-thickness: 1px;
   cursor: pointer;
 }
-.linkish:hover { background: var(--action-hi); color: var(--bg); text-decoration: none; }
+.linkish:hover { background: var(--hi); color: var(--bg); text-decoration: none; }
 
 .sec > .dim,
 .sec > .notice { margin-top: 12px; }
@@ -506,12 +531,12 @@ button.ghost { background: transparent; color: var(--action); border-color: var(
 /* Off the scale, so no bar at all: just the number, flush left. */
 .barcell.outlier b { margin-left: 0; }
 
-details summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--action); font-weight: 700; list-style: none; }
+details summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--hi); font-weight: 700; list-style: none; }
 details summary::-webkit-details-marker { display: none; }
 /* The disclosure state, drawn explicitly since the native marker is gone. */
 details summary::before { content: "+"; width: 2ch; color: var(--dim); }
 details[open] summary::before { content: "-"; }
-details summary:hover { color: var(--action-hi); }
+details summary:hover { color: var(--fg); }
 details[open] summary { margin-bottom: 12px; }
 
 /* ---------------------------------------------------------------- chart */
@@ -520,8 +545,8 @@ details[open] summary { margin-bottom: 12px; }
 .legend i { font-style: normal; }
 .legend .win { color: var(--state); }
 .legend .once { color: var(--hi); }
-.legend .picked { color: var(--quiet); }
-.legend .many { color: var(--taken); }
+.legend .picked { color: var(--action); }
+.legend .many { color: var(--action); }
 
 /* One column per number, all sharing the width: the more numbers, the
    thinner each column, down to a pixel. They stand on a thick baseline. */
@@ -589,10 +614,10 @@ details[open] summary { margin-bottom: 12px; }
 }
 .win .col-bar { background: var(--state); }
 .once .col-bar { background: var(--hi); }
-/* Taken by more than one player: red, as on the preview image. On the
-   trends page, numbers that never won a day are a quiet grey. */
-.picked .col-bar { background: var(--quiet); }
-.many .col-bar { background: var(--taken); }
+/* Shared numbers on a day page and numbers that never won on the trends
+   page are blue: the chart's one colour besides the winner's green. */
+.picked .col-bar { background: var(--action); }
+.many .col-bar { background: var(--action); }
 .col:hover .col-c { visibility: visible; }
 /* Every column carries its number under the axis; only round numbers show
    it, the rest appear while hovered, drawn over their neighbours. */
@@ -622,10 +647,10 @@ details[open] summary { margin-bottom: 12px; }
   min-height: 32px;
   padding: 0 8px;
   border: 1px solid var(--edge-strong);
-  color: var(--action);
+  color: var(--hi);
   text-decoration: none;
 }
-.ranges a:hover { background: var(--action-hi); border-color: var(--action-hi); color: var(--bg); }
+.ranges a:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
 /* The selected range is where you are: the white inversion, like the nav. */
 .ranges a.on, .ranges a.on:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); font-weight: 700; }
 
@@ -658,7 +683,7 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .row input[type="text"] { font-size: var(--fs-2); flex: 1 1 160px; padding: 8px 12px; }
 .admin-form { display: block; }
 .check { display: flex; gap: 8px; align-items: baseline; margin-top: 8px; }
-.check input { accent-color: var(--action); }
+.check input { accent-color: var(--hi); }
 .hint, .empty, .tally, .nowinner { color: var(--dim); margin-top: 8px; }
 .hint strong { color: var(--hi); }
 .login { color: var(--dim); }
@@ -721,7 +746,7 @@ button.is-busy { pointer-events: none; }
 /* The checkbox is off-screen, so the ring has to show on what stands in for
    it -- otherwise tabbing to the dismiss control shows nothing at all. */
 .announce-x:focus-visible ~ .announce-card .announce-close {
-  outline: 3px solid var(--action);
+  outline: 3px solid var(--hi);
   outline-offset: 3px;
 }
 
@@ -732,7 +757,7 @@ button.is-busy { pointer-events: none; }
 /* ---------------------------------------------------------- accessibility */
 
 /* One visible focus ring for everything reachable by keyboard. */
-:focus-visible { outline: 3px solid var(--action); outline-offset: 3px; }
+:focus-visible { outline: 3px solid var(--hi); outline-offset: 3px; }
 main:focus { outline: none; }
 
 a, button, summary, input, label { touch-action: manipulation; }
@@ -743,8 +768,8 @@ a, button, summary, input, label { touch-action: manipulation; }
   top: -60px;
   z-index: 100;
   padding: 8px 16px;
-  background: var(--action);
-  color: #fff;
+  background: var(--hi);
+  color: var(--bg);
   font-weight: 700;
   text-decoration: none;
 }
@@ -830,8 +855,8 @@ p, li { text-wrap: pretty; }
 .day-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; margin-top: 24px; }
 .share-done:empty { display: none; }
 /* Struck: a number more than one player picked. */
-s { text-decoration-thickness: 2px; text-decoration-color: var(--taken); }
-.many .col-n s { text-decoration-color: var(--taken); }
+s { text-decoration-thickness: 2px; text-decoration-color: var(--action); }
+.many .col-n s { text-decoration-color: var(--action); }
 /* Your own pick: a triangle under its column, and an outline in the list. */
 .col-you { display: block; color: var(--hi); font-size: var(--fs-1); line-height: 1; text-align: center; translate: -50% 0; }
 .col.mine .col-bar { outline: 2px solid var(--hi); outline-offset: 1px; }
@@ -972,7 +997,7 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
   left: 17px;
   top: 50%;
   translate: 0 -50%;
-  color: var(--action);
+  color: var(--hi);
   font-size: var(--fs-4);
   line-height: 1;
   pointer-events: none;
@@ -984,7 +1009,7 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 @media (prefers-reduced-motion: reduce) { .guess-field::after { animation: none; } }
 
 .rules li span { display: block; }
-.mystats a { color: var(--action); }
+.mystats a { color: var(--fg); }
 
 /* A page's opening line of figures (R11.1, R13.1). */
 .lead { margin: 0 0 8px; color: var(--hi); font-size: var(--fs-3); line-height: var(--lh-tight); max-width: var(--measure); }
