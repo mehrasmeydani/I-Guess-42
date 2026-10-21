@@ -227,12 +227,15 @@ a.tag { color: var(--fg); text-decoration: underline; }
 
 /* The locked number: a sealed box, red stamp on its corner, slammed on in
    three frames when the number has just been locked. */
-.sealed { position: relative; display: inline-block; min-width: 200px; margin-top: 8px; padding: 24px 32px; border: 2px solid var(--state); }
+/* Sized to the number, centred, with room above for the stamp. */
+.sealed { position: relative; display: inline-block; min-width: 9rem; margin-top: 16px; padding: 24px 32px; border: 2px solid var(--state); text-align: center; }
 .sealed-value { margin: 0; color: var(--hi); font-size: clamp(2.6rem, 10vw, 5rem); font-weight: 700; line-height: 1; word-break: break-all; }
 .stamp {
   position: absolute;
-  top: -14px;
-  right: -12px;
+  /* Straddles the corner: half over the frame, half off it. */
+  top: 0;
+  right: 0;
+  translate: 40% -50%;
   padding: 2px 8px;
   background: var(--loss);
   color: var(--bg);
