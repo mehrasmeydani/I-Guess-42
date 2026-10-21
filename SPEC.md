@@ -616,7 +616,7 @@ Rules:
 - Placing a bet inserts the bet and `ledger(kind='bet', ref=bet_id, −stake)` in
   one transaction.
 
-### 9.2 Where the chances start: last month, replayed
+### 9.2 Where the chances start: last month, worked out exactly
 
 Once per open round:
 
@@ -626,10 +626,18 @@ Once per open round:
    same days (never named on the page).
 2. Players per round n = the month's global average of real guesses (else
    the 42 round's, else 10), between 2 and 1000.
-3. Simulate 40 000 rounds: n players each draw one of those picks at random;
-   the lowest number drawn exactly once wins, or nobody does. The seed is the
-   round's date, so a day's numbers are the same on every restart.
-4. A range's starting chance p0 = 0.95 × (share of simulated rounds it wins)
+3. n players each pick one of those picks at random. Each number's count is
+   then near enough an independent Poisson count with mean
+   λᵥ = n × (its share of the picks), which makes the chances a formula
+   rather than a simulation (`odds::analyse`):
+   - v wins: λᵥe^(−λᵥ) × Π over u < v of (1 − λᵤe^(−λᵤ));
+   - nobody wins: that product over every number;
+   - v is most picked (ties to the lowest): summed over its count k, the
+     chance every lower number has fewer than k and every higher at most k.
+   Exact to any precision, instant, the same on every restart. Checked in the
+   tests against 20 000 rounds actually played out; on the local data it
+   matched the old 40 000-round simulation to within a point everywhere.
+4. A range's starting chance p0 = 0.95 × (its chance from step 3)
    + 0.05 × a smooth curve (winners falling off as 1/n², 5% nobody), so a
    range nobody picked last week is unlikely, not impossible. With no picks
    at all, the curve alone.

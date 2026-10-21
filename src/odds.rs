@@ -7,9 +7,10 @@
 //! no winner at all; or on the most picked number M landing in a range.
 //! Odds come from two things:
 //!
-//! - Last week's picks, replayed: `SIMS` made-up rounds, each with last
-//!   week's usual number of players drawing from what people actually picked.
-//!   How often W lands in a range is its starting chance.
+//! - Last month's picks, worked out exactly: with the usual number of
+//!   players drawing from what people actually picked, how likely each number
+//!   is to be the lowest picked once, or the most picked (see `analyse`).
+//!   That is a range's starting chance.
 //! - The book: points already bet count as evidence, like money moving a
 //!   bookmaker's prices. The more is staked on numbers in a range, the
 //!   likelier it looks and the less it pays. Odds only ever shorten: a range
@@ -20,12 +21,9 @@
 //! little on average and the near-certain ones ("1 or more") pay less than
 //! they cost and are not offered at all.
 
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-
 /// The house keeps this much of fair odds (8%).
 const MARGIN_PCT: i64 = 8;
-/// How many days of picks the simulation replays.
+/// How many days of picks the chances are worked out from.
 pub const HISTORY_DAYS: i64 = 30;
 /// The last this many days of it count twice: the month for breadth, the
 /// week so the odds follow how people pick now.
@@ -34,24 +32,22 @@ pub const RECENT_DAYS: i64 = 7;
 /// a round of 30 players a day wins 3000 at most, however long the odds or
 /// big the stake. The game's size, not a lucky few, sets what is at stake.
 pub const PROFIT_PER_PLAYER: i64 = 100;
-/// Made-up rounds per day's odds.
-const SIMS: u32 = 40_000;
 /// Below this many global picks last week, the 42 round's picks fill in.
 const MIN_PICKS: usize = 30;
-/// Players per simulated round, at most (keeps the work bounded).
+/// Players a round, at most.
 const MAX_PLAYERS: usize = 1000;
 /// Without a week to go on, rounds are imagined this size.
 const DEFAULT_PLAYERS: usize = 10;
 /// Share of every chance taken from a smooth curve instead of the
-/// simulation, so a range nobody picked last week is unlikely, not impossible.
+/// picks, so a range nobody picked last month is unlikely, not impossible.
 const SMOOTH: f64 = 0.05;
 /// That curve's chance of nobody winning.
 const NOBODY_PRIOR: f64 = 0.05;
 /// How many points the starting chances are worth against bets: 1000 points
-/// staked on a range move it as far as the whole simulation pulls.
+/// staked on a range move it as far as all of last month's picks pull.
 const LIQUIDITY: f64 = 1000.0;
 /// No bet is ever certain, nor ever impossible: a long shot is 0.01% at
-/// least, which pays about ×9200. `SIMS` is enough rounds to see that far.
+/// least, which pays about ×9200.
 const P_MIN: f64 = 0.0001;
 const P_MAX: f64 = 0.99;
 /// Odds are offered between these, in hundredths. Anything that would pay
@@ -250,17 +246,18 @@ impl History {
     }
 }
 
-/// Where a day's chances start: how often each number won in the simulated
-/// rounds, before any bets.
+/// Where a day's chances start: each number's chance to win, or to be the
+/// most picked, before any bets.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Base {
-    pub sims: u32,
-    /// (winning number, how many simulated rounds it won), lowest first.
-    winners: Vec<(i64, u32)>,
-    nobody: u32,
-    /// (most picked number, in how many simulated rounds), lowest first.
-    modes: Vec<(i64, u32)>,
-    /// Picks the simulation drew from, and players per simulated round.
+    /// False when there were no picks to go on: the smooth curve alone.
+    pub has_data: bool,
+    /// (number, chance it wins), lowest first.
+    winners: Vec<(i64, f64)>,
+    nobody: f64,
+    /// (number, chance it is the most picked), lowest first.
+    modes: Vec<(i64, f64)>,
+    /// Picks the chances were worked out from, and players a round.
     pub picks: usize,
     pub players: usize,
 }
@@ -272,19 +269,19 @@ impl Base {
         self.players.max(1) as i64 * PROFIT_PER_PLAYER
     }
 
-    /// The starting chance of `market`: mostly the simulation, a little the
-    /// smooth curve; all of the curve if there was nothing to simulate.
+    /// The starting chance of `market`: mostly the picks, a little the
+    /// smooth curve; all of the curve if there were no picks.
     fn chance(&self, market: Market) -> f64 {
-        let (smooth, share) = if self.sims == 0 {
+        let (smooth, share) = if !self.has_data {
             (1.0, 0.0)
         } else {
-            let count = |v: &[(i64, u32)], lo, hi| v.iter().filter(|(n, _)| within(lo, hi, *n)).map(|(_, c)| c).sum();
-            let hits = match market {
+            let sum = |v: &[(i64, f64)], lo, hi| v.iter().filter(|(n, _)| within(lo, hi, *n)).map(|(_, p)| p).sum();
+            let share = match market {
                 Market::Nobody => self.nobody,
-                Market::Range { lo, hi } => count(&self.winners, lo, hi),
-                Market::Most { lo, hi } => count(&self.modes, lo, hi),
+                Market::Range { lo, hi } => sum(&self.winners, lo, hi),
+                Market::Most { lo, hi } => sum(&self.modes, lo, hi),
             };
-            (SMOOTH, f64::from(hits) / f64::from(self.sims))
+            (SMOOTH, share)
         };
         let curve = match market {
             Market::Nobody => NOBODY_PRIOR,
@@ -303,62 +300,124 @@ fn curve(lo: i64, hi: Option<i64>) -> f64 {
     (1.0 / (lo as f64 - 0.5) - top) / 2.0
 }
 
-/// Replays `picks` as `SIMS` rounds of `players` each: every player draws
-/// one of the picks at random, and the lowest number drawn once wins.
-fn simulate(picks: &[i64], players: usize, seed: u64) -> Base {
+/// The chance a pick count with mean `l` is exactly one.
+fn once(l: f64) -> f64 {
+    l * (-l).exp()
+}
+
+/// The chances, worked out exactly rather than played out. `players` people
+/// each pick one of `picks` at random. Each number's count is then near
+/// enough independent, a Poisson count with mean λ = players × its share of
+/// the picks (exact when the day's number of players is itself uncertain,
+/// as it is). So:
+///
+/// - v wins when exactly one picks it and no lower number has exactly one:
+///   P(v) = λᵥ·e^(−λᵥ) × Π over u < v of (1 − λᵤ·e^(−λᵤ)).
+/// - Nobody wins: the same product over every number.
+/// - v is the most picked (ties to the lowest) when, for the count k it
+///   has, every lower number has fewer than k and every higher one at most
+///   k: summed over k. Then scaled to add up to 1, leaving out the day
+///   nobody plays.
+fn analyse(picks: &[i64], players: usize) -> Base {
+    let mut counts: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+    for p in picks {
+        *counts.entry(*p).or_default() += 1;
+    }
+    let n = players as f64;
+    let total = picks.len() as f64;
+    let means: Vec<(i64, f64)> = counts.into_iter().map(|(v, c)| (v, n * c as f64 / total)).collect();
+
+    let mut nobody_yet = 1.0;
+    let mut winners = Vec::with_capacity(means.len());
+    for &(v, l) in &means {
+        let p = once(l);
+        winners.push((v, nobody_yet * p));
+        nobody_yet *= 1.0 - p;
+    }
+    Base { has_data: true, winners, nobody: nobody_yet, modes: modes(&means), picks: picks.len(), players }
+}
+
+/// Each number's chance of being the most picked, ties to the lowest, for
+/// independent Poisson counts with these means (see `analyse`).
+fn modes(means: &[(i64, f64)]) -> Vec<(i64, f64)> {
+    let top = means.iter().map(|m| m.1).fold(0.0, f64::max);
+    // Far enough out that every count's chance beyond is negligible.
+    let kmax = (top + 12.0 * top.sqrt() + 20.0).ceil() as usize;
+    // pmf[u][k] and cdf[u][k] = P(count of u <= k), from logs so a large
+    // mean does not underflow e^(-λ).
+    let mut pmf = vec![vec![0.0; kmax + 1]; means.len()];
+    let mut cdf = vec![vec![0.0; kmax + 1]; means.len()];
+    for (u, &(_, l)) in means.iter().enumerate() {
+        let mut log_p = -l;
+        let mut acc = 0.0;
+        for k in 0..=kmax {
+            if k > 0 {
+                log_p += l.ln() - (k as f64).ln();
+            }
+            pmf[u][k] = log_p.exp();
+            acc += pmf[u][k];
+            cdf[u][k] = acc.min(1.0);
+        }
+    }
+    let m = means.len();
+    let mut out = vec![0.0; m];
+    let mut right = vec![1.0; m + 1];
+    for k in 1..=kmax {
+        // right[v] = product over u > v of P(count of u <= k).
+        right[m] = 1.0;
+        for u in (0..m).rev() {
+            right[u] = right[u + 1] * cdf[u][k];
+        }
+        // Lower numbers must have fewer than k: walked up from the left.
+        let mut left = 1.0;
+        for v in 0..m {
+            out[v] += pmf[v][k] * left * right[v + 1];
+            left *= cdf[v][k - 1];
+        }
+    }
+    let sum: f64 = out.iter().sum();
+    means.iter().zip(out).map(|(&(v, _), p)| (v, if sum > 0.0 { p / sum } else { 0.0 })).collect()
+}
+
+/// What the old way did, for checking the formula in tests: play `rounds`
+/// rounds of `players` drawing from `picks`, count who won and what was
+/// most picked.
+#[cfg(test)]
+fn played_out(picks: &[i64], players: usize, rounds: u32) -> (std::collections::HashMap<Option<i64>, f64>, std::collections::HashMap<i64, f64>) {
+    use rand::{Rng, SeedableRng};
+    let mut rng = rand::rngs::StdRng::seed_from_u64(7);
     let mut values: Vec<i64> = picks.to_vec();
     values.sort_unstable();
     values.dedup();
-    let index: Vec<usize> = picks.iter().map(|p| values.binary_search(p).unwrap_or(0)).collect();
-    let mut rng = StdRng::seed_from_u64(seed);
-    let mut counts = vec![0u32; values.len()];
-    let mut wins = vec![0u32; values.len()];
-    let mut modes = vec![0u32; values.len()];
-    let mut nobody = 0;
-    for _ in 0..SIMS {
-        counts.iter_mut().for_each(|c| *c = 0);
+    let (mut wins, mut most) = (std::collections::HashMap::new(), std::collections::HashMap::new());
+    for _ in 0..rounds {
+        let mut counts = vec![0u32; values.len()];
         for _ in 0..players {
-            counts[index[rng.gen_range(0..index.len())]] += 1;
+            let p = picks[rng.gen_range(0..picks.len())];
+            counts[values.binary_search(&p).unwrap()] += 1;
         }
-        match counts.iter().position(|&c| c == 1) {
-            Some(i) => wins[i] += 1,
-            None => nobody += 1,
-        }
-        // The most picked; on a tie the lowest, as values are in order.
-        let top = counts.iter().copied().max().unwrap_or(0);
-        if let Some(i) = counts.iter().position(|&c| c == top) {
-            modes[i] += 1;
-        }
+        let w = counts.iter().position(|&c| c == 1).map(|i| values[i]);
+        *wins.entry(w).or_insert(0.0) += 1.0 / f64::from(rounds);
+        let top = *counts.iter().max().unwrap();
+        let i = counts.iter().position(|&c| c == top).unwrap();
+        *most.entry(values[i]).or_insert(0.0) += 1.0 / f64::from(rounds);
     }
-    Base {
-        sims: SIMS,
-        winners: values.iter().copied().zip(wins).filter(|(_, n)| *n > 0).collect(),
-        modes: values.into_iter().zip(modes).filter(|(_, n)| *n > 0).collect(),
-        nobody,
-        picks: picks.len(),
-        players,
-    }
+    (wins, most)
 }
 
 /// The day's starting chances, from last month's global picks; if there were
 /// few, the 42 round's picks fill in. With no picks at all, the smooth
-/// curve alone. `seed` makes a day's simulation the same every time it is
-/// worked out.
-pub fn base(global: &History, vienna: &History, seed: u64) -> Base {
+/// curve alone.
+pub fn base(global: &History, vienna: &History) -> Base {
     let mut picks = global.picks.clone();
     if picks.len() < MIN_PICKS {
         picks.extend(&vienna.picks);
     }
     if picks.is_empty() {
-        return Base { sims: 0, winners: Vec::new(), nobody: 0, modes: Vec::new(), picks: 0, players: DEFAULT_PLAYERS };
+        return Base { has_data: false, winners: Vec::new(), nobody: 0.0, modes: Vec::new(), picks: 0, players: DEFAULT_PLAYERS };
     }
     let players = global.players().or(vienna.players()).unwrap_or(DEFAULT_PLAYERS).clamp(2, MAX_PLAYERS);
-    simulate(&picks, players, seed)
-}
-
-/// A seed from a round's key, the same on every run.
-pub fn seed(round: &str) -> u64 {
-    round.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3))
+    analyse(&picks, players)
 }
 
 /// The chance of `market` now: the starting chance, moved by the points
@@ -465,7 +524,7 @@ mod tests {
         for (v, n) in [(1, 30), (2, 25), (3, 22), (4, 18), (5, 15), (7, 14), (8, 9), (11, 8), (13, 9), (17, 7), (23, 5), (42, 10), (69, 4), (100, 3)] {
             picks.extend(std::iter::repeat_n(v, n));
         }
-        base(&week(&picks, 7), &History::default(), 1)
+        base(&week(&picks, 7), &History::default())
     }
 
     #[test]
@@ -544,7 +603,7 @@ mod tests {
         for most in [1, 2, 5, 9, 10, 49, 50, 9999] {
             assert_eq!(m.iter().filter(|x| outcome(**x, Outcome { winner: None, most: Some(most) })).count(), 1, "{most}");
         }
-        for base in [crowd(), base(&History::default(), &History::default(), 1)] {
+        for base in [crowd(), base(&History::default(), &History::default())] {
             let sum: f64 = b.iter().map(|m| base.chance(*m)).sum();
             assert!((sum - 1.0).abs() < 1e-9, "{sum}");
             let sum: f64 = m.iter().map(|m| base.chance(*m)).sum();
@@ -572,47 +631,53 @@ mod tests {
     }
 
     #[test]
-    fn the_simulation_counts_the_most_picked_number_lowest_on_a_tie() {
-        // Everyone on 4: 4 is the most picked every time.
-        let b = simulate(&[4], 5, 7);
-        assert!(b.chance(r(4, Some(4)).most()) > 0.9);
-        // Two players on 2 and 9: a tie, so the lowest, 2, whenever they differ.
-        let b = simulate(&[2, 9], 2, 7);
-        let two = b.chance(r(2, Some(2)).most());
-        assert!((0.7..0.8).contains(&two), "2 unless both pick 9: {two}");
+    fn the_formula_by_hand() {
+        // Two players picking 1 or 2: each number's count has mean 1, and
+        // exactly one is e^-1 = 0.368. 1 wins whenever it has exactly one;
+        // 2 when it has exactly one and 1 does not.
+        let b = analyse(&[1, 2], 2);
+        let one = (-1.0f64).exp();
+        assert!((b.winners[0].1 - one).abs() < 1e-12);
+        assert!((b.winners[1].1 - (1.0 - one) * one).abs() < 1e-12);
+        assert!((b.nobody - (1.0 - one) * (1.0 - one)).abs() < 1e-12);
+        let total: f64 = b.winners.iter().map(|w| w.1).sum::<f64>() + b.nobody;
+        assert!((total - 1.0).abs() < 1e-12, "every outcome once");
+        // Everyone on one number: that number is the most picked, always,
+        // and it almost never wins.
+        let b = analyse(&[4], 5);
+        assert!((b.modes[0].1 - 1.0).abs() < 1e-9);
+        assert!(b.nobody > 0.95);
     }
 
     #[test]
-    fn the_simulation_finds_the_lowest_unique_number() {
-        // Two players, each picking 1 or 2: they match half the time.
-        let b = simulate(&[1, 2], 2, 7);
-        let p1 = b.chance(r(1, Some(1)));
-        let none = b.chance(Market::Nobody);
-        assert!((p1 - 0.5).abs() < 0.05, "{p1}");
-        assert!((none - 0.5).abs() < 0.05, "{none}");
-        assert!(b.chance(r(2, Some(2))) < 0.02, "2 only wins under 1, which never happens alone");
-        // Everyone on one number: nobody ever wins.
-        let b = simulate(&[4, 4, 4], 5, 7);
-        assert!(b.chance(Market::Nobody) > 0.9);
+    fn the_formula_agrees_with_playing_it_out() {
+        // A realistic crowd of 50 a round, checked against 20 000 rounds
+        // actually played: the formula matches within a couple of points.
+        let mut picks = Vec::new();
+        for (v, n) in [(1, 30), (2, 25), (3, 22), (4, 18), (5, 15), (7, 14), (8, 9), (11, 8), (13, 9), (17, 7), (23, 5), (42, 10), (69, 4), (100, 3)] {
+            picks.extend(std::iter::repeat_n(v, n));
+        }
+        let b = analyse(&picks, 50);
+        let (wins, most) = played_out(&picks, 50, 20_000);
+        for (lo, hi) in [(1, 3), (4, 9), (10, 19), (20, 1000)] {
+            let formula: f64 = b.winners.iter().filter(|w| (lo..=hi).contains(&w.0)).map(|w| w.1).sum();
+            let played: f64 = wins.iter().filter(|(w, _)| w.is_some_and(|w| (lo..=hi).contains(&w))).map(|(_, p)| p).sum();
+            assert!((formula - played).abs() < 0.03, "winner {lo}-{hi}: formula {formula:.3}, played {played:.3}");
+        }
+        let played_nobody = wins.get(&None).copied().unwrap_or(0.0);
+        assert!((b.nobody - played_nobody).abs() < 0.03, "nobody: {} vs {played_nobody}", b.nobody);
+        for v in [1, 2, 3] {
+            let formula = b.modes.iter().find(|m| m.0 == v).map_or(0.0, |m| m.1);
+            let played = most.get(&v).copied().unwrap_or(0.0);
+            assert!((formula - played).abs() < 0.05, "most picked {v}: formula {formula:.3}, played {played:.3}");
+        }
+        let all: f64 = b.modes.iter().map(|m| m.1).sum();
+        assert!((all - 1.0).abs() < 1e-9);
     }
 
     #[test]
-    fn a_day_simulates_the_same_every_time() {
+    fn the_same_picks_give_the_same_chances_every_time() {
         assert_eq!(crowd(), crowd());
-        assert_ne!(seed("2026-10-21"), seed("2026-10-22"));
-    }
-
-    #[test]
-    fn few_global_picks_borrow_the_42_round_and_none_fall_back_to_the_curve() {
-        let global = week(&[3, 3, 5], 1);
-        let vienna = week(&vec![2; 40], 4);
-        let b = base(&global, &vienna, 1);
-        assert_eq!((b.picks, b.players), (43, 3), "picks pooled, players from the global week");
-        let b = base(&History::default(), &vienna, 1);
-        assert_eq!(b.players, 10, "players from the 42 week");
-        let b = base(&History::default(), &History::default(), 1);
-        assert_eq!(b.sims, 0);
-        assert!(b.chance(r(1, Some(1))) > b.chance(r(2, Some(2))), "low numbers likelier");
     }
 
     #[test]
@@ -702,10 +767,10 @@ mod tests {
 
     #[test]
     fn the_biggest_win_grows_with_the_game() {
-        let small = base(&week(&[1, 2, 3, 4, 5, 6], 1), &History::default(), 1);
-        let big = base(&week(&vec![2; 300], 3), &History::default(), 1);
+        let small = base(&week(&[1, 2, 3, 4, 5, 6], 1), &History::default());
+        let big = base(&week(&vec![2; 300], 3), &History::default());
         assert_eq!(small.max_profit(), 6 * PROFIT_PER_PLAYER);
         assert_eq!(big.max_profit(), 100 * PROFIT_PER_PLAYER);
-        assert_eq!(base(&History::default(), &History::default(), 1).max_profit(), 10 * PROFIT_PER_PLAYER, "no history: a round of ten");
+        assert_eq!(base(&History::default(), &History::default()).max_profit(), 10 * PROFIT_PER_PLAYER, "no history: a round of ten");
     }
 }

@@ -28,7 +28,7 @@ pub struct AppState {
     /// Rendered link-preview images of closed rounds.
     pub og: Arc<crate::og::Cache>,
     /// Where today's betting odds start, by the open round it was worked
-    /// out for: the simulation runs once a day.
+    /// out for: worked out once a day.
     pub odds_base: Arc<std::sync::Mutex<Option<TodaysBase>>>,
     /// Seconds added to the wall clock, so a test instance can be pushed past
     /// a 12:42 deadline without waiting for one. Always zero unless an admin

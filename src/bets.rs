@@ -4,7 +4,7 @@
 //! that, a board of ready-made ranges, their bets on the open round, and
 //! their slips from the last fortnight.
 //!
-//! Odds start from last week's picks, simulated once per open round and
+//! Odds start from last month's picks, worked out once per open round and
 //! kept until the next one opens, and move with the points already bet (see
 //! `odds`). Today's guesses never go into them: they are secret until 12:42.
 
@@ -28,7 +28,7 @@ use crate::templates::{self, BetsTemplate, Notice, OfferView, QuoteTemplate, Quo
 const SLIP_DAYS: i64 = 14;
 
 /// Where the open round's odds start: from the cache if it was worked out
-/// for this round, else simulated now from the week before and kept.
+/// for this round, else worked out now from the month before and kept.
 pub async fn todays_base(state: &AppState) -> Result<Arc<Base>, AppError> {
     let round = Round::current(state.now());
     let open = round.key();
@@ -41,9 +41,7 @@ pub async fn todays_base(state: &AppState) -> Result<Arc<Base>, AppError> {
     let (from, recent) = (day(odds::HISTORY_DAYS), day(odds::RECENT_DAYS));
     let global = History::from_tallies(&db::range_tallies(&state.db, Pool::Global, &from, &open).await?, &recent);
     let vienna = History::from_tallies(&db::range_tallies(&state.db, Pool::Vienna, &from, &open).await?, &recent);
-    let seed = odds::seed(&open);
-    // A few thousand made-up rounds: off the async threads.
-    let base = Arc::new(tokio::task::spawn_blocking(move || odds::base(&global, &vienna, seed)).await?);
+    let base = Arc::new(odds::base(&global, &vienna));
     *state.odds_base.lock().unwrap_or_else(|e| e.into_inner()) = Some((open, base.clone()));
     Ok(base)
 }
@@ -782,7 +780,7 @@ mod tests {
         let base = todays_base(&state).await.unwrap();
         // The last week twice (280), the older day once (10); players a day
         // from the real guesses: 150 over 8 rounds.
-        assert_eq!((base.picks, base.players, base.sims > 0), (290, 19, true));
+        assert_eq!((base.picks, base.players, base.has_data), (290, 19, true));
         assert_eq!(base.max_profit(), 19 * odds::PROFIT_PER_PLAYER);
         let html = bets_page(&state, None, None).await;
         assert!(!html.contains("replayed") && !html.contains("on the book"), "no footnotes under the board");
@@ -810,7 +808,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_simulation_runs_once_a_round() {
+    async fn the_odds_are_worked_out_once_a_round() {
         let (_t, state) = app(&[]).await;
         let first = todays_base(&state).await.unwrap();
         // Rounds closing in the past do not change today's starting odds once set.
