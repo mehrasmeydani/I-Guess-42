@@ -953,21 +953,7 @@ pub async fn clusters(db: &Db, min: i64) -> Result<Vec<Cluster>> {
     .bind(min)
     .fetch_all(db)
     .await?;
-    // Pairs joined up into groups: a, b and b, c are one group of three.
-    let mut groups: Vec<(Vec<String>, i64)> = Vec::new();
-    for (a, b, rounds) in pairs {
-        let hit: Vec<usize> = (0..groups.len()).filter(|&i| groups[i].0.contains(&a) || groups[i].0.contains(&b)).collect();
-        let mut merged = (vec![a, b], rounds);
-        for &i in hit.iter().rev() {
-            let (names, r) = groups.remove(i);
-            merged.0.extend(names);
-            merged.1 = merged.1.max(r);
-        }
-        merged.0.sort();
-        merged.0.dedup();
-        groups.push(merged);
-    }
-    for (names, rounds) in groups {
+    for (names, rounds) in join_pairs(pairs) {
         out.push(Cluster {
             why: format!("guess within ten seconds of each other, in {rounds} rounds or more this month"),
             usernames: names,
@@ -975,8 +961,165 @@ pub async fn clusters(db: &Db, min: i64) -> Result<Vec<Cluster>> {
         });
     }
 
+    // Number killers: the same two accounts the only two on a number below
+    // the winner's, round after round. Two picks are all it takes to kill a
+    // number, so that is what a blocking crowd spends; people who like 1
+    // collide in crowds, not as the same pair alone. Network-blind, so it
+    // catches accounts behind different connections too.
+    let killers: Vec<(String, String, i64, String)> = sqlx::query_as(
+        "WITH picks AS (
+             SELECT round_date, value, COUNT(*) AS n FROM global_guesses
+             WHERE participates = 1 AND round_date >= ?1 GROUP BY round_date, value
+         )
+         SELECT a1.username, a2.username, COUNT(*) AS rounds, group_concat(DISTINCT wa.username)
+         FROM global_guesses g1
+         JOIN global_guesses g2 ON g2.round_date = g1.round_date AND g2.value = g1.value
+                               AND g2.user_id > g1.user_id AND g2.participates = 1
+         JOIN picks c ON c.round_date = g1.round_date AND c.value = g1.value AND c.n = 2
+         JOIN pots p ON p.round_date = g1.round_date AND p.voided = 0
+         JOIN global_guesses w ON w.round_date = p.round_date AND w.user_id = p.winner_id AND w.value > g1.value
+         JOIN accounts wa ON wa.id = w.user_id
+         JOIN accounts a1 ON a1.id = g1.user_id
+         JOIN accounts a2 ON a2.id = g2.user_id
+         WHERE g1.round_date >= ?1 AND g1.participates = 1
+         GROUP BY g1.user_id, g2.user_id
+         HAVING rounds >= ?2",
+    )
+    .bind(&month_ago[..10])
+    .bind(min)
+    .fetch_all(db)
+    .await?;
+    let helped: std::collections::HashMap<(String, String), String> =
+        killers.iter().map(|(a, b, _, w)| ((a.clone(), b.clone()), w.clone())).collect();
+    for (names, rounds) in join_pairs(killers.iter().map(|(a, b, r, _)| (a.clone(), b.clone(), *r)).collect()) {
+        let mut winners: Vec<&str> = helped
+            .iter()
+            .filter(|((a, _), _)| names.contains(a))
+            .flat_map(|(_, w)| w.split(','))
+            .collect();
+        winners.sort_unstable();
+        winners.dedup();
+        out.push(Cluster {
+            why: format!(
+                "kill numbers in pairs: alone together on a number below the winner, {rounds} rounds or more this month (winners: {})",
+                winners.join(", ")
+            ),
+            usernames: names,
+            serious: true,
+        });
+    }
+
+    // Signing in together: different accounts starting sessions within ten
+    // seconds of each other, on several days. One person switching between
+    // tabs does not; one script working through its accounts does.
+    let logins: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT a1.username, a2.username, COUNT(DISTINCT substr(s1.created_at, 1, 10)) AS days
+         FROM account_sessions s1
+         JOIN account_sessions s2 ON s2.account_id > s1.account_id
+              AND s2.created_at >= ?1
+              AND abs(julianday(s1.created_at) - julianday(s2.created_at)) * 86400 <= 10
+         JOIN accounts a1 ON a1.id = s1.account_id
+         JOIN accounts a2 ON a2.id = s2.account_id
+         WHERE s1.created_at >= ?1
+         GROUP BY s1.account_id, s2.account_id
+         HAVING days >= ?2",
+    )
+    .bind(&month_ago)
+    .bind(min)
+    .fetch_all(db)
+    .await?;
+    for (names, days) in join_pairs(logins) {
+        out.push(Cluster {
+            why: format!("sign in within ten seconds of each other, on {days} days or more this month"),
+            usernames: names,
+            serious: true,
+        });
+    }
+
+    // Clockwork: guessing at the same time of day, day after day, as a
+    // scheduled script does. Alone it may be a habit; several accounts on
+    // the same clock are one script.
+    let times: Vec<(String, String)> = sqlx::query_as(
+        "SELECT a.username, g.submitted_at FROM global_guesses g
+         JOIN accounts a ON a.id = g.user_id
+         JOIN pots p ON p.round_date = g.round_date
+         WHERE g.round_date >= ?1 AND g.participates = 1",
+    )
+    .bind(&month_ago[..10])
+    .fetch_all(db)
+    .await?;
+    let mut by_account: std::collections::BTreeMap<String, Vec<i64>> = std::collections::BTreeMap::new();
+    for (name, at) in times {
+        if let Ok(t) = DateTime::parse_from_rfc3339(&at) {
+            by_account.entry(name).or_default().push(i64::from(chrono::Timelike::num_seconds_from_midnight(&t.with_timezone(&Utc))));
+        }
+    }
+    let mut clocks: Vec<(String, i64)> = by_account
+        .into_iter()
+        .filter_map(|(name, secs)| clockwork(&secs, CLOCK_WINDOW, CLOCK_DAYS).map(|at| (name, at)))
+        .collect();
+    clocks.sort_by_key(|c| c.1);
+    let mut i = 0;
+    while i < clocks.len() {
+        let mut j = i;
+        while j + 1 < clocks.len() && clocks[j + 1].1 - clocks[i].1 <= 60 {
+            j += 1;
+        }
+        let at = clocks[i].1;
+        let names: Vec<String> = clocks[i..=j].iter().map(|c| c.0.clone()).collect();
+        out.push(Cluster {
+            why: format!(
+                "guess{} at about {:02}:{:02} UTC every day, {CLOCK_DAYS} days or more this month",
+                if names.len() > 1 { "" } else { "es" },
+                at / 3600,
+                at % 3600 / 60
+            ),
+            serious: names.len() > 1,
+            usernames: names,
+        });
+        i = j + 1;
+    }
+
     out.sort_by_key(|c| !c.serious);
     Ok(out)
+}
+
+/// Guesses within this many seconds of the same time of day...
+const CLOCK_WINDOW: i64 = 120;
+/// ...on at least this many days make an account's guessing clockwork.
+const CLOCK_DAYS: usize = 5;
+
+/// If at least `days` of these times of day (seconds since midnight) fall
+/// within `window` seconds of each other, the start of that window.
+/// Midnight wraps: 23:59 and 00:01 are two minutes apart.
+fn clockwork(secs: &[i64], window: i64, days: usize) -> Option<i64> {
+    const DAY: i64 = 24 * 60 * 60;
+    let mut s = secs.to_vec();
+    s.sort_unstable();
+    let n = s.len();
+    let doubled: Vec<i64> = s.iter().copied().chain(s.iter().map(|t| t + DAY)).collect();
+    (0..n)
+        .find(|&i| doubled[i..i + n].iter().take_while(|t| **t - doubled[i] <= window).count() >= days)
+        .map(|i| s[i])
+}
+
+/// Pairs joined up into groups: a, b and b, c are one group of three, with
+/// the largest count among its pairs.
+fn join_pairs(pairs: Vec<(String, String, i64)>) -> Vec<(Vec<String>, i64)> {
+    let mut groups: Vec<(Vec<String>, i64)> = Vec::new();
+    for (a, b, count) in pairs {
+        let hit: Vec<usize> = (0..groups.len()).filter(|&i| groups[i].0.contains(&a) || groups[i].0.contains(&b)).collect();
+        let mut merged = (vec![a, b], count);
+        for &i in hit.iter().rev() {
+            let (names, c) = groups.remove(i);
+            merged.0.extend(names);
+            merged.1 = merged.1.max(c);
+        }
+        merged.0.sort();
+        merged.0.dedup();
+        groups.push(merged);
+    }
+    groups
 }
 
 // ------------------------------------------------------------- sessions
@@ -2635,6 +2778,18 @@ pub mod test_support {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn clockwork_is_the_same_time_of_day_on_enough_days() {
+        let at = |h: i64, m: i64, s: i64| h * 3600 + m * 60 + s;
+        let script = [at(9, 0, 5), at(9, 0, 40), at(9, 1, 2), at(9, 0, 15), at(9, 1, 30), at(18, 0, 0)];
+        assert_eq!(super::clockwork(&script, 120, 5), Some(at(9, 0, 5)));
+        let person = [at(8, 10, 0), at(12, 40, 0), at(9, 5, 0), at(21, 0, 0), at(13, 13, 0), at(9, 30, 0)];
+        assert_eq!(super::clockwork(&person, 120, 5), None);
+        // Around midnight it wraps.
+        let late = [at(23, 59, 30), at(0, 0, 10), at(23, 59, 50), at(0, 0, 40), at(0, 1, 0)];
+        assert_eq!(super::clockwork(&late, 120, 5), Some(at(23, 59, 30)));
+    }
     use super::test_support::*;
     use super::*;
 

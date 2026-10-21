@@ -372,6 +372,62 @@ mod tests {
         assert!(found.first().is_some_and(|c| c.serious), "serious ones first");
     }
 
+    #[tokio::test]
+    async fn number_killing_pairs_logins_together_and_clockwork_are_flagged() {
+        let (t, _state) = setup(&["megardes"]).await;
+        let mut ids = std::collections::HashMap::new();
+        for name in ["k1", "k2", "win", "fan1", "fan2", "fan3", "bot1", "bot2"] {
+            sqlx::query("INSERT INTO accounts (username, created_at, last_seen_at) VALUES (?1, 'x', 'x')")
+                .bind(name).execute(&t.db).await.unwrap();
+            let (id,): (i64,) = sqlx::query_as("SELECT id FROM accounts WHERE username = ?1").bind(name).fetch_one(&t.db).await.unwrap();
+            ids.insert(name, id);
+        }
+        let now = chrono::Utc::now();
+        let day = |back: i64| (now - chrono::Duration::days(back)).format("%Y-%m-%d").to_string();
+        // Three rounds: k1 and k2 alone on 2, the three fans together on 1,
+        // win takes 5. Different networks, different times: only the pair is
+        // a pattern - the fans are a crowd, not a pair.
+        for back in 2..=4 {
+            let round = day(back);
+            for (who, value) in [("k1", 2), ("k2", 2), ("fan1", 1), ("fan2", 1), ("fan3", 1), ("win", 5)] {
+                db::insert_guess(&t.db, Pool::Global, &round, ids[who], value, true).await.unwrap();
+                // Spread out over the day, so nothing looks like lockstep.
+                let at = (now - chrono::Duration::days(back) + chrono::Duration::minutes(ids[who] * 47)).to_rfc3339();
+                sqlx::query("UPDATE global_guesses SET submitted_at = ?1 WHERE round_date = ?2 AND user_id = ?3")
+                    .bind(at).bind(&round).bind(ids[who]).execute(&t.db).await.unwrap();
+            }
+            db::settle_round(&t.db, &round).await.unwrap();
+        }
+        // bot1 and bot2 sign in within seconds of each other on three days,
+        // and guess at 07:00 every day for five.
+        for back in 2..=6 {
+            let morning = (now - chrono::Duration::days(back)).date_naive().and_hms_opt(7, 0, 0).unwrap().and_utc();
+            for (who, offset) in [("bot1", 0), ("bot2", 4)] {
+                let at = (morning + chrono::Duration::seconds(offset)).to_rfc3339();
+                if back <= 4 {
+                    sqlx::query("INSERT INTO account_sessions (token, account_id, created_at, expires_at) VALUES (?1, ?2, ?3, '2099-01-01T00:00:00Z')")
+                        .bind(format!("{who}{back}")).bind(ids[who]).bind(&at).execute(&t.db).await.unwrap();
+                }
+                let round = day(back + 10);
+                db::insert_guess(&t.db, Pool::Global, &round, ids[who], 30 + offset, true).await.unwrap();
+                sqlx::query("UPDATE global_guesses SET submitted_at = ?1 WHERE round_date = ?2 AND user_id = ?3")
+                    .bind(&at).bind(&round).bind(ids[who]).execute(&t.db).await.unwrap();
+            }
+            db::settle_round(&t.db, &day(back + 10)).await.unwrap();
+        }
+
+        let found = db::clusters(&t.db, 3).await.unwrap();
+        let with = |text: &str| found.iter().find(|c| c.why.contains(text)).unwrap_or_else(|| panic!("{text}: {found:?}"));
+        let killers = with("kill numbers in pairs");
+        assert_eq!(killers.usernames, ["k1", "k2"]);
+        assert!(killers.serious && killers.why.contains("winners: win"));
+        assert!(!found.iter().any(|c| c.usernames.contains(&"fan1".to_string())), "a crowd on 1 is not a pattern: {found:?}");
+        assert_eq!(with("sign in within ten seconds").usernames, ["bot1", "bot2"]);
+        let clock = with("at about 07:00 UTC every day");
+        assert_eq!(clock.usernames, ["bot1", "bot2"]);
+        assert!(clock.serious, "two accounts on one clock");
+    }
+
     async fn page_of(cfg: crate::config::Config, imprint_page: bool) -> String {
         let (_t, state, _) = app_with(cfg).await;
         let jar = axum_extra::extract::cookie::CookieJar::new();
