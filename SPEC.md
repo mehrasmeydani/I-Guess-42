@@ -659,7 +659,8 @@ days before it (average chance given to what then happened): the formula
 11.5%, a blend with past winners worse (10.2-11.3%), the old curve 8.1%.
 
 The ready-made board - exactly 1, 2, 3, 4–5, 6–9, 10–19, 20–49, 50 or more,
-nobody wins - covers every outcome once, so its chances add up to 100%.
+nobody wins - covers every outcome once, so its chances add up to 100%,
+or a little more where the record (step 6) lifts a range.
 
 ### 9.3 The book: odds move as people bet
 
