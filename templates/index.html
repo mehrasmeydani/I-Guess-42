@@ -81,7 +81,7 @@
         <p class="sealed-value">{{ g }}</p>
         <span class="stamp">sealed</span>
       </div>
-      <p class="locked-line">reveal {{ close_time }} &middot; <span class="countdown-mirror">{{ time_left }}</span> &middot; <a href="{{ calendar_href }}" download>add to calendar</a></p>
+      <p class="locked-line">reveal {{ close_time }} &middot; <a href="{{ calendar_href }}" download>add to calendar</a></p>
     {% when None %}
       {% if signed_in && !can_play %}
         <h2 class="section-title">confirm your email to play</h2>

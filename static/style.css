@@ -208,7 +208,7 @@ a.tag { color: var(--fg); text-decoration: underline; }
 
 /* The round as the original showed it: a rule with the state, the big
    clock, a text bar, and the figures. The premise sits under the number box. */
-.premise { margin: 40px 0 0; color: var(--hi); font-size: clamp(var(--fs-4), 10vw, var(--fs-5)); font-weight: 700; line-height: 1.25; max-width: 32ch; text-wrap: balance; }
+.premise { margin: 40px 0 0; color: var(--hi); font-size: var(--fs-3); font-weight: 700; line-height: 1.25; max-width: 32ch; text-wrap: balance; }
 /* The original's clock, ticking with seconds: big, sized by the viewport so
    "23:59:59" still fits a 320px screen. */
 .countdown {
@@ -984,7 +984,7 @@ details.expand[open] summary .when-open { display: inline; }
   .daynav-here { grid-column: 1 / -1; grid-row: 1; }
   /* The status block shrinks so the number box is in view without
      scrolling on a 375x812 phone (R4.2). */
-  .premise { margin-top: 32px; font-size: var(--fs-3); }
+  .premise { margin-top: 32px; font-size: var(--fs-2); }
   .sec { margin-top: 32px; }
   .auth { margin-top: 32px; }
   .auth-card { padding: 24px 20px; }

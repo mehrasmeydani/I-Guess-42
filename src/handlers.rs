@@ -2239,7 +2239,8 @@ mod round_page_tests {
         assert!(html.contains("you're in"));
         assert!(html.contains(r#"<div class="sealed fresh">"#), "stamped on just now");
         assert!(html.contains(r#"<span class="stamp">sealed</span>"#));
-        assert!(html.contains("reveal 12:42 &middot; <span class=\"countdown-mirror\">"), "{html}");
+        assert!(html.contains("reveal 12:42 &middot; <a href="), "{html}");
+        assert!(!html.contains("countdown-mirror"), "one clock: the one at the top");
         assert!(html.contains(&format!(r#"<a href="/g/round/{round}.ics" download>add to calendar</a>"#)));
         assert!(!html.contains(r#"id="guess""#), "no input once locked");
 

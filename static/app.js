@@ -14,7 +14,6 @@
   var bar = document.querySelector('.meter');
   var barText = document.querySelector('.meter-bar');
   var pctLabel = document.querySelector('.meter-pct');
-  var mirrors = document.querySelectorAll('.countdown-mirror');
   var stateEl = document.querySelector('#round-h .state');
   // The server paints 30 cells, which fit the narrowest phone; fit() makes
   // it as many as the row holds. The bar is monospace text, so one cell is
@@ -67,7 +66,6 @@
     var ms = remaining();
     var text = short(ms);
     el.textContent = text;
-    for (var i = 0; i < mirrors.length; i++) mirrors[i].textContent = text;
     // What is read out and the bar only change once a minute.
     var minute = Math.floor(ms / 60000);
     if (minute !== lastMinute) {
