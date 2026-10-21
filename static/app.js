@@ -365,4 +365,18 @@
   var kinds = form.querySelectorAll('input[name=on]');
   for (var k = 0; k < kinds.length; k++) kinds[k].addEventListener('change', update);
   form.addEventListener('submit', function (e) { e.preventDefault(); clearTimeout(timer); update(); });
+
+  // What the stake typed pays if the bet wins, stake included, as
+  // odds::payout works it out: floor(stake * odds / 100). On the box, not
+  // the input, since the quote inside is swapped out as the range changes.
+  box.addEventListener('input', function (e) {
+    if (e.target.name !== 'stake') return;
+    var pays = box.querySelector('.pays');
+    if (!pays) return;
+    var stake = parseInt(e.target.value.replace(/[^0-9]/g, ''), 10);
+    var odds = parseInt(pays.dataset.odds, 10);
+    if (!(stake > 0) || !(odds > 0)) { pays.textContent = '\u2013'; return; }
+    var back = Math.floor(stake * odds / 100);
+    pays.innerHTML = back + ' <small>+' + (back - stake) + '</small>';
+  });
 })();

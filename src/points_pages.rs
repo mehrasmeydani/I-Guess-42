@@ -104,11 +104,25 @@ async fn leaderboard_in(
     };
     let open = Round::current(state.now()).key();
     let named = crate::handlers::names_visible(pool, viewer.as_ref());
-    let wins = db::leaderboard(&state.db, pool, &open, BOARD)
-        .await?
+    // Your own row is marked: by account in the global round, by 42 login
+    // in the 42 one.
+    let me_global = viewer.as_ref().map(|v| v.account.username.clone());
+    let me_42 = viewer.as_ref().and_then(|v| v.intra.as_ref().map(|u| u.login.clone()));
+    let wins: Vec<db::LeaderboardRow> = db::leaderboard(&state.db, pool, &open, BOARD).await?;
+    let top_wins = wins.first().map_or(1, |r| r.wins.max(1));
+    let wins = wins
         .into_iter()
-        .map(|r| templates::LeaderView::new(r, named))
+        .map(|r| {
+            let me = match pool {
+                Pool::Global => me_global.as_deref() == Some(r.login.as_str()),
+                Pool::Vienna => me_42.as_deref() == Some(r.login.as_str()),
+            };
+            let pct = r.wins * 100 / top_wins;
+            let l = templates::LeaderView::new(r, named);
+            PointsBoardRow { name: l.login, title: l.display_name, points: l.wins.to_string(), pct, me }
+        })
         .collect();
+    let top_points = rows.first().map_or(1, |r| r.points.max(1));
     Ok(templates::render(&BoardTemplate {
         pool,
         test_mode: state.cfg.test_env(),
@@ -118,6 +132,9 @@ async fn leaderboard_in(
         rows: rows
             .into_iter()
             .map(|r| PointsBoardRow {
+                me: me_global.as_deref() == Some(r.username.as_str()),
+                pct: (r.points.max(0) * 100 / top_points).clamp(0, 100),
+                title: r.username.clone(),
                 name: r.username,
                 points: if week && r.points > 0 {
                     format!("+{}", templates::group_digits(r.points))

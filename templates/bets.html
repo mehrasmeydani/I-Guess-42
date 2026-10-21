@@ -42,13 +42,13 @@
   <h2 class="section-title" id="board-h">where the winner lands <span class="dim scope-inline">tap one to bet</span></h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="where the winner lands">
   <table class="grid markets">
-    <thead><tr><th scope="col">range</th><th scope="col" class="num">chance</th><th scope="col" class="num">odds</th></tr></thead>
+    <thead><tr><th scope="col">range</th><th scope="col">chance</th><th scope="col" class="num">odds</th></tr></thead>
     <tbody>
       {% for o in board %}
         <tr{% if o.on %} class="on"{% endif %}>
           <td><a href="/g/bets?m={{ o.key }}">{{ o.label }}</a></td>
-          <td class="num dim">{{ o.chance }}%</td>
-          <td class="num b">{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
+          <td class="barcell chance"><span class="minibar" style="--w: {{ o.pct }}%"></span><b>{{ o.chance }}%</b></td>
+          <td class="num odds">{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
         </tr>
       {% endfor %}
     </tbody>
@@ -61,13 +61,13 @@
   <h2 class="section-title" id="most-h">the most picked number <span class="dim scope-inline">tap one to bet</span></h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="the most picked number">
   <table class="grid markets">
-    <thead><tr><th scope="col">range</th><th scope="col" class="num">chance</th><th scope="col" class="num">odds</th></tr></thead>
+    <thead><tr><th scope="col">range</th><th scope="col">chance</th><th scope="col" class="num">odds</th></tr></thead>
     <tbody>
       {% for o in board_most %}
         <tr{% if o.on %} class="on"{% endif %}>
           <td><a href="/g/bets?m={{ o.key }}">{{ o.label }}</a></td>
-          <td class="num dim">{{ o.chance }}%</td>
-          <td class="num b">{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
+          <td class="barcell chance"><span class="minibar" style="--w: {{ o.pct }}%"></span><b>{{ o.chance }}%</b></td>
+          <td class="num odds">{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
         </tr>
       {% endfor %}
     </tbody>
@@ -84,7 +84,7 @@
     <thead><tr><th scope="col">bet</th><th scope="col" class="num">stake</th><th scope="col" class="num">odds</th><th scope="col" class="num">pays</th></tr></thead>
     <tbody>
       {% for b in mine %}
-        <tr><td>{{ b.market }}</td><td class="num">{{ b.stake }}</td><td class="num">{{ b.odds }}</td><td class="num b">{{ b.amount }}</td></tr>
+        <tr><td>{{ b.market }}</td><td class="num">{{ b.stake }}</td><td class="num">{{ b.odds }}</td><td class="num b win">{{ b.amount }}</td></tr>
       {% endfor %}
     </tbody>
   </table>

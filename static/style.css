@@ -32,6 +32,10 @@
   --state: #16c60c;
   --loss: #e74856;
   --env: #c19c00;
+  /* The leaderboard's first three places. */
+  --gold: #f2c94c;
+  --silver: #c9ced6;
+  --bronze: #d08c4f;
   /* The original's separating lines: thick and light, so sections read as
      boxes rather than text floating on black. */
   --rule-color: #cccccc;
@@ -931,8 +935,24 @@ details.expand[open] summary .when-open { display: inline; }
 .testdetails { margin-top: 16px; color: var(--dim); font-size: var(--fs-1); }
 .testdetails summary { color: var(--dim); font-weight: 400; }
 
-/* Rankings: the place hugs its number, the name takes the room. */
+/* Rankings: the place hugs its number, the name takes the room, and the
+   score is a bar against the leader. The first three places are medals;
+   points are green as everywhere, wins a chart's blue bar with a green
+   figure. Your own row is marked. */
 .leaders-table th:first-child, .leaders-table td:first-child { width: 1%; padding-right: 16px; white-space: nowrap; }
+.leaders-table .place { color: var(--dim); font-weight: 700; }
+.leaders-table .r1 .place { color: var(--gold); }
+.leaders-table .r2 .place { color: var(--silver); }
+.leaders-table .r3 .place { color: var(--bronze); }
+.leaders-table .r1 .who { color: var(--hi); font-weight: 700; }
+.leaders-table .score { width: 45%; text-align: left; }
+.leaders-table .score b { color: var(--state); font-variant-numeric: tabular-nums; }
+.leaders-table .pts .minibar { background: var(--state); }
+.leaders-table .wins .minibar { background: var(--action); }
+.leaders-table .r1 .minibar { background: var(--gold); }
+.leaders-table tr.me td { background: #161616; }
+.leaders-table tr.me td:first-child { box-shadow: inset 3px 0 0 var(--hi); padding-left: 8px; }
+.you-tag { margin-left: 8px; padding: 0 6px; background: var(--hi); color: var(--bg); font-size: var(--fs-1); font-weight: 700; }
 
 /* Wide tables scroll inside their own box, never the page (R18.5). */
 .table-wrap { max-width: 100%; overflow-x: auto; }
@@ -1133,6 +1153,14 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .quote > p:last-child { margin-top: 12px; }
 .betform { display: flex; gap: 8px; margin: 16px 0 0; }
 .markets td { vertical-align: middle; }
+/* Chance as a chart's blue bar, odds and payouts in green: what you can win. */
+.markets .chance { width: 40%; }
+.markets .chance .minibar { background: var(--action); }
+.markets .chance b { color: var(--fg); font-weight: 400; }
+.markets .odds, .quote-figures .odds, .quote-figures .pays { color: var(--state); font-weight: 700; }
+.quote-figures .pays small { color: var(--fg); font-size: var(--fs-1); font-weight: 400; margin-left: 6px; }
+.quote-chance { display: block; height: 6px; margin-top: 12px; background: #262626; }
+.quote-chance i { display: block; height: 100%; width: var(--w); background: var(--action); }
 .markets tr.on td { background: var(--panel); }
 .markets tr.on a { background: var(--hi); color: var(--bg); padding: 0 8px; margin-left: -8px; }
 .teaser { margin-top: 24px; }

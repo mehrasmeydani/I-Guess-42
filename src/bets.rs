@@ -135,17 +135,17 @@ impl Pick {
 }
 
 fn offer_views(base: &Base, book: &[(Market, i64)], markets: Vec<Market>, picked: Option<Market>) -> Vec<OfferView> {
-    markets
+    let quotes: Vec<Quote> = markets.iter().map(|m| odds::quote(base, book, *m)).collect();
+    let top = quotes.iter().map(|q| q.chance_pct).max().unwrap_or(1).max(1);
+    quotes
         .into_iter()
-        .map(|m| {
-            let qt = odds::quote(base, book, m);
-            OfferView {
-                key: m.key(),
-                label: m.label(),
-                chance: qt.chance_pct,
-                odds: qt.odds_x100.map(odds::odds_label),
-                on: picked == Some(m),
-            }
+        .map(|qt| OfferView {
+            key: qt.market.key(),
+            label: qt.market.label(),
+            chance: qt.chance_pct,
+            odds: qt.odds_x100.map(odds::odds_label),
+            on: picked == Some(qt.market),
+            pct: qt.chance_pct * 100 / top,
         })
         .collect()
 }
@@ -158,7 +158,6 @@ fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market]) 
         chance: qt.chance_pct,
         odds: qt.odds_x100.map(odds::odds_label),
         odds_x100: qt.odds_x100.unwrap_or(0),
-        pays_on_10: qt.odds_x100.map(|o| odds::payout(10, o)).unwrap_or(0),
         taken: taken.contains(&m),
     }
 }
@@ -585,7 +584,7 @@ mod tests {
         assert!(html.contains("your bets today"));
         assert!(html.contains("placed &middot; one bet per range a round") && !html.contains(r#"action="/g/bet""#));
         assert!(html.contains("on the book: 40 pts, 1 bet"));
-        assert!(html.contains(&format!("<td class=\"num b\">{}</td>", odds::payout(40, o))));
+        assert!(html.contains(&format!("<td class=\"num b win\">{}</td>", odds::payout(40, o))));
     }
 
     #[tokio::test]
@@ -622,6 +621,8 @@ mod tests {
         assert!(!html.contains("<header") && !html.contains("<html"), "just the box");
         let o = odds_for(&state, "range:5:12").await;
         assert!(html.contains(&format!(r#"name="odds" value="{o}""#)));
+        // What it pays is worked out from the stake as it is typed, not for 10.
+        assert!(html.contains(&format!(r#"<dt>if it wins</dt><dd class="pays" data-odds="{o}">"#)) && !html.contains("10 pays"));
         // Signed out: the odds, no form.
         let html = body(ask("5", "12", None).await.unwrap()).await;
         assert!(html.contains("winner 5 to 12") && !html.contains(r#"action="/g/bet""#));

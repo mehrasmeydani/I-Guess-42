@@ -227,7 +227,7 @@ async fn the_leaderboard_ranks_points_first_then_wins() {
     let html = body(board(Pool::Global, None).await).await;
     let (points, wins) = (html.find(">most points").expect("points"), html.find(">most wins").expect("wins"));
     assert!(points < wins, "points first");
-    assert!(html[wins..].contains("<td>cat</td><td class=\"num b\">1</td>"), "cat won a day");
+    assert!(html[wins..].contains(r#"<td class="who">cat</td>"#) && html[wins..].contains("<b>1</b>"), "cat won a day");
     assert!(html.contains(r#"href="/g/leaderboard">leaders</a>"#), "a tab in the header");
     assert!(html.contains(r#"class="on" aria-current="page" href="/g/leaderboard">leaders</a>"#));
 

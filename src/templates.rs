@@ -544,6 +544,8 @@ pub struct OfferView {
     pub odds: Option<String>,
     /// The one picked above.
     pub on: bool,
+    /// Bar length against the likeliest on the board, 0-100.
+    pub pct: i64,
 }
 
 /// The range the visitor picked, priced.
@@ -554,8 +556,6 @@ pub struct QuoteView {
     /// None: too safe to offer.
     pub odds: Option<String>,
     pub odds_x100: i64,
-    /// What 10 points on it would bring back.
-    pub pays_on_10: i64,
     /// Bet on already today.
     pub taken: bool,
 }
@@ -647,7 +647,14 @@ pub struct PointsTemplate {
 
 pub struct PointsBoardRow {
     pub name: String,
+    /// The name in full, for the row's tooltip.
+    pub title: String,
+    /// Points, or days won, as shown.
     pub points: String,
+    /// Bar length against the top of the table, 0-100.
+    pub pct: i64,
+    /// The visitor's own row.
+    pub me: bool,
 }
 
 #[derive(Template)]
@@ -662,7 +669,7 @@ pub struct BoardTemplate {
     /// Points, highest first: the global round only.
     pub rows: Vec<PointsBoardRow>,
     /// The most days won, all-time.
-    pub wins: Vec<LeaderView>,
+    pub wins: Vec<PointsBoardRow>,
 }
 
 /// One day on the trends timeline.
