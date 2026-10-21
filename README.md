@@ -406,8 +406,16 @@ numbers secret until 12:42.
 
 - Sessions are 32 random alphanumeric characters, stored server-side; the
   cookie is `HttpOnly`, `SameSite=Lax`, `Secure` when configured.
-- The OAuth `state` is single-use, stored server-side, and expires in 15
-  minutes.
+- The OAuth `state` is single-use, stored server-side, expires in 15 minutes,
+  and must match the initiating browser's `HttpOnly`, `SameSite=Lax` cookie.
+- Sign-in initiation is limited to 60 requests per rolling minute per app
+  instance. The results, day and trends pages share a separate 120-request
+  limit. Rejected requests return 429 with `Retry-After: 60`. These are global
+  limits, so clients cannot bypass them with forged forwarding headers, but
+  heavy traffic can temporarily prevent other visitors from using these routes.
+- Pending OAuth states are capped at 1000 database rows. Expired states are
+  removed before new attempts are stored; this cap also applies across app
+  restarts and processes sharing the database.
 - `SameSite=Lax` is what stops cross-site guess submissions; there is no
   separate CSRF token.
 - Only students whose **primary** 42 campus is in `ALLOWED_CAMPUS_IDS` can

@@ -169,15 +169,24 @@ pub async fn purge_expired(db: &Db) -> Result<()> {
 
 // --------------------------------------------------------- oauth states
 
-pub async fn store_oauth_state(db: &Db, state: &str) -> Result<()> {
+/// Bounds pending attempts even across restarts or multiple app processes.
+pub async fn store_oauth_state(db: &Db, state: &str) -> Result<bool> {
     let now = Utc::now();
-    sqlx::query("INSERT INTO oauth_states (state, created_at, expires_at) VALUES (?1, ?2, ?3)")
-        .bind(state)
+    sqlx::query("DELETE FROM oauth_states WHERE expires_at <= ?1")
         .bind(ts(now))
-        .bind(ts(now + chrono::Duration::minutes(15)))
         .execute(db)
         .await?;
-    Ok(())
+    let rows = sqlx::query(
+        "INSERT INTO oauth_states (state, created_at, expires_at)
+         SELECT ?1, ?2, ?3 WHERE (SELECT COUNT(*) FROM oauth_states) < 1000",
+    )
+    .bind(state)
+    .bind(ts(now))
+    .bind(ts(now + chrono::Duration::minutes(crate::auth::OAUTH_TTL_MINUTES)))
+    .execute(db)
+    .await?
+    .rows_affected();
+    Ok(rows > 0)
 }
 
 /// Returns true if the state was present and unexpired. Single-use: the row is
@@ -977,6 +986,34 @@ mod tests {
         assert_eq!(demos.len(), 2);
         assert!(demos.iter().all(|u| u.id < 0));
         assert!(!demos.iter().any(|u| u.login == "real"));
+    }
+
+    #[tokio::test]
+    async fn oauth_states_are_bounded_and_expired_slots_are_reused() {
+        let t = temp_db().await;
+        sqlx::query(
+            "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 999)
+             INSERT INTO oauth_states SELECT 'state-' || x, '2000', '9999' FROM n",
+        )
+        .execute(&t.db)
+        .await
+        .unwrap();
+        let (a, b) = tokio::join!(
+            store_oauth_state(&t.db, "last-a"),
+            store_oauth_state(&t.db, "last-b"),
+        );
+        assert_ne!(a.unwrap(), b.unwrap());
+        assert!(!store_oauth_state(&t.db, "overflow").await.unwrap());
+        sqlx::query("UPDATE oauth_states SET expires_at = '2000'")
+            .execute(&t.db)
+            .await
+            .unwrap();
+        assert!(store_oauth_state(&t.db, "fresh").await.unwrap());
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM oauth_states")
+            .fetch_one(&t.db)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]

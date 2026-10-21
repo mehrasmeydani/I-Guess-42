@@ -14,6 +14,9 @@ pub const AUTHORIZE_URL: &str = "https://api.intra.42.fr/oauth/authorize";
 pub const TOKEN_URL: &str = "https://api.intra.42.fr/oauth/token";
 pub const ME_URL: &str = "https://api.intra.42.fr/v2/me";
 
+pub const OAUTH_COOKIE: &str = "ig42_oauth_state";
+pub const OAUTH_TTL_MINUTES: i64 = 15;
+
 pub const SESSION_COOKIE: &str = "ig42_session";
 /// Parks an admin's own session token while they browse as a demo account, so
 /// they can get back without signing in through 42 again. Test instances only.
@@ -153,6 +156,22 @@ pub async fn fetch_me(http: &reqwest::Client, access_token: &str) -> Result<Intr
     }
 
     resp.json::<IntraUser>().await.context("decoding /v2/me")
+}
+
+pub fn oauth_cookie(state: String, secure: bool) -> Cookie<'static> {
+    let mut cookie = Cookie::new(OAUTH_COOKIE, state);
+    cookie.set_http_only(true);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_secure(secure);
+    cookie.set_path("/auth/callback");
+    cookie.set_max_age(CookieDuration::minutes(OAUTH_TTL_MINUTES));
+    cookie
+}
+
+pub fn clearing_oauth_cookie() -> Cookie<'static> {
+    let mut cookie = Cookie::new(OAUTH_COOKIE, "");
+    cookie.set_path("/auth/callback");
+    cookie
 }
 
 pub fn session_cookie(token: String, secure: bool) -> Cookie<'static> {

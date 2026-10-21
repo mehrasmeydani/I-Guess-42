@@ -6,7 +6,7 @@ use axum_extra::extract::cookie::CookieJar;
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::app::{error_page, AppError, AppState};
+use crate::app::{error_page, too_many_requests, AppError, AppState};
 use crate::auth;
 use crate::db::{self, User};
 use crate::round::Round;
@@ -176,6 +176,10 @@ pub async fn results(
     jar: CookieJar,
     Query(query): Query<ResultsQuery>,
 ) -> Result<Response, AppError> {
+    if !state.history_limit.allow().await {
+        return Ok(too_many_requests());
+    }
+
     if let Some(date) = query.date.as_deref().filter(|d| !d.is_empty()) {
         // Only a well-formed date is echoed into a URL.
         if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok() {
@@ -254,6 +258,10 @@ pub async fn day(
     jar: CookieJar,
     Path(date): Path<String>,
 ) -> Result<Response, AppError> {
+    if !state.history_limit.allow().await {
+        return Ok(too_many_requests());
+    }
+
     let no_such_day = || error_page(StatusCode::NOT_FOUND, "No closed round on that day.");
 
     // Only well-formed dates reach the database.
@@ -314,6 +322,10 @@ pub async fn trends(
     jar: CookieJar,
     Query(query): Query<TrendsQuery>,
 ) -> Result<Response, AppError> {
+    if !state.history_limit.allow().await {
+        return Ok(too_many_requests());
+    }
+
     let (range, days) = match query.days.as_deref() {
         Some("30") => ("30", Some(30)),
         Some("all") => ("all", None),
@@ -728,11 +740,20 @@ pub async fn admin_clear(
 
 // -------------------------------------------------------------------- auth
 
-pub async fn login(State(state): State<AppState>) -> Result<Response, AppError> {
+pub async fn login(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Response, AppError> {
+    if !state.login_limit.allow().await {
+        return Ok(too_many_requests());
+    }
     let state_token = auth::random_token();
-    db::store_oauth_state(&state.db, &state_token).await?;
+    if !db::store_oauth_state(&state.db, &state_token).await? {
+        return Ok(too_many_requests());
+    }
     let url = auth::authorize_url(&state.cfg, &state_token)?;
-    Ok(Redirect::to(&url).into_response())
+    let jar = jar.add(auth::oauth_cookie(state_token, state.cfg.secure_cookies));
+    Ok((jar, Redirect::to(&url)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -764,6 +785,13 @@ pub async fn callback(
         ));
     };
 
+    if jar.get(auth::OAUTH_COOKIE).map(|c| c.value()) != Some(state_token.as_str()) {
+        return Ok(error_page(
+            StatusCode::BAD_REQUEST,
+            "That sign-in was started in another browser. Start again from the home page.",
+        ));
+    }
+
     if !db::consume_oauth_state(&state.db, &state_token).await? {
         return Ok(error_page(
             StatusCode::BAD_REQUEST,
@@ -771,6 +799,7 @@ pub async fn callback(
         ));
     }
 
+    let jar = jar.remove(auth::clearing_oauth_cookie());
     let access_token = auth::exchange_code(&state.http, &state.cfg, &code).await?;
     let me = auth::fetch_me(&state.http, &access_token).await?;
 
@@ -832,6 +861,135 @@ pub async fn not_found() -> Response {
 mod tests {
     use super::{names_visible, parse_guess, round_matches};
     use crate::db::RoundSummary;
+
+    #[tokio::test]
+    async fn oauth_binding_and_request_limits_over_http() {
+        use crate::{app::AppState, config::Config, db};
+        use axum::{routing::get, Router};
+        use std::sync::Arc;
+
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&db).await.unwrap();
+        let cfg = Config {
+            client_id: "test".into(),
+            client_secret: "unused".into(),
+            redirect_uri: "http://localhost/auth/callback".into(),
+            database_url: String::new(),
+            bind_addr: String::new(),
+            secure_cookies: true,
+            admin_logins: Vec::new(),
+            allowed_campus_ids: vec![53],
+            points_api_key: None,
+            points_api_url: String::new(),
+        };
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let state = AppState::new(db.clone(), Arc::new(cfg), http.clone());
+        let router = Router::new()
+            .route("/login", get(super::login))
+            .route("/auth/callback", get(super::callback))
+            .route("/results", get(super::results))
+            .route("/day/{date}", get(super::day))
+            .route("/trends", get(super::trends))
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+        let login = http.get(format!("{base}/login")).send().await.unwrap();
+        assert_eq!(login.status(), 303);
+        let cookie = login.headers()["set-cookie"].to_str().unwrap().to_string();
+        assert!(cookie.contains("HttpOnly"));
+        assert!(cookie.contains("SameSite=Lax"));
+        assert!(cookie.contains("Secure"));
+        assert!(cookie.contains("Path=/auth/callback"));
+        assert!(cookie.contains("Max-Age=900"));
+        let location = reqwest::Url::parse(login.headers()["location"].to_str().unwrap()).unwrap();
+        let token = location
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let callback = format!("{base}/auth/callback?code=unused&state={token}");
+        for cookie in [None, Some("ig42_oauth_state=another-browser")] {
+            let mut request = http.get(&callback);
+            if let Some(cookie) = cookie {
+                request = request.header("cookie", cookie);
+            }
+            let response = request.send().await.unwrap();
+            assert_eq!(response.status(), 400);
+            assert!(response.text().await.unwrap().contains("another browser"));
+        }
+        // A foreign browser cannot consume the initiating browser's state.
+        assert!(db::consume_oauth_state(&db, &token).await.unwrap());
+        let response = http
+            .get(&callback)
+            .header("cookie", cookie.split(';').next().unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400);
+        assert!(response
+            .text()
+            .await
+            .unwrap()
+            .contains("expired or was already used"));
+
+        for _ in 1..60 {
+            assert_eq!(
+                http.get(format!("{base}/login"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                303
+            );
+        }
+        let response = http.get(format!("{base}/login")).send().await.unwrap();
+        assert_eq!(response.status(), 429);
+        assert_eq!(response.headers()["retry-after"], "60");
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM oauth_states")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(count, 59);
+
+        for path in ["/results", "/trends", "/day/invalid"] {
+            assert_ne!(
+                http.get(format!("{base}{path}"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                429
+            );
+        }
+        for _ in 3..120 {
+            assert_eq!(
+                http.get(format!("{base}/day/invalid"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                404
+            );
+        }
+        for path in ["/results", "/trends", "/day/invalid"] {
+            let response = http.get(format!("{base}{path}")).send().await.unwrap();
+            assert_eq!(response.status(), 429);
+            assert_eq!(response.headers()["retry-after"], "60");
+        }
+        server.abort();
+        let _ = server.await;
+        db.close().await;
+    }
 
     fn round(date: &str, winner: Option<(&str, i64)>) -> RoundSummary {
         RoundSummary {
