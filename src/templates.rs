@@ -1127,6 +1127,8 @@ pub struct ModTemplate {
     pub impersonating: bool,
     pub notice: Option<Notice>,
     pub clusters: Vec<crate::db::Cluster>,
+    /// Accounts warned and not banned yet.
+    pub warned: Vec<String>,
     pub banned: Vec<crate::db::ModAccount>,
 }
 

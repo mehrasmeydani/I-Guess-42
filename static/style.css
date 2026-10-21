@@ -166,13 +166,21 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 
 main { flex: 1; padding-block: 8px 64px; }
 
+/* One line at every width: on a phone the two taglines step aside. */
 footer {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 32px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 24px;
   padding-block: 16px 24px;
   border-top: var(--rule);
   color: var(--dim);
+  font-size: var(--fs-1);
+  white-space: nowrap;
+}
+@media (max-width: 800px) {
+  footer { gap: 16px; }
+  footer .tagline { display: none; }
 }
 /* What is running. Pushed to the far end of the row, the way a status bar
    keeps the build number out of the way of everything else. */
@@ -901,7 +909,8 @@ p, li { text-wrap: pretty; }
 .prose li { margin: 0 0 8px; }
 .prose table { margin: 0 0 16px; }
 .privacy-table { table-layout: fixed; }
-.privacy-table th, .privacy-table td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+.privacy-table th, .privacy-table td,
+.grid.privacy-table td:first-child { white-space: normal; overflow-wrap: break-word; vertical-align: top; }
 .privacy-table th:first-child { width: 31%; }
 .privacy-table th:nth-child(2) { width: 43%; }
 .privacy-table th:last-child { width: 26%; }
@@ -1168,7 +1177,9 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 /* Moderation flags: the serious ones marked, a ban button by each name. */
 .flags td { vertical-align: top; padding: 8px 16px 8px 0; }
 .flags tr.serious td:first-child { color: var(--hi); }
-.flag-names form { display: inline-flex; align-items: center; gap: 6px; margin: 0 12px 6px 0; }
+.flag-names .flag-name { display: inline-flex; align-items: center; gap: 6px; margin: 0 16px 6px 0; }
+.flag-names form { display: inline-flex; margin: 0; }
+.warned-tag { font-size: var(--fs-1); }
 .flag-names button { padding: 0 8px; font-size: var(--fs-1); }
 /* The robot check: a box like any checkbox, ticked by the puzzle being
    solved. The honeypot sits off-screen, out of reach of people. */

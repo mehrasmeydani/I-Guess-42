@@ -107,7 +107,7 @@ async fn lock_held(state: &AppState, account_id: i64, held: crate::held::Held) -
 
 /// Sends a mail, and logs rather than fails if it does not go out: the
 /// visitor is told the same thing either way.
-async fn send(state: &AppState, mail: mail::Mail) -> bool {
+pub(crate) async fn send(state: &AppState, mail: mail::Mail) -> bool {
     match state
         .mailer
         .send(&state.db, &state.http, state.cfg.mail_daily_limit, &mail)

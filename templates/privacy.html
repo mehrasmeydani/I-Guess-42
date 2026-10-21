@@ -13,12 +13,14 @@
   <table class="grid privacy-table">
     <thead><tr><th scope="col">what</th><th scope="col">why, and on what basis</th><th scope="col">kept for</th></tr></thead>
     <tbody>
-      <tr><td data-label="what">your account: username, when you joined, the ways you sign in</td><td data-label="why">to run the account you asked for (Art. 6(1)(b) GDPR)</td><td data-label="kept">until you delete it</td></tr>
+      <tr><td data-label="what">your account: username, when you joined, the ways you sign in, and the email address GitHub or Google shared</td><td data-label="why">to run the account you asked for (Art. 6(1)(b) GDPR)</td><td data-label="kept">until you delete it</td></tr>
       <tr><td data-label="what">if you sign in with an email: the address and a hash of your password, never the password</td><td data-label="why">to let you sign in and reset it (Art. 6(1)(b))</td><td data-label="kept">until you delete it or remove that login</td></tr>
       <tr><td data-label="what">if you sign in with 42: your login, display name and campus</td><td data-label="why">to decide which rounds you can play (Art. 6(1)(b))</td><td data-label="kept">refreshed at each sign-in; until you delete your account</td></tr>
-      <tr><td data-label="what">your guesses, one per round, and when you made them</td><td data-label="why">to play the game; they are secret until the round closes, then part of its results (Art. 6(1)(b))</td><td data-label="kept">for good, so past results stay true; a deleted account's rounds stay under <b>deleted-</b> and a number</td></tr>
-      <tr><td data-label="what">your points: every credit and charge in the global round</td><td data-label="why">to keep score in the game (Art. 6(1)(b)). points are only for fun and can't be bought, sold or exchanged</td><td data-label="kept">for good, so pots stay correct; a deleted account's history stays under <b>deleted-</b> and a number</td></tr>
-      <tr><td data-label="what">a keyed hash of the network you signed up and guessed from, never the address</td><td data-label="why">to spot one person playing many accounts (Art. 6(1)(f), our interest in a fair game). the key changes every month, so a hash cannot be matched after its month</td><td data-label="kept">with the account or guess it belongs to</td></tr>
+      <tr><td data-label="what">your guesses, one per round, and when you made them</td><td data-label="why">to play the game; they are secret until the round closes, then counted into its results; shown with your name only if it won (Art. 6(1)(b))</td><td data-label="kept">for good, so past results stay true; a deleted account's rounds stay under <b>deleted-</b> and a number</td></tr>
+      <tr><td data-label="what">your points and bets: every credit and charge in the global round, and each bet with its odds and result</td><td data-label="why">to keep score in the game (Art. 6(1)(b)). points are only for fun and can't be bought, sold or exchanged</td><td data-label="kept">for good, so pots stay correct; a deleted account's history stays under <b>deleted-</b> and a number</td></tr>
+      <tr><td data-label="what">a keyed hash of the network you signed up and guessed from, never the address</td><td data-label="why">to spot one person, or one script, playing many accounts, together with when accounts sign in and guess (Art. 6(1)(f), our interest in a fair game). the key changes every month, so a hash cannot be matched after its month</td><td data-label="kept">with the account or guess it belongs to; a deleted account's sign-up hash goes with it</td></tr>
+      <tr><td data-label="what">if a moderator warns or bans an account: why, and when</td><td data-label="why">to keep the game fair and know who was warned (Art. 6(1)(f))</td><td data-label="kept">as long as the account exists</td></tr>
+      <tr><td data-label="what">your network address, in memory only</td><td data-label="why">to slow down password guessing and floods of sign-ups (Art. 6(1)(f))</td><td data-label="kept">up to 1 hour, never written down</td></tr>
       <tr><td data-label="what">sign-in sessions</td><td data-label="why">to keep you signed in (Art. 6(1)(b))</td><td data-label="kept">30 days, or until you sign out</td></tr>
       <tr><td data-label="what">emailed links (confirm, reset)</td><td data-label="why">to prove the address is yours (Art. 6(1)(b))</td><td data-label="kept">24 hours (confirm) or 1 hour (reset), then deleted</td></tr>
       <tr><td data-label="what">a count of mails sent</td><td data-label="why">to stay within the mail service's limits (Art. 6(1)(f))</td><td data-label="kept">2 days</td></tr>
@@ -29,11 +31,16 @@
 
   <h2>who else sees it</h2>
   <ul>
-    <li><b>everyone</b>, signed in or not, sees your username next to the rounds you played and the ones you won, on results, round pages, leaderboards and shared links. your username is public; pick one you are happy to show, and change it on your account page.</li>
+    <li><b>everyone</b>, signed in or not, sees your username next to the rounds you won, on the leaderboards (points and wins) and in shared links. what you picked is only ever shown as a count per number. your username is public; pick one you are happy to show, and change it on your account page.</li>
+    <li><b>moderators</b>, named by the operator, see the patterns above for the global round: shared networks as hashes, when accounts sign in and guess, and what was picked in rounds that have closed. never today's guesses.</li>
     <li><b>42</b> (42 intra, EU), <b>GitHub</b> (GitHub Inc., USA) and <b>Google</b> (Google LLC, USA) learn that you signed in here, when you choose them. GitHub and Google transfer data to the USA under the EU-US Data Privacy Framework.</li>
-    <li><b>Resend</b> (Resend Inc., USA) delivers the mails we send: the link to confirm your address, and password resets. it sees your address and the mail.</li>
+    <li><b>42 Vienna</b>'s coalition points service, for the 42 round only: the 42 user ids of who played each round and who won it, so 42 can award coalition points.</li>
+    <li><b>Resend</b> (Resend Inc., USA) delivers the mails we send: confirming your address, password resets, &ldquo;you already have an account&rdquo;, and a moderator&rsquo;s warning. it sees your address and the mail.</li>
   </ul>
-  <p>we don't sell or share anything else, and there are no ads, analytics or trackers.</p>
+  <p>the robot check on the sign-up form is our own: a small puzzle your browser solves, checked here. no outside service sees it. we don't sell or share anything else, and there are no ads, analytics or trackers.</p>
+
+  <h2>fair play</h2>
+  <p>one person, one account, played by hand. accounts run by a script, or several accounts used to take numbers so another one wins, are not allowed. moderators look for the patterns above. a flagged account gets one warning by email; if it goes on, it is banned and marked, and rounds it bent can be called off or have their points taken back.</p>
 
   <h2>cookies and storage</h2>
   <ul>

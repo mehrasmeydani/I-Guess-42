@@ -155,6 +155,7 @@ async fn main() -> Result<()> {
         // 404 unless MODERATORS names the signed-in 42 login.
         .route("/mod", get(moderation::moderation))
         .route("/mod/ban", post(moderation::ban))
+        .route("/mod/warn", post(moderation::warn))
         .route("/mod/unban", post(moderation::unban))
         .route("/mod/adjust", post(moderation::adjust))
         .route("/mod/void", post(moderation::void))

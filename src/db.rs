@@ -826,6 +826,34 @@ pub struct Cluster {
     pub serious: bool,
 }
 
+/// Records a moderator's warning on an account, and gives back the address
+/// to mail it to: its password email, else one a provider shared. None for
+/// no such account.
+pub async fn warn_account(db: &Db, account_id: i64, reason: &str) -> Result<Option<String>> {
+    sqlx::query("UPDATE accounts SET warned_at = ?1, warn_reason = ?2 WHERE id = ?3")
+        .bind(ts(Utc::now()))
+        .bind(reason)
+        .bind(account_id)
+        .execute(db)
+        .await?;
+    let email: Option<String> = sqlx::query_scalar(
+        "SELECT COALESCE(
+             (SELECT email FROM passwords WHERE account_id = ?1),
+             (SELECT email FROM identities WHERE account_id = ?1 AND email IS NOT NULL ORDER BY created_at LIMIT 1))",
+    )
+    .bind(account_id)
+    .fetch_one(db)
+    .await?;
+    Ok(email)
+}
+
+/// Usernames of accounts a moderator has warned, for the flags to show.
+pub async fn warned_usernames(db: &Db) -> Result<Vec<String>> {
+    Ok(sqlx::query_scalar("SELECT username FROM accounts WHERE warned_at IS NOT NULL AND banned_at IS NULL")
+        .fetch_all(db)
+        .await?)
+}
+
 /// Groups of at least `min` accounts that signed up from one address in the
 /// last 30 days, or guessed in the global pool from one address in the last
 /// 7, and runs of `min` or more sign-ups within ten minutes of each other.

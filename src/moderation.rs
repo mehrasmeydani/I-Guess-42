@@ -44,6 +44,7 @@ async fn page(state: &AppState, viewer: Viewer, notice: Option<Notice>, status: 
         impersonating: false,
         notice,
         clusters: db::clusters(&state.db, CLUSTER_MIN).await?,
+        warned: db::warned_usernames(&state.db).await?,
         banned: db::banned_accounts(&state.db).await?,
     });
     *resp.status_mut() = status;
@@ -59,9 +60,10 @@ pub async fn moderation(
         return Ok(gone());
     };
     let notice = match q.msg.as_deref() {
-        Some(code @ ("banned" | "unbanned" | "adjusted" | "called_off")) => {
+        Some(code @ ("banned" | "unbanned" | "adjusted" | "called_off" | "warned")) => {
             crate::copy::notice(code).map(|(_, text)| Notice::ok(text))
         }
+        Some(code @ "warned_no_mail") => crate::copy::notice(code).map(|(_, text)| Notice::error(text)),
         _ => None,
     };
     page(&state, viewer, notice, StatusCode::OK).await
@@ -98,6 +100,36 @@ pub async fn ban(
     let by = viewer.intra.as_ref().map(|u| u.login.as_str()).unwrap_or("?");
     tracing::info!(moderator = by, account = target.id, username = %target.username, reason, "banned");
     Ok(Redirect::to("/mod?msg=banned").into_response())
+}
+
+/// Warns an account by mail before a ban: the flag's reason, and what comes
+/// next. Recorded on the account, so the flags show who has had theirs.
+pub async fn warn(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<BanForm>,
+) -> Result<Response, AppError> {
+    let Some(viewer) = moderator(&state, &jar).await? else {
+        return Ok(gone());
+    };
+    let refuse = |why: &'static str| page(&state, viewer.clone(), Some(Notice::error(why)), StatusCode::UNPROCESSABLE_ENTITY);
+    let reason = form.reason.trim();
+    if reason.is_empty() {
+        return refuse(crate::copy::NEED_REASON).await;
+    }
+    let Some(target) = db::mod_account(&state.db, &normalize_username(&form.username)).await? else {
+        return refuse(crate::copy::NO_SUCH_ACCOUNT).await;
+    };
+    let by = viewer.intra.as_ref().map(|u| u.login.as_str()).unwrap_or("?");
+    tracing::info!(moderator = by, account = target.id, username = %target.username, reason, "warned");
+    let msg = match db::warn_account(&state.db, target.id, reason).await? {
+        Some(email) => {
+            crate::signin::send(&state, crate::mail::warning(&email, &target.username, reason, &state.cfg.public_url)).await;
+            "warned"
+        }
+        None => "warned_no_mail",
+    };
+    Ok(Redirect::to(&format!("/mod?msg={msg}")).into_response())
 }
 
 #[derive(Deserialize)]
@@ -292,6 +324,34 @@ mod tests {
         assert_eq!(location(&resp), "/mod?msg=unbanned");
         db::create_session(&t.db, "c2", cheat, 30).await.unwrap();
         assert!(db::viewer_for_session(&t.db, "c2").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_warning_is_mailed_recorded_and_shown_before_a_ban() {
+        let mut cfg = config(&[]);
+        cfg.moderators = vec!["megardes".into()];
+        let (t, state, sent) = app_with(cfg).await;
+        student(&t.db, 1001, "megardes", "mod").await;
+        let hash = crate::credentials::hash_password("correct horse battery").await.unwrap();
+        db::create_password_account(&t.db, "bot@example.com", "botty", &hash, None).await.unwrap();
+        stranger(&t.db, "nomail", "n").await;
+        let form = |u: &str, r: &str| Form(BanForm { username: u.into(), reason: r.into() });
+
+        let resp = warn(State(state.clone()), jar("mod"), form("botty", "guess within ten seconds of each other")).await.unwrap();
+        assert_eq!(location(&resp), "/mod?msg=warned");
+        let mail = sent.lock().unwrap().last().cloned().expect("a mail");
+        assert_eq!((mail.to.as_str(), mail.purpose), ("bot@example.com", "warning"));
+        assert!(mail.text.contains("guess within ten seconds") && mail.text.contains("banned and marked"));
+        assert_eq!(db::warned_usernames(&t.db).await.unwrap(), ["botty"]);
+
+        // No address on file: warned in the record, and the moderator told.
+        let resp = warn(State(state.clone()), jar("mod"), form("nomail", "x")).await.unwrap();
+        assert_eq!(location(&resp), "/mod?msg=warned_no_mail");
+        // Not a moderator: no page, nothing done.
+        stranger(&t.db, "eve", "e").await;
+        let resp = warn(State(state.clone()), jar("e"), form("eve", "x")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(db::warned_usernames(&t.db).await.unwrap().len(), 2);
     }
 
     #[tokio::test]

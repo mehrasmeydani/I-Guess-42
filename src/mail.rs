@@ -165,6 +165,26 @@ pub fn reset(to: &str, link: &str) -> Mail {
 /// Sent instead of a second account when someone signs up with an address
 /// that has one, so the sign-up form never tells anyone which addresses are
 /// registered.
+/// A moderator's warning: the account looks like it plays for someone else.
+/// The next step is a ban.
+pub fn warning(to: &str, username: &str, reason: &str, base: &str) -> Mail {
+    Mail {
+        to: to.to_string(),
+        subject: "A warning about your i guess low account".to_string(),
+        text: format!(
+            "Hi {username},\n\n\
+             a moderator of i guess low looked at your account and found this:\n\n\
+             {reason}\n\n\
+             Accounts run by a script, or used to take numbers so another account \
+             wins, are not allowed. This is the only warning: if it goes on, the \
+             account is banned and marked, and rounds it bent can be called off.\n\n\
+             If we got this wrong, answer this mail.\n\n\
+             {base}\n"
+        ),
+        purpose: "warning",
+    }
+}
+
 pub fn exists(to: &str, base: &str) -> Mail {
     Mail {
         to: to.to_string(),
