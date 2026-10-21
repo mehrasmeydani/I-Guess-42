@@ -1608,17 +1608,21 @@ another writer commits in between, instead of waiting.
 
 ### Bets (`odds.rs`, `bets.rs`)
 
-`odds.rs` is pure: which markets exist, whether one won, the weighted and
-smoothed chance from past winners (the only floats in the codebase), and
-odds as fair odds less 8%, rounded down to 0.05, between 1.05 and 50. Points
-stay integers: odds are stored in hundredths, payouts rounded down.
+A bet is on the winning number landing in a range the player picks, or on
+nobody winning. `odds.rs` is pure: ranges and their keys, whether one won,
+the replay of last week's picks (4000 made-up rounds) that gives each range
+its starting chance, the book that moves it with the points already bet,
+and odds as fair odds less an 8% tax, rounded down to 0.05, at most 50, and
+not offered below 1.05. Points stay integers: odds are stored in hundredths,
+payouts rounded down.
 
-`bets.rs` works the odds out once per open round from closed rounds (global,
-smoothed towards the 42 round's history) and caches them in `AppState`, so
-they never move during a round. `db::place_bet` takes the stake in the same
-transaction, within 100 a bet and 200 a round; `settle_bets` runs inside
-`settle_round`, so a round's pot and its bets are paid together or not at
-all, each at most once.
+`bets.rs` runs the replay once per open round, off the async threads, and
+caches it in `AppState.odds_base`; the book is read fresh on every page.
+`db::place_bet` reads the book inside its write transaction and asks the
+caller for a price, so a bet is placed at the odds shown or better, or not
+at all, and two bets at once each see the other. Caps: 100 a bet, 200 a
+round. `settle_bets` runs inside `settle_round`, so a round's pot and its
+bets are paid together or not at all, each at most once.
 
 ### Testing it
 

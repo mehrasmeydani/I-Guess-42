@@ -200,18 +200,7 @@ async fn index_in(
             .map(|(_, carried)| crate::templates::points_label(&carried)),
         stake_label: (pool == Pool::Global).then(|| crate::templates::points_label(&crate::economy::GUESS_STAKE)),
         bet_teaser: match pool {
-            Pool::Global => {
-                let offers = crate::bets::todays_offers(&state).await?;
-                let pick = [crate::odds::Market::Under(10), crate::odds::Market::Over(10), crate::odds::Market::Nobody];
-                Some(
-                    offers
-                        .iter()
-                        .filter(|o| pick.contains(&o.market))
-                        .map(|o| format!("{} {}", o.market.label().trim_start_matches("winner "), crate::odds::odds_label(o.odds_x100)))
-                        .collect::<Vec<_>>()
-                        .join(" · "),
-                )
-            }
+            Pool::Global => Some(crate::bets::teaser(&state).await?),
             Pool::Vienna => None,
         },
         round_key,

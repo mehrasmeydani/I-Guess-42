@@ -258,6 +258,7 @@ async fn my_rounds_show_the_record_and_every_round_played() {
     assert!(html.contains(r#"<a class="who" href="/g/me""#));
     assert!(!html.contains(r#">me</a>"#), "no me tab");
     assert!(html.contains(r#"href="/account">account &amp; log out"#));
+    assert!(html.contains(r#"<form method="post" action="/logout"><button type="submit" class="out">log out</button></form>"#), "and log out in the header");
     // Yesterday's winner sees it as a win, and their best.
     let html = body(handlers::global_me(State(state.clone()), jar("cat")).await.unwrap()).await;
     assert!(html.contains(r#"<dt>best win</dt><dd><span class="win">3</span></dd>"#));

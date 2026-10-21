@@ -18,39 +18,70 @@
     <p class="dim">stake 1&ndash;{{ max_bet }} a bet &middot; {{ room }} left to stake this round &middot; points only, never money</p>
   {% endif %}
 
-  <div class="table-wrap" tabindex="0" role="region" aria-label="today's markets">
+  {# Step one, a plain GET so it works without scripts: pick a range, see its odds. #}
+  <form class="pick" method="get" action="/g/bets">
+    <label for="lo">winner from</label>
+    <input id="lo" name="lo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="5" value="{{ lo }}" autocomplete="off" required>
+    <label for="hi">to</label>
+    <input id="hi" name="hi" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="any" value="{{ hi }}" autocomplete="off">
+    <button type="submit">see odds</button>
+    <a class="pick-none{% if nobody_picked %} on{% endif %}" href="/g/bets?m=none">or: nobody wins</a>
+  </form>
+  <p class="dim">empty &ldquo;to&rdquo; = or more &middot; same number twice = exactly that number</p>
+
+  {% match quote %}{% when Some with (q) %}
+  <div class="quote" aria-live="polite">
+    <p class="quote-label">{{ q.label }}</p>
+    <dl class="quote-figures">
+      <div><dt>chance</dt><dd>{{ q.chance }}%</dd></div>
+      {% match q.odds %}{% when Some with (o) %}
+      <div><dt>odds</dt><dd class="b">{{ o }}</dd></div>
+      <div><dt>10 pays</dt><dd>{{ q.pays_on_10 }}</dd></div>
+      {% when None %}{% endmatch %}
+    </dl>
+    {% match q.odds %}
+    {% when None %}
+      <p class="lose">too safe to bet on &middot; after the {{ tax }} cut it pays less than it costs</p>
+    {% when Some with (o) %}
+      {% if !can_bet %}
+      {% else if q.taken %}<p class="dim">placed &middot; one bet per range a round</p>
+      {% else if room <= 0 %}<p class="dim">nothing left to stake this round</p>
+      {% else %}
+      <form method="post" action="/g/bet" class="betform">
+        <input type="hidden" name="market" value="{{ q.key }}">
+        <input type="hidden" name="odds" value="{{ q.odds_x100 }}">
+        <input type="hidden" name="round" value="{{ round_key }}">
+        <input name="stake" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="10" aria-label="stake on {{ q.label }} at {{ o }}" autocomplete="off" required>
+        <button type="submit">bet</button>
+      </form>
+      {% endif %}
+    {% endmatch %}
+  </div>
+  {% when None %}{% endmatch %}
+</section>
+
+<section class="sec" style="--b: 1" aria-labelledby="board-h">
+  <h2 class="section-title" id="board-h">where the winner lands <span class="dim scope-inline">tap one to bet</span></h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="where the winner lands">
   <table class="grid markets">
-    <thead><tr><th scope="col">bet</th><th scope="col" class="num">chance</th><th scope="col" class="num">odds</th>{% if can_bet %}<th scope="col"><span class="sr">stake</span></th>{% endif %}</tr></thead>
+    <thead><tr><th scope="col">range</th><th scope="col" class="num">chance</th><th scope="col" class="num">odds</th></tr></thead>
     <tbody>
-      {% for o in offers %}
-        <tr>
-          <td>{{ o.label }}</td>
-          <td class="num dim" title="from past rounds, recent ones counting more">{{ o.chance }}%</td>
-          <td class="num b">{{ o.odds }}</td>
-          {% if can_bet %}
-          <td class="betcell">
-            {% if o.taken %}<span class="dim">placed</span>
-            {% else if room > 0 %}
-            <form method="post" action="/g/bet" class="betform">
-              <input type="hidden" name="market" value="{{ o.key }}">
-              <input type="hidden" name="odds" value="{{ o.odds_x100 }}">
-              <input type="hidden" name="round" value="{{ round_key }}">
-              <input name="stake" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="10" aria-label="stake on {{ o.label }}" autocomplete="off" required>
-              <button type="submit">bet</button>
-            </form>
-            {% endif %}
-          </td>
-          {% endif %}
+      {% for o in board %}
+        <tr{% if o.on %} class="on"{% endif %}>
+          <td><a href="/g/bets?m={{ o.key }}">{{ o.label }}</a></td>
+          <td class="num dim">{{ o.chance }}%</td>
+          <td class="num b">{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
         </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
-  <p class="dim">winner = the round's winning number &middot; under/over lose if nobody wins &middot; settled at {{ close_time }} with the pot</p>
+  <p class="dim">{% if sims > 0 %}odds: last week&rsquo;s picks replayed {{ sims }} times{% else %}no picks last week &middot; odds are a rough guess{% endif %} &middot; they move as people bet &middot; the house keeps {{ tax }} &middot; on the book today: {{ book_total }} points, {{ book_bets }} {% if book_bets == 1 %}bet{% else %}bets{% endif %}</p>
+  <p class="dim">winner = the round&rsquo;s winning number &middot; ranges lose if nobody wins &middot; settled at {{ close_time }} with the pot</p>
 </section>
 
 {% if !mine.is_empty() %}
-<section class="sec" style="--b: 1">
+<section class="sec" style="--b: 2">
   <h2 class="section-title">your bets today</h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="your bets today">
   <table class="grid">
@@ -66,7 +97,7 @@
 {% endif %}
 
 {% if !past.is_empty() %}
-<section class="sec" style="--b: 2">
+<section class="sec" style="--b: 3">
   <h2 class="section-title">past bets <span class="dim scope-inline">last 14 days &middot; net {{ net_label }}</span></h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="past bets">
   <table class="grid">

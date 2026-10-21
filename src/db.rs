@@ -2055,17 +2055,23 @@ pub enum Placed {
     Broke,
     /// The round is settled or called off.
     Closed,
+    /// The odds moved below what the visitor was shown, or the bet is no
+    /// longer offered.
+    Moved,
 }
 
-/// Places a bet at the odds the visitor was shown, and takes the stake, in
-/// one transaction. The caps hold per bet and per account per round.
+/// Places a bet and takes the stake, in one transaction. The caps hold per
+/// bet and per account per round. `price` is given the round's open bets
+/// (market, stake) as they stand inside the transaction, and returns the
+/// odds to place at, or None to refuse: so two bets at once each see the
+/// other, and nobody gets odds the book has already moved past.
 pub async fn place_bet(
     db: &Db,
     account_id: i64,
     round_date: &str,
     market: &str,
     stake: i64,
-    odds_x100: i64,
+    price: impl FnOnce(&[(String, i64)]) -> Option<i64>,
 ) -> Result<Placed> {
     if !(1..=crate::odds::MAX_BET).contains(&stake) {
         return Ok(Placed::OverCap);
@@ -2100,6 +2106,13 @@ pub async fn place_bet(
     if balance < stake {
         return Ok(Placed::Broke);
     }
+    let book: Vec<(String, i64)> = sqlx::query_as("SELECT market, stake FROM bets WHERE round_date = ?1 AND result IS NULL")
+        .bind(round_date)
+        .fetch_all(&mut *tx)
+        .await?;
+    let Some(odds_x100) = price(&book) else {
+        return Ok(Placed::Moved);
+    };
     let now = ts(Utc::now());
     let inserted: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO bets (account_id, round_date, market, stake, odds_x100, placed_at)
@@ -2236,15 +2249,12 @@ pub async fn bets_of(db: &Db, account_id: i64, since: &str) -> Result<Vec<Bet>> 
     Ok(rows)
 }
 
-/// The winning numbers of the last `limit` closed rounds of `pool` that
-/// were played, newest first (`None` where nobody won): what the odds are
-/// estimated from.
-pub async fn winner_history(db: &Db, pool: Pool, open_round: &str, limit: i64) -> Result<Vec<Option<i64>>> {
-    Ok(closed_rounds(db, pool, open_round, limit)
-        .await?
-        .into_iter()
-        .map(|r| r.winning_value)
-        .collect())
+/// The open bets on a round, (market, stake): what moves its odds.
+pub async fn book(db: &Db, round_date: &str) -> Result<Vec<(String, i64)>> {
+    Ok(sqlx::query_as("SELECT market, stake FROM bets WHERE round_date = ?1 AND result IS NULL")
+        .bind(round_date)
+        .fetch_all(db)
+        .await?)
 }
 
 /// One line of an account's points history.

@@ -1,10 +1,14 @@
 //! `/g/bets`: betting points on how the global round turns out (SPEC.md
-//! section 9). Today's markets with their chances and odds, the visitor's
-//! bets on the open round, and their slips from the last fortnight.
+//! section 9). The player picks a range for the winning number - or bets
+//! nobody wins - sees its chance and odds, and bets at those odds. Below
+//! that, a board of ready-made ranges, their bets on the open round, and
+//! their slips from the last fortnight.
 //!
-//! Odds are worked out once per open round, from closed rounds only, and
-//! kept until the next one opens: they never move with bets or guesses made
-//! today, which are secret until 12:42 and must not leak through prices.
+//! Odds start from last week's picks, simulated once per open round and
+//! kept until the next one opens, and move with the points already bet (see
+//! `odds`). Today's guesses never go into them: they are secret until 12:42.
+
+use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -16,33 +20,64 @@ use crate::app::{AppError, AppState};
 use crate::db::{self, Placed, Pool};
 use crate::handlers::current_viewer;
 use crate::limits;
-use crate::odds::{self, Market, Offer};
+use crate::odds::{self, Base, Market, Quote, Week};
 use crate::round::Round;
-use crate::templates::{self, BetsTemplate, Notice, OfferView, SlipView, UserView};
+use crate::templates::{self, BetsTemplate, Notice, OfferView, QuoteView, SlipView, UserView};
 
 /// How far back the page lists settled slips.
 const SLIP_DAYS: i64 = 14;
 
-/// The open round's offers: from the cache if they were worked out for this
-/// round, else worked out now and kept.
-pub async fn todays_offers(state: &AppState) -> Result<Vec<Offer>, AppError> {
-    let open = Round::current(state.now()).key();
-    if let Some((round, offers)) = state.offers.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        if *round == open {
-            return Ok(offers.clone());
+/// Where the open round's odds start: from the cache if it was worked out
+/// for this round, else simulated now from the week before and kept.
+pub async fn todays_base(state: &AppState) -> Result<Arc<Base>, AppError> {
+    let round = Round::current(state.now());
+    let open = round.key();
+    if let Some((r, base)) = state.odds_base.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if *r == open {
+            return Ok(base.clone());
         }
     }
-    let limit = odds::HISTORY as i64;
-    let global = db::winner_history(&state.db, Pool::Global, &open, limit).await?;
-    let vienna = db::winner_history(&state.db, Pool::Vienna, &open, limit).await?;
-    let offers = odds::offers(&global, &vienna);
-    *state.offers.lock().unwrap_or_else(|e| e.into_inner()) = Some((open, offers.clone()));
-    Ok(offers)
+    let from = (round.date - chrono::Duration::days(odds::WEEK_DAYS)).format("%Y-%m-%d").to_string();
+    let global = Week::from_tallies(&db::range_tallies(&state.db, Pool::Global, &from, &open).await?);
+    let vienna = Week::from_tallies(&db::range_tallies(&state.db, Pool::Vienna, &from, &open).await?);
+    let seed = odds::seed(&open);
+    // A few thousand made-up rounds: off the async threads.
+    let base = Arc::new(tokio::task::spawn_blocking(move || odds::base(&global, &vienna, seed)).await?);
+    *state.odds_base.lock().unwrap_or_else(|e| e.into_inner()) = Some((open, base.clone()));
+    Ok(base)
+}
+
+/// Stored bets as the odds see them; anything unreadable is left out.
+fn parse_book(rows: &[(String, i64)]) -> Vec<(Market, i64)> {
+    rows.iter().filter_map(|(k, s)| Market::parse(k).map(|m| (m, *s))).collect()
+}
+
+/// The open round's quotes for `markets`, as the book stands now.
+pub async fn quotes(state: &AppState, markets: &[Market]) -> Result<Vec<Quote>, AppError> {
+    let base = todays_base(state).await?;
+    let book = parse_book(&db::book(&state.db, &Round::current(state.now()).key()).await?);
+    Ok(markets.iter().map(|m| odds::quote(&base, &book, *m)).collect())
+}
+
+/// The round page's one line about bets: a couple of ranges and their odds.
+pub async fn teaser(state: &AppState) -> Result<String, AppError> {
+    let pick = [Market::Range { lo: 1, hi: Some(9) }, Market::Range { lo: 10, hi: None }, Market::Nobody];
+    Ok(quotes(state, &pick)
+        .await?
+        .iter()
+        .filter_map(|q| Some(format!("{} {}", q.market.label().trim_start_matches("winner "), odds::odds_label(q.odds_x100?))))
+        .collect::<Vec<_>>()
+        .join(" · "))
 }
 
 #[derive(Deserialize, Default)]
 pub struct BetsQuery {
     pub msg: Option<String>,
+    /// A market by key, as the board's links give it.
+    pub m: Option<String>,
+    /// A range as typed: from, and to (empty: or more).
+    pub lo: Option<String>,
+    pub hi: Option<String>,
 }
 
 fn slip(b: db::Bet) -> SlipView {
@@ -68,7 +103,15 @@ pub async fn page(
     let viewer = current_viewer(&state, &jar).await?;
     let round = Round::current(state.now());
     let open = round.key();
-    let offers = todays_offers(&state).await?;
+
+    // What the visitor picked: a board link, or the two boxes.
+    let typed = q.lo.as_deref().is_some_and(|s| !s.trim().is_empty()) || q.hi.as_deref().is_some_and(|s| !s.trim().is_empty());
+    let picked = match (&q.m, typed) {
+        (Some(key), _) => Market::parse(key),
+        (None, true) => Market::from_inputs(q.lo.as_deref().unwrap_or(""), q.hi.as_deref().unwrap_or("")),
+        (None, false) => None,
+    };
+    let bad_pick = picked.is_none() && (q.m.is_some() || typed);
 
     let can_bet = viewer.as_ref().is_some_and(|v| v.account.verified);
     let (mine, past) = match viewer.as_ref().filter(|v| v.account.verified) {
@@ -81,13 +124,34 @@ pub async fn page(
         }
         None => (Vec::new(), Vec::new()),
     };
-    let taken: Vec<String> = mine.iter().map(|b| b.market.clone()).collect();
+    let taken: Vec<Market> = mine.iter().filter_map(|b| Market::parse(&b.market)).collect();
     let staked: i64 = mine.iter().filter(|b| b.result.is_none()).map(|b| b.stake).sum();
     let net: i64 = past.iter().filter_map(|b| b.payout.map(|p| p - b.stake)).sum();
+
+    let base = todays_base(&state).await?;
+    let book = parse_book(&db::book(&state.db, &open).await?);
+    let quote = picked.map(|m| {
+        let qt = odds::quote(&base, &book, m);
+        QuoteView {
+            key: m.key(),
+            label: m.label(),
+            chance: qt.chance_pct,
+            odds: qt.odds_x100.map(odds::odds_label),
+            odds_x100: qt.odds_x100.unwrap_or(0),
+            pays_on_10: qt.odds_x100.map(|o| odds::payout(10, o)).unwrap_or(0),
+            taken: taken.contains(&m),
+        }
+    });
+    let (lo, hi) = match (picked, typed) {
+        (Some(m), _) => m.inputs(),
+        (None, true) => (q.lo.clone().unwrap_or_default(), q.hi.clone().unwrap_or_default()),
+        (None, false) => (String::new(), String::new()),
+    };
     let notice = q
         .msg
         .as_deref()
         .and_then(crate::copy::notice)
+        .or(bad_pick.then(|| crate::copy::notice("bet_market")).flatten())
         .map(|(kind, text)| if kind == "ok" { Notice::ok(text) } else { Notice::error(text) });
     // Re-read, so the header shows any points just collected.
     let viewer = current_viewer(&state, &jar).await?;
@@ -101,17 +165,27 @@ pub async fn page(
         close_time: round.deadline.with_timezone(&crate::round::TZ).format("%H:%M").to_string(),
         signed_in: viewer.is_some(),
         can_bet,
-        offers: offers
-            .iter()
-            .map(|o| OfferView {
-                key: o.market.key(),
-                label: o.market.label(),
-                chance: o.chance_pct,
-                odds: odds::odds_label(o.odds_x100),
-                odds_x100: o.odds_x100,
-                taken: taken.contains(&o.market.key()),
+        lo,
+        hi,
+        nobody_picked: picked == Some(Market::Nobody),
+        quote,
+        board: odds::board()
+            .into_iter()
+            .map(|m| {
+                let qt = odds::quote(&base, &book, m);
+                OfferView {
+                    key: m.key(),
+                    label: m.label(),
+                    chance: qt.chance_pct,
+                    odds: qt.odds_x100.map(odds::odds_label),
+                    on: picked == Some(m),
+                }
             })
             .collect(),
+        book_total: book.iter().map(|(_, s)| s).sum(),
+        book_bets: book.len(),
+        sims: base.sims,
+        tax: odds::tax_label(),
         mine: mine.into_iter().map(slip).collect(),
         past: past.into_iter().map(slip).collect(),
         room: odds::MAX_BETS_PER_ROUND - staked,
@@ -126,14 +200,16 @@ pub struct BetForm {
     pub market: String,
     pub stake: String,
     /// The odds the visitor was shown, in hundredths: the bet is placed at
-    /// these or not at all.
+    /// these or better, or not at all.
     pub odds: i64,
     /// The round the page was for.
     pub round: String,
 }
 
-fn back(code: &str) -> Response {
-    Redirect::to(&format!("/g/bets?msg={code}")).into_response()
+/// Back to the bets page with a message, and the range still picked.
+fn back(code: &str, market: Option<Market>) -> Response {
+    let pick = market.map(|m| format!("&m={}", m.key())).unwrap_or_default();
+    Redirect::to(&format!("/g/bets?msg={code}{pick}")).into_response()
 }
 
 pub async fn place(
@@ -145,34 +221,36 @@ pub async fn place(
         return Ok(Redirect::to("/login").into_response());
     };
     if !viewer.account.verified {
-        return Ok(back("unverified"));
-    }
-    let open = Round::current(state.now()).key();
-    if form.round != open {
-        return Ok(back("bet_closed"));
+        return Ok(back("unverified", None));
     }
     let Some(market) = Market::parse(&form.market) else {
-        return Ok(back("bet_market"));
+        return Ok(back("bet_market", None));
     };
+    let open = Round::current(state.now()).key();
+    if form.round != open {
+        return Ok(back("bet_closed", Some(market)));
+    }
     let Ok(stake) = form.stake.trim().parse::<i64>() else {
-        return Ok(back("bet_cap"));
+        return Ok(back("bet_cap", Some(market)));
     };
     if !state.limits.take(&format!("bet:{}", viewer.account.id), limits::BETS_PER_ACCOUNT) {
-        return Ok(back("bet_slow"));
+        return Ok(back("bet_slow", Some(market)));
     }
-    let offer = todays_offers(&state).await?.into_iter().find(|o| o.market == market);
-    let Some(offer) = offer.filter(|o| o.odds_x100 == form.odds) else {
-        return Ok(back("bet_odds"));
-    };
+    let base = todays_base(&state).await?;
     crate::economy::collect(&state.db, viewer.account.id, &open).await?;
-    let code = match db::place_bet(&state.db, viewer.account.id, &open, &market.key(), stake, offer.odds_x100).await? {
+    // Priced against the book as it stands when the bet goes in: at the
+    // odds shown, or better if they lengthened since.
+    let shown = form.odds;
+    let price = |rows: &[(String, i64)]| odds::quote(&base, &parse_book(rows), market).odds_x100.filter(|o| *o >= shown);
+    let code = match db::place_bet(&state.db, viewer.account.id, &open, &market.key(), stake, price).await? {
         Placed::In => "bet_placed",
         Placed::Already => "bet_twice",
         Placed::OverCap => "bet_cap",
         Placed::Broke => "broke",
         Placed::Closed => "bet_closed",
+        Placed::Moved => "bet_odds",
     };
-    Ok(back(code))
+    Ok(back(code, Some(market)))
 }
 
 #[cfg(test)]
@@ -197,7 +275,7 @@ mod tests {
     }
 
     async fn bet(db: &Db, who: i64, round: &str, market: &str, stake: i64, odds: i64) -> Placed {
-        db::place_bet(db, who, round, market, stake, odds).await.unwrap()
+        db::place_bet(db, who, round, market, stake, |_| Some(odds)).await.unwrap()
     }
 
     #[tokio::test]
@@ -207,12 +285,12 @@ mod tests {
         collect(&t.db, ann, "2026-10-21").await.unwrap();
         let start = db::balance(&t.db, ann).await.unwrap();
 
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "under:10", 50, 135).await, Placed::In);
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:1:9", 50, 135).await, Placed::In);
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), start - 50);
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "under:10", 10, 135).await, Placed::Already, "one per market");
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "over:10", 101, 260).await, Placed::OverCap, "per bet");
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "over:10", 0, 260).await, Placed::OverCap);
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "over:10", 100, 260).await, Placed::In, "both sides is allowed");
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:1:9", 10, 135).await, Placed::Already, "one per range");
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", 101, 260).await, Placed::OverCap, "per bet");
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", 0, 260).await, Placed::OverCap);
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", 100, 260).await, Placed::In, "both sides is allowed");
         assert_eq!(bet(&t.db, ann, "2026-10-21", "none", 60, 980).await, Placed::OverCap, "200 a round");
         assert_eq!(bet(&t.db, ann, "2026-10-21", "none", 50, 980).await, Placed::In);
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), start - 200);
@@ -235,8 +313,8 @@ mod tests {
             plays(&t.db, who, "2026-10-21", v).await;
         }
         // Winner will be 7.
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "under:10", 50, 135).await, Placed::In);
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "over:10", 20, 260).await, Placed::In);
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:1:9", 50, 135).await, Placed::In);
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", 20, 260).await, Placed::In);
         assert_eq!(bet(&t.db, bob, "2026-10-21", "none", 10, 980).await, Placed::In);
         let (a0, b0) = (db::balance(&t.db, ann).await.unwrap(), db::balance(&t.db, bob).await.unwrap());
 
@@ -244,9 +322,9 @@ mod tests {
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), a0 + 67, "50 at ×1.35 pays 67; over loses");
         assert_eq!(db::balance(&t.db, bob).await.unwrap(), b0, "nobody-wins lost");
         let slips = db::bets_of(&t.db, ann, "").await.unwrap();
-        let won = slips.iter().find(|b| b.market == "under:10").unwrap();
+        let won = slips.iter().find(|b| b.market == "range:1:9").unwrap();
         assert_eq!((won.result.as_deref(), won.payout), (Some("won"), Some(67)));
-        let lost = slips.iter().find(|b| b.market == "over:10").unwrap();
+        let lost = slips.iter().find(|b| b.market == "range:10:").unwrap();
         assert_eq!((lost.result.as_deref(), lost.payout), (Some("lost"), Some(0)));
         // Settling again pays nothing more, and the round takes no more bets.
         settle_all(&t.db, "2026-10-22").await.unwrap();
@@ -261,7 +339,7 @@ mod tests {
         plays(&t.db, ann, "2026-10-21", 3).await;
         plays(&t.db, bob, "2026-10-21", 3).await;
         bet(&t.db, ann, "2026-10-21", "none", 10, 980).await;
-        bet(&t.db, bob, "2026-10-21", "under:5", 10, 180).await;
+        bet(&t.db, bob, "2026-10-21", "range:1:4", 10, 180).await;
         let (a0, b0) = (db::balance(&t.db, ann).await.unwrap(), db::balance(&t.db, bob).await.unwrap());
         settle_all(&t.db, "2026-10-22").await.unwrap();
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), a0 + 98);
@@ -286,8 +364,8 @@ mod tests {
         let (ann, cheat) = (player(&t.db, "ann").await, player(&t.db, "cheat").await);
         plays(&t.db, ann, "2026-10-21", 4).await;
         plays(&t.db, cheat, "2026-10-21", 2).await;
-        bet(&t.db, ann, "2026-10-21", "under:5", 30, 180).await;
-        bet(&t.db, cheat, "2026-10-21", "over:5", 30, 180).await;
+        bet(&t.db, ann, "2026-10-21", "range:1:4", 30, 180).await;
+        bet(&t.db, cheat, "2026-10-21", "range:5:", 30, 180).await;
         let c0 = db::balance(&t.db, cheat).await.unwrap();
         db::ban_account(&t.db, cheat, "alts", "2026-10-21").await.unwrap();
         assert_eq!(db::balance(&t.db, cheat).await.unwrap(), c0 + 30 + GUESS_STAKE, "bet and stake back");
@@ -302,12 +380,40 @@ mod tests {
         assert_eq!(refunds.0, 2, "each bet refunded exactly once");
     }
 
+    #[tokio::test]
+    async fn a_bet_refused_by_its_price_takes_nothing() {
+        let t = temp_db().await;
+        let ann = player(&t.db, "ann").await;
+        collect(&t.db, ann, "2026-10-21").await.unwrap();
+        let start = db::balance(&t.db, ann).await.unwrap();
+        assert_eq!(db::place_bet(&t.db, ann, "2026-10-21", "none", 10, |_| None).await.unwrap(), Placed::Moved);
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), start);
+        assert!(db::bets_of(&t.db, ann, "").await.unwrap().is_empty());
+        // The price sees the bets already in.
+        bet(&t.db, ann, "2026-10-21", "range:1:4", 30, 200).await;
+        let mut seen = Vec::new();
+        db::place_bet(&t.db, ann, "2026-10-21", "none", 10, |rows| {
+            seen = rows.to_vec();
+            Some(900)
+        })
+        .await
+        .unwrap();
+        assert_eq!(seen, vec![("range:1:4".to_string(), 30)]);
+    }
+
     // ------------------------------------------------------------- pages
 
-    async fn bets_page(state: &AppState, token: Option<&str>, msg: Option<&str>) -> String {
+    async fn bets_page_q(state: &AppState, token: Option<&str>, q: BetsQuery) -> String {
         let jar = token.map(jar).unwrap_or_default();
-        let q = Query(BetsQuery { msg: msg.map(str::to_string) });
-        body(page(State(state.clone()), jar, q).await.unwrap()).await
+        body(page(State(state.clone()), jar, Query(q)).await.unwrap()).await
+    }
+
+    async fn bets_page(state: &AppState, token: Option<&str>, msg: Option<&str>) -> String {
+        bets_page_q(state, token, BetsQuery { msg: msg.map(str::to_string), ..Default::default() }).await
+    }
+
+    fn picked(m: &str) -> BetsQuery {
+        BetsQuery { m: Some(m.into()), ..Default::default() }
     }
 
     fn form(state: &AppState, market: &str, stake: &str, odds: i64) -> Form<BetForm> {
@@ -319,47 +425,96 @@ mod tests {
         })
     }
 
-    async fn odds_for(state: &AppState, market: Market) -> i64 {
-        todays_offers(state).await.unwrap().into_iter().find(|o| o.market == market).unwrap().odds_x100
+    async fn odds_now(state: &AppState, market: &str) -> Option<i64> {
+        quotes(state, &[Market::parse(market).unwrap()]).await.unwrap()[0].odds_x100
+    }
+
+    async fn odds_for(state: &AppState, market: &str) -> i64 {
+        odds_now(state, market).await.unwrap()
+    }
+
+    /// Last week, as a crowd of 20 a day picking mostly low numbers.
+    async fn last_week(state: &AppState) {
+        let today = Round::current(state.now()).date;
+        let mut n = 0;
+        for d in 1..=7 {
+            let day = (today - chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
+            for (i, v) in [1, 1, 2, 2, 3, 3, 3, 4, 5, 5, 6, 7, 8, 9, 11, 13, 17, 23, 42, 100].into_iter().enumerate() {
+                let who = player(&state.db, &format!("p{d}x{i}")).await;
+                db::insert_guess(&state.db, Pool::Global, &day, who, v, true).await.unwrap();
+                n += 1;
+            }
+        }
+        assert_eq!(n, 140);
     }
 
     #[tokio::test]
-    async fn the_page_lists_every_market_and_takes_bets_from_players() {
+    async fn the_page_shows_the_board_and_a_picked_range_takes_a_bet() {
         let (_t, state) = app(&[]).await;
         player(&state.db, "ann").await;
         let out = bets_page(&state, None, None).await;
-        assert!(out.contains("winner under 10") && out.contains("nobody wins") && out.contains("winner 50 or more"));
+        assert!(out.contains("winner exactly 1") && out.contains("winner 50 or more") && out.contains("nobody wins"));
+        assert!(out.contains(r#"href="/g/bets?m=range:6:9""#));
         assert!(!out.contains(r#"action="/g/bet""#), "signed out: no forms");
         let html = bets_page(&state, Some("ann"), None).await;
-        assert_eq!(html.matches(r#"action="/g/bet""#).count(), 9);
+        assert!(!html.contains(r#"action="/g/bet""#), "nothing picked yet");
         assert!(html.contains("200 left to stake this round"));
 
-        let o = odds_for(&state, Market::Under(10)).await;
-        let resp = place(State(state.clone()), jar("ann"), form(&state, "under:10", "40", o)).await.unwrap();
-        assert_eq!(location(&resp), "/g/bets?msg=bet_placed");
-        let html = bets_page(&state, Some("ann"), Some("bet_placed")).await;
+        let html = bets_page_q(&state, Some("ann"), picked("range:5:12")).await;
+        assert_eq!(html.matches(r#"action="/g/bet""#).count(), 1);
+        assert!(html.contains("winner 5 to 12") && html.contains(r#"value="5""#) && html.contains(r#"value="12""#));
+
+        let o = odds_for(&state, "range:5:12").await;
+        let resp = place(State(state.clone()), jar("ann"), form(&state, "range:5:12", "40", o)).await.unwrap();
+        assert_eq!(location(&resp), "/g/bets?msg=bet_placed&m=range:5:12");
+        let html = bets_page_q(&state, Some("ann"), BetsQuery { msg: Some("bet_placed".into()), m: Some("range:5:12".into()), ..Default::default() }).await;
         assert!(html.contains("bet placed · settled at 12:42"));
         assert!(html.contains("your bets today"));
         assert!(html.contains("160 left to stake this round"));
-        assert_eq!(html.matches(r#"action="/g/bet""#).count(), 8, "that market is taken");
+        assert!(html.contains("placed &middot; one bet per range a round") && !html.contains(r#"action="/g/bet""#));
+        assert!(html.contains("on the book today: 40 points, 1 bet"));
         assert!(html.contains(&format!("<td class=\"num b\">{}</td>", odds::payout(40, o))));
     }
 
     #[tokio::test]
-    async fn a_bet_is_placed_at_the_odds_shown_or_not_at_all() {
+    async fn a_typed_range_is_quoted_and_a_bad_one_is_explained() {
+        let (_t, state) = app(&[]).await;
+        player(&state.db, "ann").await;
+        let typed = |lo: &str, hi: &str| BetsQuery { lo: Some(lo.into()), hi: Some(hi.into()), ..Default::default() };
+        let html = bets_page_q(&state, Some("ann"), typed("7", "")).await;
+        assert!(html.contains("winner 7 or more") && html.contains(r#"action="/g/bet""#));
+        let html = bets_page_q(&state, Some("ann"), typed("3", "3")).await;
+        assert!(html.contains("winner exactly 3"));
+        let html = bets_page_q(&state, Some("ann"), typed("12", "5")).await;
+        assert!(html.contains("pick a range: whole numbers from 1, low to high"));
+        assert!(html.contains(r#"value="12""#), "what was typed stays");
+        assert!(!html.contains(r#"action="/g/bet""#));
+        // Any winner at all: so likely that after the cut it pays less than it costs.
+        let html = bets_page_q(&state, Some("ann"), typed("1", "")).await;
+        assert!(html.contains("too safe to bet on") && !html.contains(r#"action="/g/bet""#));
+    }
+
+    #[tokio::test]
+    async fn a_bet_is_placed_at_the_odds_shown_or_better_or_not_at_all() {
         let (_t, state) = app(&[]).await;
         let ann = player(&state.db, "ann").await;
-        let o = odds_for(&state, Market::Nobody).await;
+        let o = odds_for(&state, "none").await;
         for (f, code) in [
-            (form(&state, "none", "10", o + 5), "bet_odds"),
-            (form(&state, "under:7", "10", o), "bet_market"),
-            (form(&state, "none", "lots", o), "bet_cap"),
-            (Form(BetForm { market: "none".into(), stake: "10".into(), odds: o, round: "2000-01-01".into() }), "bet_closed"),
+            (form(&state, "none", "10", o + 5), "bet_odds&m=none"),
+            (form(&state, "range:9:3", "10", o), "bet_market"),
+            (form(&state, "under:7;", "10", o), "bet_market"),
+            (form(&state, "none", "lots", o), "bet_cap&m=none"),
+            (form(&state, "range:1:", "10", 105), "bet_odds&m=range:1:"),
+            (Form(BetForm { market: "none".into(), stake: "10".into(), odds: o, round: "2000-01-01".into() }), "bet_closed&m=none"),
         ] {
             let resp = place(State(state.clone()), jar("ann"), f).await.unwrap();
             assert_eq!(location(&resp), format!("/g/bets?msg={code}"));
         }
         assert!(db::bets_of(&state.db, ann, "").await.unwrap().is_empty());
+        // Shown worse odds than the book now gives: placed at the better ones.
+        let resp = place(State(state.clone()), jar("ann"), form(&state, "none", "10", o - 50)).await.unwrap();
+        assert_eq!(location(&resp), "/g/bets?msg=bet_placed&m=none");
+        assert_eq!(db::bets_of(&state.db, ann, "").await.unwrap()[0].odds_x100, o);
         // Not signed in: to sign in. Not confirmed: told so.
         let resp = place(State(state.clone()), CookieJar::new(), form(&state, "none", "10", o)).await.unwrap();
         assert_eq!(location(&resp), "/login");
@@ -369,35 +524,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn odds_stay_put_for_the_day_and_a_placed_bet_keeps_its_own() {
+    async fn odds_come_from_last_week_and_move_as_people_bet() {
         let (_t, state) = app(&[]).await;
-        let ann = player(&state.db, "ann").await;
-        let first = todays_offers(&state).await.unwrap();
-        // Rounds closing in the past do not move today's odds once set...
+        last_week(&state).await;
+        let base = todays_base(&state).await.unwrap();
+        assert_eq!((base.picks, base.players, base.sims > 0), (140, 20, true));
+        let html = bets_page(&state, None, None).await;
+        assert!(html.contains("last week&rsquo;s picks replayed"));
+
+        let (ann, bob) = (player(&state.db, "ann").await, player(&state.db, "bob").await);
+        let (mid, high) = ("range:5:12", "range:1:4");
+        let (mid0, high0) = (odds_for(&state, mid).await, odds_for(&state, high).await);
+        place(State(state.clone()), jar("ann"), form(&state, mid, "50", mid0)).await.unwrap();
+        let mid1 = odds_for(&state, mid).await;
+        assert!(mid1 < mid0, "backed: shorter, {mid0} -> {mid1}");
+        assert!(odds_for(&state, high).await > high0, "not backed: longer");
+        // Bob is shown the new odds; the old ones are gone.
+        let resp = place(State(state.clone()), jar("bob"), form(&state, mid, "50", mid0)).await.unwrap();
+        assert_eq!(location(&resp), "/g/bets?msg=bet_odds&m=range:5:12");
+        place(State(state.clone()), jar("bob"), form(&state, mid, "50", mid1)).await.unwrap();
+        // Each keeps the odds they bet at.
+        assert_eq!(db::bets_of(&state.db, ann, "").await.unwrap()[0].odds_x100, mid0);
+        assert_eq!(db::bets_of(&state.db, bob, "").await.unwrap()[0].odds_x100, mid1);
+        assert!(odds_for(&state, mid).await < mid1);
+        // The odds on the round page follow the book too.
+        let teaser = teaser(&state).await.unwrap();
+        assert!(teaser.contains("10 or more ×") && teaser.contains("nobody wins ×"), "{teaser}");
+    }
+
+    #[tokio::test]
+    async fn the_simulation_runs_once_a_round() {
+        let (_t, state) = app(&[]).await;
+        let first = todays_base(&state).await.unwrap();
+        // Rounds closing in the past do not change today's starting odds once set.
         let bob = player(&state.db, "bob").await;
         let yesterday = Round::current(state.now()).previous_date().format("%Y-%m-%d").to_string();
         db::insert_guess(&state.db, Pool::Global, &yesterday, bob, 40, true).await.unwrap();
-        assert_eq!(todays_offers(&state).await.unwrap(), first, "cached for the round");
-        // ...and a bet carries the odds it was placed at, whatever comes later.
-        let o = odds_for(&state, Market::Over(20)).await;
-        place(State(state.clone()), jar("ann"), form(&state, "over:20", "10", o)).await.unwrap();
-        *state.offers.lock().unwrap() = None;
-        assert_eq!(db::bets_of(&state.db, ann, "").await.unwrap()[0].odds_x100, o);
+        assert!(Arc::ptr_eq(&todays_base(&state).await.unwrap(), &first), "cached for the round");
+        *state.odds_base.lock().unwrap() = None;
+        assert_eq!(todays_base(&state).await.unwrap().picks, 1, "worked out again: yesterday counts");
     }
 
     #[tokio::test]
     async fn scripts_are_slowed_down() {
         let (_t, state) = app(&[]).await;
         player(&state.db, "ann").await;
-        let o = odds_for(&state, Market::Nobody).await;
+        let o = odds_for(&state, "none").await;
         let mut last = String::new();
         for _ in 0..31 {
             let resp = place(State(state.clone()), jar("ann"), form(&state, "none", "1", o)).await.unwrap();
             last = location(&resp).to_string();
         }
-        assert_eq!(last, "/g/bets?msg=bet_slow");
+        assert_eq!(last, "/g/bets?msg=bet_slow&m=none");
     }
-
     #[tokio::test]
     async fn the_global_round_page_points_to_the_bets_and_the_42_round_does_not() {
         let (_t, state) = app(&[]).await;
@@ -405,7 +584,7 @@ mod tests {
         let q = || Query(crate::handlers::IndexQuery { msg: None, n: None });
         let global = body(crate::handlers::global_index(State(state.clone()), jar("s"), q()).await.unwrap()).await;
         assert!(global.contains(r#"<a href="/g/bets">all bets &rarr;</a>"#));
-        assert!(global.contains("under 10 ×"));
+        assert!(global.contains("10 or more ×"), "1 to 9 is too safe to offer with no history");
         assert!(global.contains(r#"href="/g/bets">bets</a>"#), "a tab in the global round");
         let vienna = body(crate::handlers::index(State(state.clone()), jar("s"), q()).await.unwrap()).await;
         assert!(!vienna.contains("/g/bets"), "no bets in the 42 round");
@@ -417,7 +596,7 @@ mod tests {
         let ann = player(&state.db, "ann").await;
         let day = Round::current(state.now()).previous_date().format("%Y-%m-%d").to_string();
         plays(&state.db, ann, &day, 3).await;
-        bet(&state.db, ann, &day, "under:5", 10, 180).await;
+        bet(&state.db, ann, &day, "range:1:4", 10, 180).await;
         settle_all(&state.db, &Round::current(state.now()).key()).await.unwrap();
         let html = body(crate::points_pages::points(State(state.clone()), jar("ann")).await.unwrap()).await;
         assert!(html.contains(">bet<") && html.contains(">bet won<") && html.contains("+18"), "{html}");

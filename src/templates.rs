@@ -532,13 +532,27 @@ pub struct WelcomeTemplate {
     pub error: Option<&'static str>,
 }
 
-/// A market on the bets page.
+/// A ready-made range on the bets board.
 pub struct OfferView {
     pub key: String,
     pub label: String,
     pub chance: i64,
-    pub odds: String,
+    /// None: too safe to offer.
+    pub odds: Option<String>,
+    /// The one picked above.
+    pub on: bool,
+}
+
+/// The range the visitor picked, priced.
+pub struct QuoteView {
+    pub key: String,
+    pub label: String,
+    pub chance: i64,
+    /// None: too safe to offer.
+    pub odds: Option<String>,
     pub odds_x100: i64,
+    /// What 10 points on it would bring back.
+    pub pays_on_10: i64,
     /// Bet on already today.
     pub taken: bool,
 }
@@ -569,7 +583,19 @@ pub struct BetsTemplate {
     pub close_time: String,
     pub signed_in: bool,
     pub can_bet: bool,
-    pub offers: Vec<OfferView>,
+    /// The range boxes, as picked or typed.
+    pub lo: String,
+    pub hi: String,
+    pub nobody_picked: bool,
+    pub quote: Option<QuoteView>,
+    pub board: Vec<OfferView>,
+    /// Points on the book today, and how many bets.
+    pub book_total: i64,
+    pub book_bets: usize,
+    /// Made-up rounds behind the odds; 0 if there were no picks to replay.
+    pub sims: u32,
+    /// "8%".
+    pub tax: String,
     pub mine: Vec<SlipView>,
     pub past: Vec<SlipView>,
     /// How much more may be staked on bets this round.

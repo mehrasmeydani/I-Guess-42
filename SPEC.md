@@ -578,123 +578,131 @@ bragging points. Two things keep the leaderboard meaningful:
 
 ## 9. Betting and odds
 
-### 9.1 Markets
+### 9.1 What you bet on
 
 For every global round, open from when the round opens until its 12:42
 deadline. W = that round's winning number (the lowest unique number), or
-none.
+none. The player picks the bet themselves:
 
-| Market id | Wins when |
-|---|---|
-| `under:N` for N in 5, 10, 20, 50 | W exists and W < N |
-| `over:N` for N in 5, 10, 20, 50 | W exists and W ≥ N |
-| `none` | nobody wins |
+| Market id | Wins when | Typed as |
+|---|---|---|
+| `range:A:B` | W exists and A ≤ W ≤ B | from A to B |
+| `range:A:` | W exists and W ≥ A | from A, "to" left empty |
+| `range:A:A` | W = A | the same number twice |
+| `none` | nobody wins | "or: nobody wins" |
 
-Under/over bets **lose** on a no-winner day. That's standard bookmaker
-behaviour and keeps `none` meaningful.
+1 ≤ A ≤ B ≤ 1 000 000 000. Ranges **lose** on a no-winner day. That's
+standard bookmaker behaviour and keeps `none` meaningful. The first bets were
+stored as `under:N` / `over:N`; those still read as `range:1:N−1` / `range:N:`.
 
 Rules:
 
-- One bet per market per round (DB `UNIQUE`); betting both sides of a line is
-  allowed.
-- Stake 1 to `MAX_BET`, and total bets per round at most
-  `MAX_BETS_STAKE_PER_ROUND`.
+- One bet per range per round (DB `UNIQUE` on the market key); any number of
+  different ranges, overlapping or not.
+- Stake 1 to `MAX_BET` (100), and all of an account's bets in a round at most
+  `MAX_BETS_PER_ROUND` (200).
 - **You don't need to guess to bet**, and betting doesn't affect your guess.
 - Placing a bet inserts the bet and `ledger(kind='bet', ref=bet_id, −stake)` in
   one transaction.
 
-### 9.2 Estimating probabilities
+### 9.2 Where the chances start: last week, replayed
 
-For each market, the probability p that it wins is estimated from past global
-rounds, with recent days counting more. Then the 42 pool's history pulls it
-towards a sensible value while the global pool is young.
+Once per open round:
 
-Let the last up to 90 closed global rounds be days d = 1 … n (d = 1 is
-yesterday). For a market with outcome h_d ∈ {0, 1} on day d:
+1. Take every real pick from the last 7 closed global rounds. If there are
+   fewer than 30, add the 42 round's picks from the same week (never named on
+   the page).
+2. Players per round n = last week's global average (else the 42 round's,
+   else 10), between 2 and 1000.
+3. Simulate 4000 rounds: n players each draw one of those picks at random;
+   the lowest number drawn exactly once wins, or nobody does. The seed is the
+   round's date, so a day's numbers are the same on every restart.
+4. A range's starting chance p0 = 0.95 × (share of simulated rounds it wins)
+   + 0.05 × a smooth curve (winners falling off as 1/n², 5% nobody), so a
+   range nobody picked last week is unlikely, not impossible. With no picks
+   at all, the curve alone.
 
-```
-weight      w_d = 0.5 ^ ((d − 1) / 14)            # a 14-day half-life
-evidence    S   = Σ w_d · h_d,   T = Σ w_d
-prior       p0  = the same estimate computed over the 42 pool's history
-                  (0.5 if that has no history either)
-smoothed    p   = (S + α · p0) / (T + α),  α = 4
-```
+The ready-made board - exactly 1, 2, 3, 4–5, 6–9, 10–19, 20–49, 50 or more,
+nobody wins - covers every outcome once, so its chances add up to 100%.
 
-- **α = 4** means the prior counts like 4 days of data. On day one,
-  p = p0. After a month of global rounds the global data dominates.
-- p is clamped to [0.02, 0.98], so no market is ever "certain".
-- Rounds with zero real players (`participates = 1`) are skipped, and so are
-  rounds that were voided by moderation.
+### 9.3 The book: odds move as people bet
 
-### 9.3 From probability to odds
-
-Decimal odds, as on European betting sites:
+Points already bet on the open round count as evidence, as money moves a
+betting exchange. With L = 1000 points of liquidity behind the simulation:
 
 ```
-fair odds      = 1 / p
-offered odds   = (1 − margin) / p,  margin = 0.08
-then           rounded *down* to the nearest 0.05, clamped to [1.05, 50.00]
+backed(R) = Σ over open bets b: stake_b × p0(R ∩ b) / p0(b)
+p(R)      = (L × p0(R) + backed(R)) / (L + Σ stake_b),  clamped to [0.01, 0.99]
+```
+
+A bet on 5–12 makes 5–12 (and ranges overlapping it) likelier and every
+other range less likely, so its odds shorten and theirs lengthen. Only bets
+move the book; today's guesses never go in (secret until 12:42). A heavy bet
+on one number can hint at what its bettor picked - that is the bettor's own
+choice to make.
+
+### 9.4 From chance to odds: the tax
+
+```
+offered odds   = (1 − 0.08) / p, rounded *down* to the nearest 0.05, at most 50.00
+               not offered at all below 1.05 ("too safe to bet on")
 stored as      odds_x100 (integer)
 payout         = floor(stake × odds_x100 / 100)     # includes the stake back
 ```
 
-- **Locked at placement.** The odds shown on the slip are the odds you get,
-  even if they change later that day.
-- The odds are recomputed when the round opens (after settlement, see 10) and
-  cached in memory for the day. They do **not** move with bets placed or
-  guesses made today. Today's guesses are secret until 12:42, and moving odds
-  would leak information about them.
+- The 8% tax means every bet loses 8% on average. A near-certain range
+  ("1 or more", p ≈ 0.95) would pay under ×1.00, so it is refused: no free
+  points for betting on the obvious.
+- **Locked at placement.** The form carries the odds shown. The bet is
+  priced again inside the write transaction, against the book as it stands
+  then: placed at those odds or better, else refused with "odds moved". Two
+  bets at once each see the other.
 
-### 9.4 Worked example
+### 9.5 Worked example
 
-Market `under:10`. The global pool has 20 days of history, and the winner was
-under 10 on 12 of them, mostly recently (S = 8.1, T = 12.4 after
-weighting). The 42 pool's history gives p0 = 0.70.
+Last week's replay gives 5–12 p0 = 0.29. Nothing on the book:
+0.92 / 0.29 = 3.17 → **×3.15**. Ann bets 50 on it:
+p = (1000 × 0.29 + 50) / 1050 = 0.324 → 0.92 / 0.324 = 2.84 → **×2.80** for
+the next person. Ann's 50 pays **157** if W lands in 5–12 (net +107), 0 if not.
 
-```
-p        = (8.1 + 4 × 0.70) / (12.4 + 4) = 10.9 / 16.4 = 0.665
-offered  = 0.92 / 0.665 = 1.383  → 1.35
-```
-
-A 50-point bet on `under:10` pays **67** if it wins (net +17) and 0 if it
-loses.
-
-### 9.5 Bets page `/g/bets`
+### 9.6 Bets page `/g/bets`
 
 ```
- TODAY'S MARKETS                     close 12:42 · odds locked when you bet
- ──────────────────────────────────────────────────────────────────────────
-                    chance   odds
- under 5             38 %    ×2.40     [ stake ][ bet ]
- over 5              55 %    ×1.65     [ stake ][ bet ]
- under 10            67 %    ×1.35     ...
+ TODAY'S BETS              round 22.10.2026 · close 12:42 · odds locked when you bet
+ winner from [ 5 ] to [ 12 ] [see odds]   or: nobody wins
+ ┌──────────────────────────────┐
+ │ winner 5 to 12               │
+ │ chance 29%  odds ×3.10  10 pays 31
+ │ [ stake ][ bet ]             │
+ └──────────────────────────────┘
+ WHERE THE WINNER LANDS        chance   odds
+ winner exactly 1                 22%   ×4.15   (each row links to its quote)
  ...
- nobody wins          7 %    ×13.10    ...
-
- YOUR BETS TODAY           stake   odds    pays
- under 10                     50   ×1.35     67
-
- PAST SLIPS  (last 14 days, won/lost/void, net)
+ nobody wins                       1%  ×50.00
+ odds: last week's picks replayed 4000 times · they move as people bet ·
+ the house keeps 8% · on the book today: 50 points, 1 bet
+ YOUR BETS TODAY / PAST BETS (last 14 days, won/lost/refunded, net)
 ```
 
-The "chance" column shows p (before margin) as a percentage, with a hover
-note "based on the last 90 days, recent days count more". This explains what
-the algorithm does without requiring trust.
+Picking is a plain GET (`?lo=5&hi=12`, or `?m=range:5:12` from the board),
+so it works without scripts. The round page shows a line of odds (1 to 9,
+10 or more, nobody wins - whichever are offered) linking here.
 
-### 9.6 Code layout
+### 9.7 Code layout
 
 `src/odds.rs` holds pure functions, so they are easy to unit test:
 
 ```rust
-pub enum Market { Under(i64), Over(i64), Nobody }
+pub enum Market { Range { lo: i64, hi: Option<i64> }, Nobody }
 pub fn outcome(market: Market, winner: Option<i64>) -> bool;
-pub fn probability(history: &[Option<i64>], prior: f64) -> f64;   // newest first
-pub fn offered_odds_x100(p: f64) -> i64;
+pub fn base(global: &Week, vienna: &Week, seed: u64) -> Base;     // the replay
+pub fn chance(base: &Base, book: &[(Market, i64)], m: Market) -> f64;
+pub fn offered_odds_x100(p: f64) -> Option<i64>;                  // None: too safe
 pub fn payout(stake: i64, odds_x100: i64) -> i64;
 ```
 
-The only floats in the codebase live in `probability()`. Everything that's
-stored or shown as a number of points is an integer.
+All the floats live in `odds.rs`. Everything that's stored or shown as a
+number of points is an integer.
 
 ---
 

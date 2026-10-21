@@ -69,9 +69,10 @@
       <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>
       {% match user %}
         {% when Some with (u) %}
-          {# Points and your name; logging out is on the account page. #}
+          {# Points, your name (your rounds and account), and log out. #}
           {% if pool.is_global() %}{% match u.points %}{% when Some with (p) %}<a class="pts" href="/g/points" title="your points">{{ crate::templates::points_label(p) }}</a>{% when None %}{% endmatch %}{% endif %}
           <a class="who" href="{{ pool.base() }}/me" title="your rounds and account">{{ u.login }}</a>
+          <form method="post" action="/logout"><button type="submit" class="out">log out</button></form>
         {% when None %}
           {% block signin_link %}<a class="signin" href="/login">sign in</a>{% endblock %}
       {% endmatch %}

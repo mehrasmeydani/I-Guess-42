@@ -139,7 +139,7 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
   padding: 2px 8px;
   border: 1px solid var(--edge-strong);
   color: var(--hi);
-  font-weight: 400;
+  font: 400 var(--fs-1)/1.5 var(--font);
   text-decoration: none;
 }
 .status .out:hover { background: var(--hi); border-color: var(--hi); color: var(--bg); }
@@ -1057,22 +1057,28 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
   .diff .change { min-width: 0; }
 }
 
-/* Bets: a stake box and a button in the last column of each market. */
+/* Bets: pick a range (two boxes, a button), then its quote with a stake
+   box. The board below links each ready-made range to its quote. */
+.pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 16px; }
+.pick input[type="text"], .betform input[type="text"] { flex: none; width: 8ch; padding: 8px; background: var(--bg); border: 1px solid var(--edge-strong); border-radius: 0; color: var(--hi); font: 400 var(--fs-2)/1 var(--font); }
+.pick input:focus-visible, .betform input:focus-visible { border-color: var(--hi); }
+.pick button, .betform button { padding: 8px 16px; }
+.pick-none { margin-left: 8px; }
+.pick-none.on { background: var(--hi); color: var(--bg); padding: 0 8px; }
+.quote { margin-top: 16px; padding: 16px; border: 1px solid var(--edge-strong); max-width: 560px; }
+.quote-label { color: var(--hi); font-weight: 700; }
+.quote-figures { display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 8px 0 0; }
+.quote-figures dt { color: var(--dim); font-size: var(--fs-1); }
+.quote-figures dd { margin: 0; color: var(--hi); font-size: var(--fs-3); }
+.quote > p:last-child { margin-top: 12px; }
+.betform { display: flex; gap: 8px; margin: 16px 0 0; }
 .markets td { vertical-align: middle; }
-.betcell { width: 1%; white-space: nowrap; }
-.betform { display: flex; gap: 8px; margin: 0; }
-.betform input { width: 6ch; padding: 4px 8px; background: var(--bg); border: 1px solid var(--edge-strong); border-radius: 0; color: var(--hi); font: 400 var(--fs-2)/1.4 var(--font); }
-.betform input:focus-visible { border-color: var(--hi); }
-.betform button { padding: 4px 12px; }
+.markets tr.on td { background: var(--panel); }
+.markets tr.on a { background: var(--hi); color: var(--bg); padding: 0 8px; margin-left: -8px; }
 .teaser { margin-top: 24px; }
 
-/* On a phone each market is two lines: the bet, its chance and odds, then
-   the stake box and button across the width. */
 @media (max-width: 640px) {
-  .markets thead tr, .markets tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) 5ch 8ch; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--edge); }
-  .markets th, .markets td { padding: 0 0 0 8px; border: 0; }
-  .markets th:first-child, .markets td:first-child { padding-left: 0; }
-  .markets thead th:nth-child(4) { display: none; }
-  .markets .betcell { grid-column: 1 / -1; width: auto; padding: 8px 0 0; }
-  .betform input { flex: 1; width: auto; }
+  .pick input[type="text"] { flex: 1 1 6ch; width: 6ch; }
+  .pick-none { flex-basis: 100%; margin-left: 0; }
+  .betform input[type="text"] { flex: 1; width: auto; }
 }
