@@ -86,11 +86,15 @@ async fn lock_held(state: &AppState, account_id: i64, held: crate::held::Held) -
     if !db::account_verified(&state.db, account_id).await? {
         return Ok("/g?msg=held_unverified");
     }
-    if db::insert_guess(&state.db, Pool::Global, &round, account_id, held.value, true).await? {
-        Ok("/g?msg=saved")
-    } else {
-        Ok("/g?msg=held_existing")
-    }
+    crate::economy::collect(&state.db, account_id, &round).await?;
+    Ok(
+        match db::lock_global_guess(&state.db, &round, account_id, held.value, crate::economy::GUESS_STAKE).await? {
+            db::Locked::In | db::Locked::AlreadySame => "/g?msg=saved",
+            db::Locked::AlreadyOther => "/g?msg=held_existing",
+            db::Locked::Broke => "/g?msg=broke",
+            db::Locked::Voided => "/g?msg=voided",
+        },
+    )
 }
 
 /// Sends a mail, and logs rather than fails if it does not go out: the

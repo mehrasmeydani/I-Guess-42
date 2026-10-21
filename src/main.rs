@@ -5,6 +5,7 @@ mod config;
 mod credentials;
 mod db;
 mod demo;
+mod economy;
 mod handlers;
 mod held;
 mod ics;
@@ -15,6 +16,7 @@ mod oauth;
 mod og;
 mod platform;
 mod points;
+mod points_pages;
 mod round;
 mod signin;
 mod stats;
@@ -96,6 +98,8 @@ async fn main() -> Result<()> {
         (None, _) => {}
     }
     let state = AppState::new(db, cfg, http);
+    // In-game points: fake ones, so they run on test instances too.
+    tokio::spawn(economy::run(state.clone()));
 
     let router = Router::new()
         .route("/", get(handlers::index))
@@ -114,6 +118,8 @@ async fn main() -> Result<()> {
         .route("/day/{date}/og.png", get(handlers::day_image))
         .route("/g/trends", get(handlers::global_trends))
         .route("/g/me", get(handlers::global_me))
+        .route("/g/points", get(points_pages::points))
+        .route("/g/leaderboard", get(points_pages::leaderboard))
         .route("/me", get(handlers::me))
         .route("/g/guess", post(handlers::global_submit_guess))
         .route("/g/guess/confirm", post(handlers::global_confirm_guess))
@@ -140,6 +146,8 @@ async fn main() -> Result<()> {
         .route("/mod", get(moderation::moderation))
         .route("/mod/ban", post(moderation::ban))
         .route("/mod/unban", post(moderation::unban))
+        .route("/mod/adjust", post(moderation::adjust))
+        .route("/mod/void", post(moderation::void))
         .route("/privacy", get(moderation::privacy))
         .route("/imprint", get(moderation::imprint))
         .route("/healthz", get(handlers::healthz))

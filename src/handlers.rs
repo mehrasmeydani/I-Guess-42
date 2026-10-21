@@ -63,6 +63,10 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
         "mail_failed" => Notice::error("The mail didn't go out. Try again later."),
         "welcome" => Notice::ok("Welcome. Pick a number: lowest one nobody else picks wins."),
         "held_existing" => Notice::error("You had already guessed this round, so that number stands."),
+        "voided" => Notice::error("This round was called off by a moderator; it takes no more guesses."),
+        "broke" => Notice::error(
+            "Not enough points for a guess. You get more each day you visit the round.",
+        ),
         "held_unverified" => Notice::error(
             "Confirm your email first; then pick your number again. Nothing was entered.",
         ),
@@ -148,11 +152,24 @@ async fn index_in(
     let round = Round::current(now);
     let round_key = round.key();
 
-    let viewer = current_viewer(&state, &jar).await?;
+    let mut viewer = current_viewer(&state, &jar).await?;
     if let Some(away) = outside_42(pool, viewer.as_ref(), "/g/") {
         return Ok(away);
     }
     let player = viewer.as_ref().and_then(|v| player_in(pool, v));
+    // The global round: pay out anything that closed since the settler last
+    // looked, so the page never shows an unpaid pot, and hand a player who
+    // turned up their points for today.
+    let pot = if pool == Pool::Global {
+        crate::economy::settle_all(&state.db, &round_key).await?;
+        if let Some(p) = player {
+            crate::economy::collect(&state.db, p, &round_key).await?;
+            viewer = current_viewer(&state, &jar).await?;
+        }
+        Some(db::pot_so_far(&state.db, &round_key).await?)
+    } else {
+        None
+    };
     let my_guess_label = match player {
         Some(p) => db::my_guess(&state.db, pool, &round_key, p)
             .await?
@@ -213,6 +230,11 @@ async fn index_in(
         impersonating: auth::admin_return_token(&jar).is_some(),
         calendar_href: format!("{}/round/{round_key}.ics", pool.base()),
         stats,
+        pot_label: pot.map(|(stakes, carried)| crate::templates::points_label(&(stakes + carried))),
+        carried_label: pot
+            .filter(|(_, carried)| *carried > 0)
+            .map(|(_, carried)| crate::templates::points_label(&carried)),
+        stake_label: (pool == Pool::Global).then(|| crate::templates::points_label(&crate::economy::GUESS_STAKE)),
         round_key,
         time_left: crate::round::format_duration(seconds_left),
         time_left_spoken: crate::round::spoken_duration(seconds_left),
@@ -463,10 +485,24 @@ async fn day_in(
     let total_rounds = db::closed_round_count(&state.db, pool, &open_round).await?;
     let previous = earlier.first().map(|r| r.date_key.clone());
     let data_source = data_source(&state, pool).await?;
+    let pot_line = match pool {
+        Pool::Global => db::pot(&state.db, &date).await?.map(|p| {
+            let total = templates::points_label(&(p.stakes + p.carried_in));
+            if p.voided {
+                "this round was called off; every stake was refunded.".to_string()
+            } else if p.winner_id.is_some() {
+                format!("the pot of {total} went to the winner.")
+            } else {
+                format!("nobody won, so the pot of {total} rolled over to the next round.")
+            }
+        }),
+        Pool::Vienna => None,
+    };
 
     Ok(templates::render(&DayTemplate {
         pool,
         previous,
+        pot_line,
         takeaway,
         summary: summary_text,
         data_source,
@@ -795,6 +831,12 @@ async fn submit_guess_in(
     {
         return Ok(back(pool, "already"));
     }
+    if pool == Pool::Global {
+        crate::economy::collect(&state.db, player, &round_key).await?;
+        if db::balance(&state.db, player).await? < crate::economy::GUESS_STAKE {
+            return Ok(back(pool, "broke"));
+        }
+    }
 
     Ok(templates::render(&ConfirmTemplate {
         pool,
@@ -807,6 +849,7 @@ async fn submit_guess_in(
         value_raw: value.to_string(),
         round_key,
         deadline_human: round.deadline_human(),
+        stake_label: (pool == Pool::Global).then(|| crate::templates::points_label(&crate::economy::GUESS_STAKE)),
     }))
 }
 
@@ -855,18 +898,32 @@ async fn confirm_guess_in(
         return Ok(back(pool, "rolled"));
     }
 
-    let msg = if db::insert_guess(&state.db, pool, &round_key, player, value, true).await? {
-        if let Some(hash) = ip_hash {
-            db::set_guess_ip_hash(&state.db, &round_key, player, &hash).await?;
+    let msg = match pool {
+        // The global round: the guess and its stake, together or not at all.
+        Pool::Global => {
+            crate::economy::collect(&state.db, player, &round_key).await?;
+            match db::lock_global_guess(&state.db, &round_key, player, value, crate::economy::GUESS_STAKE).await? {
+                db::Locked::In => {
+                    if let Some(hash) = ip_hash {
+                        db::set_guess_ip_hash(&state.db, &round_key, player, &hash).await?;
+                    }
+                    "saved"
+                }
+                // The same guess again - a double click, a retried request:
+                // it is already in, which is what was asked for.
+                db::Locked::AlreadySame => "saved",
+                // A different number from another tab got there first.
+                db::Locked::AlreadyOther => "already",
+                db::Locked::Broke => "broke",
+                db::Locked::Voided => "voided",
+            }
         }
-        "saved"
-    } else if db::my_guess(&state.db, pool, &round_key, player).await? == Some(value) {
-        // The same guess again - a double click, a retried request: it is
-        // already in, which is what was asked for.
-        "saved"
-    } else {
-        // A different number from another tab got there first; it stands.
-        "already"
+        Pool::Vienna => {
+            // In now, or the same number was in already: either way, saved.
+            let saved = db::insert_guess(&state.db, pool, &round_key, player, value, true).await?
+                || db::my_guess(&state.db, pool, &round_key, player).await? == Some(value);
+            if saved { "saved" } else { "already" }
+        }
     };
     Ok(back(pool, msg))
 }
@@ -1394,12 +1451,14 @@ mod tests {
                 display_name: "Meg Ardes".to_string(),
                 image_url: None,
             }),
+            points: 0,
         };
         // Signed in, but not through 42: a stranger with an account must not
         // be able to read the 42 pool's logins.
         let stranger = Viewer {
             account: Account { id: 2, username: "stranger".to_string(), intra_id: None, verified: true },
             intra: None,
+            points: 0,
         };
         assert!(names_visible(Pool::Vienna, Some(&student)));
         assert!(!names_visible(Pool::Vienna, Some(&stranger)));

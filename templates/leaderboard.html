@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}leaderboard &middot; i guess low{% endblock %}
+{% block h1 %}points leaderboard{% endblock %}
+{% block path %}/g/leaderboard{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0" aria-labelledby="board-h">
+  <h2 class="section-title" id="board-h">points
+    <span class="ranges" aria-label="what to rank by">
+      <a class="{% if !week %}on{% endif %}" {% if !week %}aria-current="true"{% endif %} href="/g/leaderboard">all-time</a>
+      <a class="{% if week %}on{% endif %}" {% if week %}aria-current="true"{% endif %} href="/g/leaderboard?show=week">this week</a>
+    </span>
+  </h2>
+  <p class="dim">{% if week %}points won from playing over the last seven days: pots minus stakes. daily and welcome points don't count here.{% else %}everyone's balance. points are just for fun.{% endif %}</p>
+  {% if !names_visible %}<p class="dim mask-note">sign in to see names. signed-out players get a stable label.</p>{% endif %}
+  {% if rows.is_empty() %}
+    <p class="dim">nobody yet.</p>
+  {% else %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="points leaderboard">
+    <table class="grid">
+      <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="num">points</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr><td class="num dim">{{ "{:02}"|format(loop.index) }}</td><td>{{ r.name }}</td><td class="num b">{{ r.points }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -87,6 +87,9 @@ pub struct UserView {
     /// Plays the 42 round (a 42 student, or a stand-in on a test instance),
     /// and so may be shown that it exists.
     pub plays_42: bool,
+    /// Their points in the global round, for the header there; `None` for an
+    /// account that cannot play it yet.
+    pub points: Option<i64>,
 }
 
 impl From<User> for UserView {
@@ -95,6 +98,7 @@ impl From<User> for UserView {
             login: u.login,
             display_name: u.display_name,
             plays_42: true,
+            points: None,
         }
     }
 }
@@ -109,15 +113,22 @@ pub fn sees_42(user: &Option<UserView>) -> bool {
 /// else by their username.
 impl From<Viewer> for UserView {
     fn from(v: Viewer) -> Self {
+        let points = v.account.verified.then_some(v.points);
         match v.intra {
-            Some(u) => Self::from(u),
+            Some(u) => Self { points, ..Self::from(u) },
             None => Self {
                 login: v.account.username.clone(),
                 display_name: v.account.username,
                 plays_42: false,
+                points,
             },
         }
     }
+}
+
+/// "1 250 pts".
+pub fn points_label(points: &i64) -> String {
+    format!("{} pts", group_digits(*points))
 }
 
 /// What a player is called for a visitor who may not see their name:
@@ -257,6 +268,12 @@ pub struct IndexTemplate {
     pub calendar_href: String,
     /// The player's record, for the line under the status block.
     pub stats: Option<crate::stats::PlayerStats>,
+    /// The global round's pot so far, and how much of it rolled over from
+    /// rounds nobody won.
+    pub pot_label: Option<String>,
+    pub carried_label: Option<String>,
+    /// What a guess costs, in the global round.
+    pub stake_label: Option<String>,
     pub guess_count: i64,
     pub last_round: Option<RoundView>,
     /// How much of the announcement window is left, in seconds, or `None`
@@ -291,6 +308,8 @@ pub struct ConfirmTemplate {
     pub value_raw: String,
     pub round_key: String,
     pub deadline_human: String,
+    /// What locking it costs, in the global round.
+    pub stake_label: Option<String>,
 }
 
 #[derive(Template)]
@@ -380,6 +399,9 @@ pub struct DayTemplate {
     pub share_text: Option<String>,
     /// Every picked number with what became of it, for the table.
     pub rows: Vec<PickRow>,
+    /// The global round's pot that day, in words: "the pot of 340 pts went
+    /// to the winner", "nobody won: 340 pts rolled over".
+    pub pot_line: Option<String>,
 }
 
 /// The takeaway after the big number that already says who won:
@@ -452,6 +474,47 @@ pub struct MeTemplate {
     pub older: Vec<MyRoundView>,
     /// Signed in, but not allowed to play this pool (unconfirmed email).
     pub cannot_play: bool,
+}
+
+/// A line of points history.
+pub struct LedgerView {
+    pub date: String,
+    pub what: String,
+    /// "+100", "-10".
+    pub amount: String,
+    pub gain: bool,
+}
+
+#[derive(Template)]
+#[template(path = "points.html")]
+pub struct PointsTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub balance_label: String,
+    pub rows: Vec<LedgerView>,
+    pub stake: i64,
+    pub grant: i64,
+    pub bonus: i64,
+}
+
+pub struct PointsBoardRow {
+    pub name: String,
+    pub points: String,
+}
+
+#[derive(Template)]
+#[template(path = "leaderboard.html")]
+pub struct BoardTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    /// Gains over the last week, rather than balances.
+    pub week: bool,
+    pub names_visible: bool,
+    pub rows: Vec<PointsBoardRow>,
 }
 
 /// One day on the trends timeline.

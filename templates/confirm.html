@@ -13,7 +13,7 @@
   <form method="post" action="{{ pool.base() }}/guess/confirm" class="confirmform">
     <input type="hidden" name="guess" value="{{ value_raw }}">
     <input type="hidden" name="round" value="{{ round_key }}">
-    <button type="submit">yes, lock in {{ value_label }} &rarr;</button>
+    <button type="submit" class="primary">yes, lock in {{ value_label }}{% match stake_label %}{% when Some with (s) %} for {{ s }}{% when None %}{% endmatch %} &rarr;</button>
     <a class="btn ghost" href="{{ pool.base() }}/">no, go back</a>
   </form>
 </section>

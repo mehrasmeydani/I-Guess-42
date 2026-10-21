@@ -42,6 +42,7 @@
     <span><i class="many">█</i> taken by more than one <s>struck</s></span>
     {% if my_pick.is_some() %}<span><i class="mine">▲</i> your pick</span>{% endif %}
   </p>
+  {% match pot_line %}{% when Some with (line) %}<p class="pot-line">{{ line }}</p>{% when None %}{% endmatch %}
   {% include "chart.html" %}
   <p class="chart-summary">{{ summary }}</p>
   <details class="expand">

@@ -61,6 +61,8 @@ pub async fn moderation(
     let notice = match q.msg.as_deref() {
         Some("banned") => Some(Notice::ok("Banned.")),
         Some("unbanned") => Some(Notice::ok("Unbanned.")),
+        Some("adjusted") => Some(Notice::ok("Points adjusted.")),
+        Some("voided") => Some(Notice::ok("Round called off; every stake refunded.")),
         _ => None,
     };
     page(&state, viewer, notice, StatusCode::OK).await
@@ -118,6 +120,75 @@ pub async fn unban(
         tracing::info!(moderator = by, account = target.id, username = %target.username, "unbanned");
     }
     Ok(Redirect::to("/mod?msg=unbanned").into_response())
+}
+
+#[derive(Deserialize)]
+pub struct AdjustForm {
+    pub username: String,
+    pub amount: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// Adds or takes points by hand, with a note the player sees in their
+/// history: for undoing what a ban could not, such as a pot won with help.
+pub async fn adjust(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<AdjustForm>,
+) -> Result<Response, AppError> {
+    let Some(viewer) = moderator(&state, &jar).await? else {
+        return Ok(gone());
+    };
+    let refuse = |why: &'static str| page(&state, viewer.clone(), Some(Notice::error(why)), StatusCode::UNPROCESSABLE_ENTITY);
+    let note = form.note.trim();
+    if note.is_empty() {
+        return refuse("Say why: the note is shown in the player's history.").await;
+    }
+    let Ok(amount) = form.amount.trim().parse::<i64>() else {
+        return refuse("The amount is a whole number, negative to take points away.").await;
+    };
+    if amount == 0 || amount.abs() > 1_000_000 {
+        return refuse("The amount is between -1 000 000 and 1 000 000, and not 0.").await;
+    }
+    let Some(target) = db::mod_account(&state.db, &normalize_username(&form.username)).await? else {
+        return refuse("No account by that name.").await;
+    };
+    let open = Round::current(state.now()).key();
+    let reference = format!("adjust:{}", crate::auth::random_token());
+    db::credit_once(&state.db, target.id, &open, "adjust", amount, &reference, Some(note)).await?;
+    let by = viewer.intra.as_ref().map(|u| u.login.as_str()).unwrap_or("?");
+    tracing::info!(moderator = by, account = target.id, amount, note, "points adjusted");
+    Ok(Redirect::to("/mod?msg=adjusted").into_response())
+}
+
+#[derive(Deserialize)]
+pub struct VoidForm {
+    pub round: String,
+}
+
+/// Calls off a global round that has not been settled: the open one, or
+/// one that just closed. Every stake comes back and nobody wins it.
+pub async fn void(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<VoidForm>,
+) -> Result<Response, AppError> {
+    let Some(viewer) = moderator(&state, &jar).await? else {
+        return Ok(gone());
+    };
+    let date = form.round.trim();
+    if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err() {
+        let why = Notice::error("Give the round as a date: 2026-10-21.");
+        return page(&state, viewer, Some(why), StatusCode::UNPROCESSABLE_ENTITY).await;
+    }
+    if !db::void_round(&state.db, date).await? {
+        let why = Notice::error("That round is settled already; use an adjustment instead.");
+        return page(&state, viewer, Some(why), StatusCode::UNPROCESSABLE_ENTITY).await;
+    }
+    let by = viewer.intra.as_ref().map(|u| u.login.as_str()).unwrap_or("?");
+    tracing::info!(moderator = by, round = date, "global round called off");
+    Ok(Redirect::to("/mod?msg=voided").into_response())
 }
 
 // --------------------------------------------------------- legal pages

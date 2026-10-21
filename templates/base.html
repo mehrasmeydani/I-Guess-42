@@ -70,6 +70,7 @@
       {% match user %}
         {% when Some with (u) %}
           {# Your login is only your name; logging out is its own button. #}
+          {% if pool.is_global() %}{% match u.points %}{% when Some with (p) %}<a class="pts" href="/g/points" title="your points">{{ crate::templates::points_label(p) }}</a>{% when None %}{% endmatch %}{% endif %}
           <a class="who" href="/account" title="your account: {{ u.display_name }}">{{ u.login }}</a>
           <form method="post" action="/logout" class="inline">
             <button class="linkish out" type="submit" aria-label="log out {{ u.login }}">log out</button>

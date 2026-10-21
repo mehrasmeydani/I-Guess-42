@@ -18,6 +18,25 @@
 </section>
 
 <section class="sec" style="--b: 1">
+  <h2 class="rule"><span>points</span></h2>
+  <form class="authform" method="post" action="/mod/adjust">
+    <label for="adj-user">username</label>
+    <input id="adj-user" name="username" type="text" autocomplete="off" spellcheck="false" required>
+    <label for="adj-amount">points, negative to take away</label>
+    <input id="adj-amount" name="amount" type="text" inputmode="numeric" autocomplete="off" required>
+    <label for="adj-note">why (the player sees this)</label>
+    <input id="adj-note" name="note" type="text" autocomplete="off" required maxlength="200">
+    <button type="submit">adjust</button>
+  </form>
+  <form class="authform" method="post" action="/mod/void">
+    <label for="void-round">call off a global round that is not settled yet</label>
+    <input id="void-round" name="round" type="text" placeholder="2026-10-21" autocomplete="off" required>
+    <p class="hint">every stake is refunded, nobody wins it, and it takes no more guesses. a settled round can only be corrected with adjustments.</p>
+    <button type="submit" class="danger">call it off</button>
+  </form>
+</section>
+
+<section class="sec" style="--b: 2">
   <h2 class="rule"><span>worth a look</span><span class="tag">{{ clusters.len() }}</span></h2>
   {% if clusters.is_empty() %}
     <p class="dim">nothing stands out: no three accounts share an address or a ten-minute sign-up window.</p>

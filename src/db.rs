@@ -42,6 +42,8 @@ pub struct Account {
 pub struct Viewer {
     pub account: Account,
     pub intra: Option<User>,
+    /// Their points in the global round (economy.rs).
+    pub points: i64,
 }
 
 /// Which game a query is about. The two pools are the same game on separate
@@ -153,6 +155,17 @@ pub async fn connect(url: &str) -> Result<Db> {
     Ok(pool)
 }
 
+/// A transaction that will write, holding the write lock from its first
+/// statement (`BEGIN IMMEDIATE`). A plain `BEGIN` reads first and upgrades
+/// later, and an upgrade that finds another writer has committed in the
+/// meantime fails at once with "database is locked" instead of waiting out
+/// the busy timeout - which the 12:42 rush of guesses, each reading a
+/// balance before writing a stake, would hit. Every transaction in this file
+/// writes, so every one starts here.
+async fn write_tx(db: &Db) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    Ok(db.begin_with("BEGIN IMMEDIATE").await?)
+}
+
 // ---------------------------------------------------------------- users
 
 pub async fn upsert_user(
@@ -189,7 +202,7 @@ pub async fn upsert_user(
 /// which case it gets `login-42`, `login-42-2`, and so on. Real 42 users (not
 /// stand-ins, whose ids are negative) also get a `42` identity row.
 pub async fn account_for_intra(db: &Db, intra_id: i64, login: &str) -> Result<Account> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     let now = ts(Utc::now());
 
     // The account playing as this 42 user, or else one that already signs in
@@ -311,7 +324,7 @@ pub async fn create_password_account(
     hash: &str,
     ip_hash: Option<&str>,
 ) -> Result<NewAccount> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     let now = ts(Utc::now());
 
     let (email_taken,): (i64,) = sqlx::query_as(
@@ -470,7 +483,7 @@ pub async fn use_link_token(db: &Db, purpose: &str, token_hash: &str) -> Result<
 /// The account's email is confirmed, and with it the account.
 pub async fn mark_email_verified(db: &Db, account_id: i64) -> Result<()> {
     let now = ts(Utc::now());
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     sqlx::query("UPDATE passwords SET verified_at = COALESCE(verified_at, ?1) WHERE account_id = ?2")
         .bind(&now)
         .bind(account_id)
@@ -488,7 +501,7 @@ pub async fn mark_email_verified(db: &Db, account_id: i64) -> Result<()> {
 /// A new password, and every session of the account ended: whoever knew the
 /// old one is signed out with it.
 pub async fn set_password(db: &Db, account_id: i64, hash: &str) -> Result<()> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     sqlx::query("UPDATE passwords SET hash = ?1, changed_at = ?2 WHERE account_id = ?3")
         .bind(hash)
         .bind(ts(Utc::now()))
@@ -575,7 +588,7 @@ pub async fn username_changed_at(db: &Db, account_id: i64) -> Result<Option<Stri
 
 /// Renames an account; false if the name was taken in the meantime.
 pub async fn rename_account(db: &Db, account_id: i64, username: &str) -> Result<bool> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     let (taken,): (i64,) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM accounts WHERE username = ?1 AND id != ?2)
               + (SELECT COUNT(*) FROM users u WHERE u.login = ?1 COLLATE NOCASE
@@ -610,7 +623,7 @@ pub enum Unlinked {
 }
 
 pub async fn unlink_identity(db: &Db, account_id: i64, provider: &str) -> Result<Unlinked> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     let (mine, total, plays_42): (i64, i64, bool) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM identities WHERE account_id = ?1 AND provider = ?2),
                 (SELECT COUNT(*) FROM identities WHERE account_id = ?1),
@@ -647,7 +660,7 @@ pub async fn unlink_identity(db: &Db, account_id: i64, provider: &str) -> Result
 /// Gives an account that came in through a provider an email and password
 /// too. False if that email already signs in somewhere.
 pub async fn add_password_login(db: &Db, account_id: i64, email: &str, hash: &str) -> Result<bool> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     let (taken,): (i64,) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM passwords WHERE email = ?1 OR account_id = ?2)
               + (SELECT COUNT(*) FROM identities WHERE provider = 'email' AND subject = ?1)",
@@ -690,7 +703,7 @@ pub async fn add_password_login(db: &Db, account_id: i64, email: &str, hash: &st
 /// `users` row and 42 pool history are not touched: they belong to the
 /// 42 pool, not to this account.
 pub async fn delete_account(db: &Db, account_id: i64) -> Result<()> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     for sql in [
         "DELETE FROM identities WHERE account_id = ?1",
         "DELETE FROM passwords WHERE account_id = ?1",
@@ -746,10 +759,10 @@ pub async fn banned_accounts(db: &Db) -> Result<Vec<ModAccount>> {
 }
 
 /// Bans an account: signed out everywhere and unable to sign in again, and
-/// its guess in the open global round no longer counts. Rounds already
+/// its guess in the open global round no longer counts (its stake refunded). Rounds already
 /// closed are left as they were.
 pub async fn ban_account(db: &Db, account_id: i64, reason: &str, open_round: &str) -> Result<()> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     sqlx::query("UPDATE accounts SET banned_at = ?1, ban_reason = ?2 WHERE id = ?3")
         .bind(ts(Utc::now()))
         .bind(reason)
@@ -765,6 +778,18 @@ pub async fn ban_account(db: &Db, account_id: i64, reason: &str, open_round: &st
         .bind(open_round)
         .execute(&mut *tx)
         .await?;
+    // Its stake comes back out of the pot: a voided guess pays for nothing.
+    sqlx::query(
+        "INSERT INTO ledger (account_id, round_date, kind, amount, ref, note, created_at)
+         SELECT account_id, round_date, 'refund', -amount, 'stake:' || round_date, 'banned', ?3
+         FROM ledger WHERE account_id = ?1 AND round_date = ?2 AND kind = 'stake'
+         ON CONFLICT(account_id, kind, ref) DO NOTHING",
+    )
+    .bind(account_id)
+    .bind(open_round)
+    .bind(ts(Utc::now()))
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -886,6 +911,7 @@ struct SessionRow {
     username: String,
     intra_id: Option<i64>,
     verified: bool,
+    points: i64,
     login: Option<String>,
     display_name: Option<String>,
     image_url: Option<String>,
@@ -898,6 +924,7 @@ pub async fn viewer_for_session(db: &Db, token: &str) -> Result<Option<Viewer>> 
     let row = sqlx::query_as::<_, SessionRow>(
         "SELECT a.id AS account_id, a.username, a.intra_id,
                 a.verified_at IS NOT NULL AS verified,
+                (SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE account_id = a.id) AS points,
                 u.login, u.display_name, u.image_url
          FROM account_sessions s
          JOIN accounts a ON a.id = s.account_id
@@ -927,6 +954,7 @@ pub async fn viewer_for_session(db: &Db, token: &str) -> Result<Option<Viewer>> 
                 verified: r.verified,
             },
             intra,
+            points: r.points,
         }
     }))
 }
@@ -1095,7 +1123,7 @@ pub async fn create_provider_account(
     wanted: &str,
     ip_hash: Option<&str>,
 ) -> Result<Account> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     let now = ts(Utc::now());
     let mut username = wanted.to_string();
     for n in 2.. {
@@ -1289,7 +1317,7 @@ pub async fn create_test_user(db: &Db, login: &str) -> Result<User> {
 /// The global pool is keyed by account, so there each bot also gets an
 /// account linked to its `users` row; deleting the bots takes both away.
 pub async fn insert_demo(db: &Db, pool: Pool, guesses: &[DemoGuess]) -> Result<u64> {
-    let mut tx = db.begin().await?;
+    let mut tx = write_tx(db).await?;
     let now = ts(Utc::now());
 
     let (lowest,): (Option<i64>,) = sqlx::query_as("SELECT MIN(id) FROM users")
@@ -1676,7 +1704,369 @@ pub async fn has_demo_data(db: &Db, pool: Pool) -> Result<bool> {
     Ok(yes)
 }
 
-// -------------------------------------------------------------- payouts
+// --------------------------------------------------------------- points
+
+/// An account's points: the sum of its ledger.
+pub async fn balance(db: &Db, account_id: i64) -> Result<i64> {
+    let (n,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE account_id = ?1")
+        .bind(account_id)
+        .fetch_one(db)
+        .await?;
+    Ok(n)
+}
+
+/// Writes a ledger row unless one with the same (account, kind, ref) is
+/// there already. True if it was written: the way every credit and charge
+/// happens at most once.
+pub async fn credit_once(
+    db: &Db,
+    account_id: i64,
+    round_date: &str,
+    kind: &str,
+    amount: i64,
+    reference: &str,
+    note: Option<&str>,
+) -> Result<bool> {
+    let n = sqlx::query(
+        "INSERT INTO ledger (account_id, round_date, kind, amount, ref, note, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(account_id, kind, ref) DO NOTHING",
+    )
+    .bind(account_id)
+    .bind(round_date)
+    .bind(kind)
+    .bind(amount)
+    .bind(reference)
+    .bind(note)
+    .bind(ts(Utc::now()))
+    .execute(db)
+    .await?
+    .rows_affected();
+    Ok(n > 0)
+}
+
+/// What came of locking a guess in the global round.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Locked {
+    /// In, and the stake taken.
+    In,
+    /// The same number was already in: nothing more to do.
+    AlreadySame,
+    /// A different number was already in; it stands.
+    AlreadyOther,
+    /// Not enough points for the stake. Nothing was written.
+    Broke,
+    /// A moderator called the round off; it takes no more guesses.
+    Voided,
+}
+
+/// Locks a guess in the global round and takes its stake, together or not
+/// at all. The stake goes into the round's pot (see `settle_round`).
+pub async fn lock_global_guess(
+    db: &Db,
+    round_date: &str,
+    account_id: i64,
+    value: i64,
+    stake: i64,
+) -> Result<Locked> {
+    let mut tx = write_tx(db).await?;
+    let voided: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM pots WHERE round_date = ?1")
+        .bind(round_date)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if voided.is_some() {
+        return Ok(Locked::Voided);
+    }
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT value FROM global_guesses WHERE round_date = ?1 AND user_id = ?2")
+            .bind(round_date)
+            .bind(account_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if let Some((v,)) = existing {
+        return Ok(if v == value { Locked::AlreadySame } else { Locked::AlreadyOther });
+    }
+    let (balance,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE account_id = ?1")
+        .bind(account_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    if balance < stake {
+        return Ok(Locked::Broke);
+    }
+    let now = ts(Utc::now());
+    let inserted = sqlx::query(
+        "INSERT INTO global_guesses (round_date, user_id, value, submitted_at, participates)
+         VALUES (?1, ?2, ?3, ?4, 1)
+         ON CONFLICT(round_date, user_id) DO NOTHING",
+    )
+    .bind(round_date)
+    .bind(account_id)
+    .bind(value)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if inserted == 0 {
+        // Another request got in between; whatever it locked stands.
+        return Ok(Locked::AlreadyOther);
+    }
+    sqlx::query(
+        "INSERT INTO ledger (account_id, round_date, kind, amount, ref, created_at)
+         VALUES (?1, ?2, 'stake', ?3, ?2, ?4)",
+    )
+    .bind(account_id)
+    .bind(round_date)
+    .bind(-stake)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Locked::In)
+}
+
+/// The stakes in a round so far, net of any refunded.
+async fn round_stakes(conn: &mut sqlx::SqliteConnection, round_date: &str) -> Result<i64> {
+    let (n,): (i64,) = sqlx::query_as(
+        "SELECT COALESCE(-SUM(amount), 0) FROM ledger
+         WHERE round_date = ?1 AND (kind = 'stake' OR (kind = 'refund' AND ref LIKE 'stake:%'))",
+    )
+    .bind(round_date)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(n)
+}
+
+/// What rolls into `round_date` from the last settled round before it: all
+/// of its pot if nobody won it (or it was voided), nothing if somebody did.
+async fn carry_into(conn: &mut sqlx::SqliteConnection, round_date: &str) -> Result<i64> {
+    let last: Option<(i64, i64, Option<i64>)> = sqlx::query_as(
+        "SELECT stakes, carried_in, winner_id FROM pots
+         WHERE round_date < ?1 ORDER BY round_date DESC LIMIT 1",
+    )
+    .bind(round_date)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(match last {
+        Some((stakes, carried, None)) => stakes + carried,
+        _ => 0,
+    })
+}
+
+/// The open round's pot so far: its stakes and what rolled into it.
+pub async fn pot_so_far(db: &Db, round_date: &str) -> Result<(i64, i64)> {
+    let mut conn = db.acquire().await?;
+    let stakes = round_stakes(&mut conn, round_date).await?;
+    let carried = carry_into(&mut conn, round_date).await?;
+    Ok((stakes, carried))
+}
+
+/// A settled round's pot, as the day page shows it.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct Pot {
+    pub round_date: String,
+    pub stakes: i64,
+    pub carried_in: i64,
+    pub winner_id: Option<i64>,
+    pub paid: i64,
+    pub players: i64,
+    pub voided: bool,
+}
+
+pub async fn pot(db: &Db, round_date: &str) -> Result<Option<Pot>> {
+    let row = sqlx::query_as::<_, Pot>(
+        "SELECT round_date, stakes, carried_in, winner_id, paid, players, voided FROM pots WHERE round_date = ?1",
+    )
+    .bind(round_date)
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
+}
+
+/// Global rounds before `open_round` with guesses or stakes and no pot row
+/// yet, oldest first: settling goes in order, since each carries into the
+/// next.
+pub async fn unsettled_rounds(db: &Db, open_round: &str) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT round_date FROM (
+             SELECT round_date FROM global_guesses WHERE round_date < ?1
+             UNION SELECT round_date FROM ledger WHERE kind = 'stake' AND round_date < ?1
+         )
+         WHERE round_date NOT IN (SELECT round_date FROM pots)
+         ORDER BY round_date",
+    )
+    .bind(open_round)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}
+
+/// Settles one closed global round, all in one transaction: the winner (the
+/// lowest number exactly one real player picked) takes the stakes plus
+/// whatever rolled in; with no winner the lot rolls on. The pots row is the
+/// "settled" mark, and the ledger's uniqueness means a retry after a crash
+/// pays nothing twice. `None` if it was settled already.
+pub async fn settle_round(db: &Db, round_date: &str) -> Result<Option<Pot>> {
+    let mut tx = write_tx(db).await?;
+    let done: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM pots WHERE round_date = ?1")
+        .bind(round_date)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if done.is_some() {
+        return Ok(None);
+    }
+    let winner: Option<(i64,)> = sqlx::query_as(
+        "SELECT g.user_id FROM global_guesses g
+         WHERE g.round_date = ?1 AND g.participates = 1 AND g.value = (
+             SELECT value FROM global_guesses WHERE round_date = ?1 AND participates = 1
+             GROUP BY value HAVING COUNT(*) = 1 ORDER BY value LIMIT 1
+         )",
+    )
+    .bind(round_date)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let (players,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM global_guesses WHERE round_date = ?1 AND participates = 1")
+            .bind(round_date)
+            .fetch_one(&mut *tx)
+            .await?;
+    let stakes = round_stakes(&mut tx, round_date).await?;
+    let carried_in = carry_into(&mut tx, round_date).await?;
+    let winner_id = winner.map(|w| w.0);
+    let paid = if winner_id.is_some() { stakes + carried_in } else { 0 };
+    let now = ts(Utc::now());
+    if let Some(w) = winner_id.filter(|_| paid > 0) {
+        sqlx::query(
+            "INSERT INTO ledger (account_id, round_date, kind, amount, ref, created_at)
+             VALUES (?1, ?2, 'pot', ?3, ?2, ?4)
+             ON CONFLICT(account_id, kind, ref) DO NOTHING",
+        )
+        .bind(w)
+        .bind(round_date)
+        .bind(paid)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO pots (round_date, stakes, carried_in, winner_id, paid, players, settled_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )
+    .bind(round_date)
+    .bind(stakes)
+    .bind(carried_in)
+    .bind(winner_id)
+    .bind(paid)
+    .bind(players)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Some(Pot {
+        round_date: round_date.to_string(),
+        stakes,
+        carried_in,
+        winner_id,
+        paid,
+        players,
+        voided: false,
+    }))
+}
+
+/// Calls off a round that has not been settled: every stake refunded, no
+/// guess counts, no pot paid, and what had rolled in rolls on. False if it
+/// was settled already.
+pub async fn void_round(db: &Db, round_date: &str) -> Result<bool> {
+    let mut tx = write_tx(db).await?;
+    let done: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM pots WHERE round_date = ?1")
+        .bind(round_date)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if done.is_some() {
+        return Ok(false);
+    }
+    let now = ts(Utc::now());
+    sqlx::query(
+        "INSERT INTO ledger (account_id, round_date, kind, amount, ref, note, created_at)
+         SELECT account_id, round_date, 'refund', -amount, 'stake:' || round_date, 'round voided', ?2
+         FROM ledger WHERE round_date = ?1 AND kind = 'stake'
+         ON CONFLICT(account_id, kind, ref) DO NOTHING",
+    )
+    .bind(round_date)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE global_guesses SET participates = 0 WHERE round_date = ?1")
+        .bind(round_date)
+        .execute(&mut *tx)
+        .await?;
+    let carried_in = carry_into(&mut tx, round_date).await?;
+    sqlx::query(
+        "INSERT INTO pots (round_date, stakes, carried_in, winner_id, paid, players, voided, settled_at)
+         VALUES (?1, 0, ?2, NULL, 0, 0, 1, ?3)",
+    )
+    .bind(round_date)
+    .bind(carried_in)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(true)
+}
+
+/// One line of an account's points history.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct LedgerRow {
+    pub round_date: String,
+    pub kind: String,
+    pub amount: i64,
+    pub note: Option<String>,
+    pub created_at: String,
+}
+
+pub async fn ledger_rows(db: &Db, account_id: i64, limit: i64) -> Result<Vec<LedgerRow>> {
+    let rows = sqlx::query_as::<_, LedgerRow>(
+        "SELECT round_date, kind, amount, note, created_at FROM ledger
+         WHERE account_id = ?1 ORDER BY id DESC LIMIT ?2",
+    )
+    .bind(account_id)
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
+/// A row of the points leaderboard.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct PointsRow {
+    pub id: i64,
+    pub username: String,
+    pub points: i64,
+}
+
+/// Balances, highest first; or, with `since`, what each account gained from
+/// playing since then - grants and the sign-up bonus left out, so it is not
+/// a measure of having turned up.
+pub async fn points_board(db: &Db, since: Option<&str>, limit: i64) -> Result<Vec<PointsRow>> {
+    let sql = match since {
+        None => "SELECT a.id, a.username, SUM(l.amount) AS points
+                 FROM ledger l JOIN accounts a ON a.id = l.account_id
+                 WHERE a.deleted_at IS NULL AND a.banned_at IS NULL
+                 GROUP BY a.id ORDER BY points DESC, a.username LIMIT ?2",
+        Some(_) => "SELECT a.id, a.username, SUM(l.amount) AS points
+                 FROM ledger l JOIN accounts a ON a.id = l.account_id
+                 WHERE a.deleted_at IS NULL AND a.banned_at IS NULL
+                   AND l.created_at >= ?1 AND l.kind NOT IN ('grant', 'signup')
+                 GROUP BY a.id HAVING points != 0 ORDER BY points DESC, a.username LIMIT ?2",
+    };
+    let rows = sqlx::query_as::<_, PointsRow>(sql)
+        .bind(since.unwrap_or(""))
+        .bind(limit)
+        .fetch_all(db)
+        .await?;
+    Ok(rows)
+}
+
+// -------------------------------------------------------------- payouts// -------------------------------------------------------------- payouts
 
 /// Everyone a closed round owes coalition points to: its winner, and every
 /// real player who took part.

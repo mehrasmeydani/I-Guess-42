@@ -1566,9 +1566,28 @@ spec (v1.1). The parts that are not just markup:
   showed the real time. The header clock now follows the game clock, and the
   test banner says when it has been moved.
 
-### Testing it
+### Points (`economy.rs`)
 
-`testkit.rs` builds an app### Testing it
+Fake points for the global round only. Every movement is a `ledger` row and a
+balance is their sum; `UNIQUE (account_id, kind, ref)` makes each credit and
+charge happen at most once, which is what lets the code that writes them run
+as often as it likes:
+
+- `economy::collect` - the sign-up bonus (ref `signup`) and the day's grant
+  (ref = the round) - runs whenever a verified player shows up.
+- `db::lock_global_guess` writes the guess and its stake (ref = the round) in
+  one transaction, or neither: refused when the balance is short or the round
+  was called off.
+- `db::settle_round` pays a closed round's stakes plus whatever rolled in to
+  its winner, or rolls the lot on, and writes the `pots` row that marks it
+  settled. `economy::run` settles every 30 seconds; the round page settles on
+  load too.
+
+All of `db.rs`'s transactions start with `BEGIN IMMEDIATE` (`write_tx`): a
+plain `BEGIN` that reads before it writes fails with "database is locked" when
+another writer commits in between, instead of waiting.
+
+### Testing it
 
 `testkit.rs` builds an app on a throwaway database with mail kept in memory,
 and gives session cookies and response helpers. `ui_tests.rs` checks the

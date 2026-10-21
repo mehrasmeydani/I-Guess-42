@@ -1,6 +1,6 @@
 # Spec: open to everyone — global pool, logins, points and betting
 
-Status: **Phases 1 and 2 built** (on the `global` branch, not deployed); phases 3–4 not started. This is the plan the next releases follow.
+Status: **Phases 1–3 built** (on the `global` branch, not deployed); phase 4 (bets) not started. This is the plan the next releases follow.
 Where it disagrees with the code, the code describes what runs today and this
 file describes what is meant to run next.
 
@@ -976,7 +976,25 @@ Built as planned, with these differences, all deliberate:
   and see results; a 42 student can switch pools with one click; the 42 pool
   is unchanged.
 
-### Phase 3 — points
+### Phase 3 — points — **done**
+
+Built as planned (`migrations/0009_points.sql`, `src/economy.rs`,
+`src/points_pages.rs`), with these differences:
+
+- The **sign-up bonus** is paid the first time a verified account visits the
+  global round, together with the daily grant, rather than at the moment of
+  verification. One place (`economy::collect`) covers every way in, 42
+  students' existing accounts included.
+- **Settlement** runs every 30 seconds rather than at 12:42 + 30 s, and also
+  whenever the global round page loads, so a pot is never shown unpaid. It is
+  idempotent either way.
+- **Voiding** works on the open round too (it then takes no more guesses), as
+  a closed round is settled within half a minute.
+- **"This week"** on the leaderboard is pots minus stakes over seven days.
+- Every write transaction in `db.rs` now starts with `BEGIN IMMEDIATE`. The
+  stake path (read a balance, then write) failed with "database is locked"
+  under a burst of simultaneous guesses otherwise; a test of 100 players
+  locking at once failed every time before the change and passes now.
 
 - Migration `0008`, `economy.rs`, settlement task (pot only).
 - Signup bonus, daily grant, guess stake, pot and rollover.

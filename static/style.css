@@ -104,7 +104,7 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
   border-bottom: var(--rule);
 }
 
-.brand { color: var(--hi); font-weight: 700; font-size: var(--fs-3); text-decoration: none; }
+.brand { white-space: nowrap; color: var(--hi); font-weight: 700; font-size: var(--fs-3); text-decoration: none; }
 .brand b { padding: 0 8px; margin-left: 2px; background: var(--green); color: var(--bg); }
 .brand:hover { background: none; color: var(--hi); }
 
@@ -211,6 +211,9 @@ a.tag { color: var(--fg); text-decoration: underline; }
 .progress-fill { display: block; height: 100%; background: var(--fg); transition: width 600ms ease; }
 .facts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; margin: 16px 0 0; color: var(--dim); }
 .facts b { color: var(--hi); }
+.facts .pot b { color: var(--green); }
+.status .pts { color: var(--green); text-decoration: none; font-weight: 700; }
+.status .pts:hover { background: none; color: var(--hi); text-decoration: underline; }
 
 .section-title { margin: 0 0 16px; color: var(--hi); font-size: var(--fs-3); font-weight: 700; }
 .section-title label { cursor: pointer; }
@@ -940,7 +943,8 @@ details.expand[open] summary .when-open { display: inline; }
   body { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
   .announce-card { bottom: calc(64px + env(safe-area-inset-bottom)); }
   .top nav.pools { margin-left: auto; font-size: var(--fs-1); }
-  .status { gap: 8px; }
+  .status { gap: 8px; font-size: var(--fs-1); }
+  .status .out { padding: 2px 8px; }
   .statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .daynav { grid-template-columns: 1fr 1fr; }
   .daynav-here { grid-column: 1 / -1; grid-row: 1; }

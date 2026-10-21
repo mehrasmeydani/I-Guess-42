@@ -59,6 +59,7 @@
     </div>
     <p class="facts">
       <span><b>{{ guess_count }}</b> {% if guess_count == 1 %}player{% else %}players{% endif %} this round</span>
+      {% match pot_label %}{% when Some with (pot) %}<span class="pot">pot <b class="win">{{ pot }}</b>{% match carried_label %}{% when Some with (c) %} <span class="dim">({{ c }} rolled over)</span>{% when None %}{% endmatch %}</span>{% when None %}{% endmatch %}
       <span class="you">
         {% match my_guess_label %}
           {% when Some with (_g) %}<b>you're in</b>
@@ -112,9 +113,10 @@
           <input id="guess" name="guess" type="text" inputmode="numeric" enterkeyhint="go"
                  pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false"
                  placeholder="e.g. 7" aria-describedby="guess-hint" required>
-          <button type="submit" class="primary">lock it in</button>
+          <button type="submit" class="primary">lock it in{% match stake_label %}{% when Some with (s) %} &middot; {{ s }}{% when None %}{% endmatch %}</button>
         </form>
-        <p class="hint" id="guess-hint">low gets crowded. think a little higher. {% if signed_in %}final when you confirm.{% else %}sign in to lock it in.{% endif %}</p>
+        <p class="hint" id="guess-hint">low gets crowded. think a little higher. {% if signed_in %}final when you confirm.{% else %}sign in to lock it in.{% endif %}
+          {% match stake_label %}{% when Some with (s) %}a guess costs {{ s }}; the winner takes the whole pot. points are just for fun.{% when None %}{% endmatch %}</p>
       {% endif %}
   {% endmatch %}
 </section>
