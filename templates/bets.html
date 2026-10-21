@@ -35,6 +35,22 @@
   {% endif %}
 </section>
 
+{% if !mine.is_empty() %}
+<section class="sec" style="--b: 1" id="mine">
+  <h2 class="section-title">your bets today <span class="dim scope-inline">{{ mine.len() }} &middot; settled at {{ close_time }}</span></h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="your bets today">
+  <table class="grid">
+    <thead><tr><th scope="col">bet</th><th scope="col" class="num">stake</th><th scope="col" class="num">odds</th><th scope="col" class="num">pays</th></tr></thead>
+    <tbody>
+      {% for b in mine %}
+        <tr><td>{{ b.market }}</td><td class="num">{{ b.stake }}</td><td class="num">{{ b.odds }}</td><td class="num b win">{{ b.amount }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
 <section class="sec" style="--b: 1" aria-labelledby="board-h">
   <h2 class="section-title" id="board-h">where the winner lands</h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="where the winner lands">
@@ -71,21 +87,6 @@
   </div>
 </section>
 
-{% if !mine.is_empty() %}
-<section class="sec" style="--b: 3">
-  <h2 class="section-title">your bets today</h2>
-  <div class="table-wrap" tabindex="0" role="region" aria-label="your bets today">
-  <table class="grid">
-    <thead><tr><th scope="col">bet</th><th scope="col" class="num">stake</th><th scope="col" class="num">odds</th><th scope="col" class="num">pays</th></tr></thead>
-    <tbody>
-      {% for b in mine %}
-        <tr><td>{{ b.market }}</td><td class="num">{{ b.stake }}</td><td class="num">{{ b.odds }}</td><td class="num b win">{{ b.amount }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-</section>
-{% endif %}
 
 {% if !past.is_empty() %}
 <section class="sec" style="--b: 4">

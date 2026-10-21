@@ -319,7 +319,10 @@ pub async fn place(
     };
     let open = Round::current(state.now()).key();
     if form.round != open {
-        return Ok(back("bet_closed", Some(market)));
+        // A page from before the round changed: over if it was an older
+        // round, else the clock moved back. Either way, today's odds again.
+        let code = if form.round < open { "bet_closed" } else { "round_changed" };
+        return Ok(back(code, Some(market)));
     }
     let Ok(stake) = form.stake.trim().parse::<i64>() else {
         return Ok(back("bet_cap", Some(market)));
@@ -635,6 +638,25 @@ mod tests {
         assert_eq!(db::balance(&state.db, ann).await.unwrap(), a0 + 20 + 60);
     }
 
+    #[tokio::test]
+    async fn a_restart_after_the_clock_ran_ahead_opens_today_again() {
+        let (_t, state) = app(&[]).await;
+        let ann = player(&state.db, "ann").await;
+        let today = Round::current(state.now()).key();
+        plays(&state.db, ann, &today, 4).await;
+        // Settled while the clock was ahead; then the process restarted,
+        // which puts the clock back but leaves the pot.
+        db::settle_round(&state.db, &today).await.unwrap();
+        assert_eq!(bet(&state.db, ann, &today, "none", 10, 900).await, Placed::Closed);
+        crate::economy::reopen_early_rounds(&state).await;
+        assert!(db::pot(&state.db, &today).await.unwrap().is_none());
+        assert_eq!(bet(&state.db, ann, &today, "none", 10, 900).await, Placed::In);
+        // A round called off stays called off.
+        assert!(db::void_round(&state.db, &today).await.unwrap());
+        crate::economy::reopen_early_rounds(&state).await;
+        assert!(db::pot(&state.db, &today).await.unwrap().is_some_and(|p| p.voided));
+    }
+
     // ------------------------------------------------------------- pages
 
     async fn bets_page_q(state: &AppState, token: Option<&str>, q: BetsQuery) -> String {
@@ -704,6 +726,11 @@ mod tests {
         let html = bets_page_q(&state, Some("ann"), BetsQuery { msg: Some("bet_placed".into()), m: Some("range:5:12".into()), ..Default::default() }).await;
         assert!(html.contains("bet placed · settled at 12:42"));
         assert!(html.contains("your bets today"));
+        let (bets_at, board_at) = (html.find("your bets today").unwrap(), html.find("where the winner lands").unwrap());
+        assert!(bets_at < board_at, "today's bets right under the bet box");
+        // And on the round page.
+        let round = body(crate::handlers::global_index(State(state.clone()), jar("ann"), Query(crate::handlers::IndexQuery { msg: None, n: None })).await.unwrap()).await;
+        assert!(round.contains("your bets today: <a href=\"/g/bets#mine\">1 bet · could pay "), "{round}");
         assert!(html.contains(r#"<p class="dim">placed</p>"#) && !html.contains(r#"action="/g/bet""#));
         assert!(html.contains(&format!("<td class=\"num b win\">{}</td>", odds::payout(40, o, None))));
     }
@@ -781,6 +808,10 @@ mod tests {
         let resp = place(State(state.clone()), jar("ann"), form(&state, "none", "10", o - 50)).await.unwrap();
         assert_eq!(location(&resp), "/g/bets?msg=bet_placed&m=none");
         assert_eq!(db::bets_of(&state.db, ann, "").await.unwrap()[0].odds_x100, o);
+        // A page from a round ahead (the clock was moved back since): told
+        // the round changed, and shown today's odds, not "round over".
+        let ahead = Form(BetForm { market: "none".into(), stake: "10".into(), odds: o, round: "2999-01-01".into() });
+        assert_eq!(location(&place(State(state.clone()), jar("ann"), ahead).await.unwrap()), "/g/bets?msg=round_changed&m=none");
         // Not signed in: to sign in. Not confirmed: told so.
         let resp = place(State(state.clone()), CookieJar::new(), form(&state, "none", "10", o)).await.unwrap();
         assert_eq!(location(&resp), "/login");

@@ -95,7 +95,20 @@ pub async fn settle_all(db: &Db, open_round: &str) -> Result<usize> {
 /// failure is a bug: logged loudly, and tried again on the next tick.
 /// Follows the game's clock, so a test instance's admin can move it past a
 /// deadline and watch the round settle.
+/// A round that has not closed yet cannot have been settled - unless a test
+/// instance's clock ran ahead and the process restarted, which puts the
+/// clock back without undoing what the future paid. Undone at start, once.
+pub async fn reopen_early_rounds(state: &AppState) {
+    let open = Round::current(state.now()).key();
+    match db::unsettle_from(&state.db, &open).await {
+        Ok(0) => {}
+        Ok(n) => tracing::warn!(rounds = n, from = %open, "rounds settled ahead of their close were opened again"),
+        Err(err) => tracing::error!(error = ?err, "checking for rounds settled too early failed"),
+    }
+}
+
 pub async fn run(state: AppState) {
+    reopen_early_rounds(&state).await;
     let mut tick = tokio::time::interval(SETTLE_EVERY);
     loop {
         tick.tick().await;

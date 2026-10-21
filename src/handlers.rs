@@ -184,6 +184,27 @@ async fn index_in(
         Some(p) => Some(player_record(&state, pool, p, &round_key).await?.0),
         None => None,
     };
+    // The player's bets on today's round, said on the round page so they
+    // need not go looking: how many, and what they could bring back.
+    let my_bets = match player.filter(|_| pool == Pool::Global) {
+        Some(p) => {
+            let today: Vec<db::Bet> = db::bets_of(&state.db, p, &round_key)
+                .await?
+                .into_iter()
+                .filter(|b| b.round_date == round_key && b.result.is_none())
+                .collect();
+            let pays: i64 = today.iter().map(|b| crate::odds::payout(b.stake, b.odds_x100, b.max_profit)).sum();
+            (!today.is_empty()).then(|| {
+                format!(
+                    "{} {} · could pay {}",
+                    today.len(),
+                    if today.len() == 1 { "bet" } else { "bets" },
+                    crate::templates::points_label(&pays)
+                )
+            })
+        }
+        None => None,
+    };
     // Ten days in a row in the global round is worth a bonus, claimed from a
     // pop-up here: the total waiting, if any.
     let streak_bonus = match player.filter(|_| pool == Pool::Global) {
@@ -223,6 +244,7 @@ async fn index_in(
             .map(|(_, carried)| crate::templates::points_label(&carried)),
         stake_label: (pool == Pool::Global).then(|| crate::templates::points_label(&crate::economy::GUESS_STAKE)),
         bets_link: pool == Pool::Global,
+        my_bets,
         round_key,
         time_left: crate::round::clock(seconds_left),
         time_left_spoken: crate::round::spoken_duration(seconds_left),

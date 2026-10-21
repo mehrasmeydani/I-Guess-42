@@ -345,6 +345,8 @@ pub struct IndexTemplate {
     pub stake_label: Option<String>,
     /// The global round links to its bets.
     pub bets_link: bool,
+    /// The player's open bets on today's round: "2 bets · could pay 340 pts".
+    pub my_bets: Option<String>,
     pub guess_count: i64,
     pub last_round: Option<RoundView>,
     /// How much of the announcement window is left, in seconds, or `None`

@@ -2367,21 +2367,26 @@ pub async fn settle_round(db: &Db, round_date: &str) -> Result<Option<Pot>> {
 /// bonuses for days still to come are removed. Guesses and stakes stay: the
 /// rounds settle again, properly, when they close. Returns the rounds undone.
 pub async fn unsettle_from(db: &Db, open_round: &str) -> Result<u64> {
+    // A round a moderator called off stays called off: its refunds stand.
+    const CALLED_OFF: &str = "SELECT round_date FROM pots WHERE voided = 1";
     let mut tx = write_tx(db).await?;
-    sqlx::query(
+    sqlx::query(&format!(
         "DELETE FROM ledger WHERE round_date >= ?1 AND (
-             kind IN ('pot', 'bet_win')
-             OR (kind = 'refund' AND ref LIKE 'bet:%')
-             OR (kind IN ('grant', 'streak') AND round_date > ?1))",
-    )
+             (kind IN ('pot', 'bet_win') AND round_date NOT IN ({CALLED_OFF}))
+             OR (kind = 'refund' AND ref LIKE 'bet:%' AND round_date NOT IN ({CALLED_OFF}))
+             OR (kind IN ('grant', 'streak') AND round_date > ?1))"
+    ))
     .bind(open_round)
     .execute(&mut *tx)
     .await?;
-    sqlx::query("UPDATE bets SET result = NULL, payout = NULL, settled_at = NULL WHERE round_date >= ?1")
-        .bind(open_round)
-        .execute(&mut *tx)
-        .await?;
-    let undone = sqlx::query("DELETE FROM pots WHERE round_date >= ?1")
+    sqlx::query(&format!(
+        "UPDATE bets SET result = NULL, payout = NULL, settled_at = NULL
+         WHERE round_date >= ?1 AND round_date NOT IN ({CALLED_OFF})"
+    ))
+    .bind(open_round)
+    .execute(&mut *tx)
+    .await?;
+    let undone = sqlx::query("DELETE FROM pots WHERE round_date >= ?1 AND voided = 0")
         .bind(open_round)
         .execute(&mut *tx)
         .await?
