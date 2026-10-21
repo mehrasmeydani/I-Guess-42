@@ -375,8 +375,12 @@
     if (!pays) return;
     var stake = parseInt(e.target.value.replace(/[^0-9]/g, ''), 10);
     var odds = parseInt(pays.dataset.odds, 10);
+    var cap = parseInt(pays.dataset.cap, 10);
     if (!(stake > 0) || !(odds > 0)) { pays.textContent = '\u2013'; return; }
+    // As odds::payout: the profit is capped by the size of the game.
     var back = Math.floor(stake * odds / 100);
-    pays.innerHTML = back + ' <small>+' + (back - stake) + '</small>';
+    var capped = cap >= 0 && back - stake > cap;
+    if (capped) back = stake + cap;
+    pays.innerHTML = back + ' <small>+' + (back - stake) + (capped ? ' \u00b7 capped' : '') + '</small>';
   });
 })();

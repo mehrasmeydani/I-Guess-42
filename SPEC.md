@@ -611,15 +611,16 @@ Rules:
 - Placing a bet inserts the bet and `ledger(kind='bet', ref=bet_id, −stake)` in
   one transaction.
 
-### 9.2 Where the chances start: last week, replayed
+### 9.2 Where the chances start: last month, replayed
 
 Once per open round:
 
-1. Take every real pick from the last 7 closed global rounds. If there are
-   fewer than 30, add the 42 round's picks from the same week (never named on
-   the page).
-2. Players per round n = last week's global average (else the 42 round's,
-   else 10), between 2 and 1000.
+1. Take every real pick from the last 30 days of global rounds, the last 7
+   days twice: the month for breadth, the week so the odds follow how people
+   pick now. If there are fewer than 30, add the 42 round's picks from the
+   same days (never named on the page).
+2. Players per round n = the month's global average of real guesses (else
+   the 42 round's, else 10), between 2 and 1000.
 3. Simulate 40 000 rounds: n players each draw one of those picks at random;
    the lowest number drawn exactly once wins, or nobody does. The seed is the
    round's date, so a day's numbers are the same on every restart.
@@ -663,6 +664,11 @@ payout         = floor(stake × odds_x100 / 100)     # includes the stake back
 - The 8% tax means every bet loses 8% on average. A near-certain range
   ("1 or more", p ≈ 0.95) would pay under ×1.00, so it is refused: no free
   points for betting on the obvious.
+- **Capped by the size of the game.** One bet wins at most n × 100 over its
+  stake (n = players a day, as in 9.2): with 25 players a day, +2 500, however
+  long the odds or big the stake. Otherwise one player with a lucky long shot
+  out-earns everyone who plays for a month. The cap is locked with the bet
+  (`bets.max_profit`, migration 0012); bets from before it pay in full.
 - **Locked at placement.** The form carries the odds shown. The bet is
   priced again inside the write transaction, against the book as it stands
   then: placed at those odds or better, else refused with "odds moved". Two

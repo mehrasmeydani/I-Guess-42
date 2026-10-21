@@ -9,7 +9,7 @@
     <div><dt>odds</dt><dd class="odds">{{ o }}</dd></div>
     {# What the stake typed below brings back if it wins, stake included:
        filled in by app.js as you type it. #}
-    {% if can_bet && !q.taken %}<div><dt>if it wins</dt><dd class="pays" data-odds="{{ q.odds_x100 }}">&ndash;</dd></div>{% endif %}
+    {% if can_bet && !q.taken %}<div><dt>if it wins</dt><dd class="pays" data-odds="{{ q.odds_x100 }}" data-cap="{{ q.max_profit }}">&ndash;</dd></div>{% endif %}
     {% when None %}{% endmatch %}
   </dl>
   <span class="quote-chance" aria-hidden="true"><i style="--w: calc({{ q.bp }} * 0.01%)"></i></span>

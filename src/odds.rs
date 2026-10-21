@@ -26,7 +26,14 @@ use rand::{Rng, SeedableRng};
 /// The house keeps this much of fair odds (8%).
 const MARGIN_PCT: i64 = 8;
 /// How many days of picks the simulation replays.
-pub const WEEK_DAYS: i64 = 7;
+pub const HISTORY_DAYS: i64 = 30;
+/// The last this many days of it count twice: the month for breadth, the
+/// week so the odds follow how people pick now.
+pub const RECENT_DAYS: i64 = 7;
+/// The most a single bet can win, over its stake, per player a day: a bet in
+/// a round of 30 players a day wins 3000 at most, however long the odds or
+/// big the stake. The game's size, not a lucky few, sets what is at stake.
+pub const PROFIT_PER_PLAYER: i64 = 100;
 /// Made-up rounds per day's odds.
 const SIMS: u32 = 40_000;
 /// Below this many global picks last week, the 42 round's picks fill in.
@@ -208,30 +215,38 @@ pub fn outcome(market: Market, o: Outcome) -> bool {
     }
 }
 
-/// A run of past rounds' picks: every guess, and how many rounds they came from.
+/// A run of past rounds: the picks to draw from (recent days twice), how
+/// many rounds they came from, and how many guesses there really were.
 #[derive(Debug, Clone, Default)]
-pub struct Week {
+pub struct History {
     pub picks: Vec<i64>,
     pub rounds: usize,
+    pub plays: usize,
 }
 
-impl Week {
-    /// From per-day tallies, as `db::range_tallies` gives them.
-    pub fn from_tallies(rows: &[crate::stats::DayTally]) -> Week {
+impl History {
+    /// From per-day tallies, as `db::range_tallies` gives them. Days from
+    /// `recent_from` on are drawn from twice.
+    pub fn from_tallies(rows: &[crate::stats::DayTally], recent_from: &str) -> History {
         let mut picks = Vec::new();
         let mut days: Vec<&str> = Vec::new();
+        let mut plays = 0;
         for r in rows {
-            picks.extend(std::iter::repeat_n(r.value, r.count.max(0) as usize));
+            let n = r.count.max(0) as usize;
+            let times = if r.round_date.as_str() >= recent_from { 2 } else { 1 };
+            picks.extend(std::iter::repeat_n(r.value, n * times));
+            plays += n;
             if days.last() != Some(&r.round_date.as_str()) {
                 days.push(&r.round_date);
             }
         }
         days.dedup();
-        Week { picks, rounds: days.len() }
+        History { picks, rounds: days.len(), plays }
     }
 
+    /// Players a day, on average.
     fn players(&self) -> Option<usize> {
-        (self.rounds > 0).then(|| self.picks.len().div_ceil(self.rounds))
+        (self.rounds > 0).then(|| self.plays.div_ceil(self.rounds))
     }
 }
 
@@ -251,6 +266,12 @@ pub struct Base {
 }
 
 impl Base {
+    /// The most one bet may win today over its stake: players a day times
+    /// `PROFIT_PER_PLAYER`.
+    pub fn max_profit(&self) -> i64 {
+        self.players.max(1) as i64 * PROFIT_PER_PLAYER
+    }
+
     /// The starting chance of `market`: mostly the simulation, a little the
     /// smooth curve; all of the curve if there was nothing to simulate.
     fn chance(&self, market: Market) -> f64 {
@@ -319,17 +340,17 @@ fn simulate(picks: &[i64], players: usize, seed: u64) -> Base {
     }
 }
 
-/// The day's starting chances, from last week's global picks; if there were
+/// The day's starting chances, from last month's global picks; if there were
 /// few, the 42 round's picks fill in. With no picks at all, the smooth
 /// curve alone. `seed` makes a day's simulation the same every time it is
 /// worked out.
-pub fn base(global: &Week, vienna: &Week, seed: u64) -> Base {
+pub fn base(global: &History, vienna: &History, seed: u64) -> Base {
     let mut picks = global.picks.clone();
     if picks.len() < MIN_PICKS {
         picks.extend(&vienna.picks);
     }
     if picks.is_empty() {
-        return Base { sims: 0, winners: Vec::new(), nobody: 0, modes: Vec::new(), picks: 0, players: 0 };
+        return Base { sims: 0, winners: Vec::new(), nobody: 0, modes: Vec::new(), picks: 0, players: DEFAULT_PLAYERS };
     }
     let players = global.players().or(vienna.players()).unwrap_or(DEFAULT_PLAYERS).clamp(2, MAX_PLAYERS);
     simulate(&picks, players, seed)
@@ -369,9 +390,14 @@ pub fn offered_odds_x100(p: f64) -> Option<i64> {
     (rounded >= ODDS_MIN).then_some(rounded)
 }
 
-/// What a winning bet pays back, stake included, rounded down.
-pub fn payout(stake: i64, odds_x100: i64) -> i64 {
-    (i128::from(stake) * i128::from(odds_x100) / 100) as i64
+/// What a winning bet pays back, stake included, rounded down; its profit
+/// at most `max_profit` if it has a cap (bets from before caps have none).
+pub fn payout(stake: i64, odds_x100: i64, max_profit: Option<i64>) -> i64 {
+    let full = (i128::from(stake) * i128::from(odds_x100) / 100) as i64;
+    match max_profit {
+        Some(cap) => full.min(stake + cap),
+        None => full,
+    }
 }
 
 /// "×2.35".
@@ -420,8 +446,8 @@ mod tests {
         Market::range(lo, hi).unwrap()
     }
 
-    fn week(picks: &[i64], rounds: usize) -> Week {
-        Week { picks: picks.to_vec(), rounds }
+    fn week(picks: &[i64], rounds: usize) -> History {
+        History { picks: picks.to_vec(), rounds, plays: picks.len() }
     }
 
     /// Last week as a plausible crowd: lots of small numbers, a long tail.
@@ -430,7 +456,7 @@ mod tests {
         for (v, n) in [(1, 30), (2, 25), (3, 22), (4, 18), (5, 15), (7, 14), (8, 9), (11, 8), (13, 9), (17, 7), (23, 5), (42, 10), (69, 4), (100, 3)] {
             picks.extend(std::iter::repeat_n(v, n));
         }
-        base(&week(&picks, 7), &Week::default(), 1)
+        base(&week(&picks, 7), &History::default(), 1)
     }
 
     #[test]
@@ -509,7 +535,7 @@ mod tests {
         for most in [1, 2, 5, 9, 10, 49, 50, 9999] {
             assert_eq!(m.iter().filter(|x| outcome(**x, Outcome { winner: None, most: Some(most) })).count(), 1, "{most}");
         }
-        for base in [crowd(), base(&Week::default(), &Week::default(), 1)] {
+        for base in [crowd(), base(&History::default(), &History::default(), 1)] {
             let sum: f64 = b.iter().map(|m| base.chance(*m)).sum();
             assert!((sum - 1.0).abs() < 1e-9, "{sum}");
             let sum: f64 = m.iter().map(|m| base.chance(*m)).sum();
@@ -573,9 +599,9 @@ mod tests {
         let vienna = week(&vec![2; 40], 4);
         let b = base(&global, &vienna, 1);
         assert_eq!((b.picks, b.players), (43, 3), "picks pooled, players from the global week");
-        let b = base(&Week::default(), &vienna, 1);
+        let b = base(&History::default(), &vienna, 1);
         assert_eq!(b.players, 10, "players from the 42 week");
-        let b = base(&Week::default(), &Week::default(), 1);
+        let b = base(&History::default(), &History::default(), 1);
         assert_eq!(b.sims, 0);
         assert!(b.chance(r(1, Some(1))) > b.chance(r(2, Some(2))), "low numbers likelier");
     }
@@ -637,19 +663,32 @@ mod tests {
 
     #[test]
     fn a_win_pays_stake_times_odds_rounded_down() {
-        assert_eq!(payout(50, 135), 67);
-        assert_eq!(payout(100, 5000), 5000);
-        assert_eq!(payout(1, 105), 1);
+        assert_eq!(payout(50, 135, None), 67);
+        assert_eq!(payout(100, 5000, None), 5000);
+        assert_eq!(payout(1, 105, None), 1);
+        // Capped: the profit, not the stake, is what the cap limits.
+        assert_eq!(payout(500, 40_740, Some(3000)), 3500);
+        assert_eq!(payout(50, 135, Some(3000)), 67, "under the cap: as before");
         assert_eq!(odds_label(235), "×2.35");
         assert_eq!(odds_label(1305), "×13.05");
     }
 
     #[test]
-    fn a_week_counts_its_rounds() {
+    fn a_month_counts_its_rounds_and_its_last_week_twice() {
         use crate::stats::DayTally;
         let t = |d: &str, v, c| DayTally { round_date: d.into(), value: v, count: c };
-        let w = Week::from_tallies(&[t("2026-10-14", 1, 2), t("2026-10-14", 5, 1), t("2026-10-15", 3, 4)]);
-        assert_eq!((w.picks.len(), w.rounds), (7, 2));
-        assert_eq!(w.players(), Some(4));
+        let rows = [t("2026-09-30", 1, 2), t("2026-09-30", 5, 1), t("2026-10-15", 3, 4)];
+        let h = History::from_tallies(&rows, "2026-10-14");
+        assert_eq!((h.picks.len(), h.rounds, h.plays), (3 + 8, 2, 7), "the recent day drawn from twice");
+        assert_eq!(h.players(), Some(4), "players a day from real guesses, not the doubled draw");
+    }
+
+    #[test]
+    fn the_biggest_win_grows_with_the_game() {
+        let small = base(&week(&[1, 2, 3, 4, 5, 6], 1), &History::default(), 1);
+        let big = base(&week(&vec![2; 300], 3), &History::default(), 1);
+        assert_eq!(small.max_profit(), 6 * PROFIT_PER_PLAYER);
+        assert_eq!(big.max_profit(), 100 * PROFIT_PER_PLAYER);
+        assert_eq!(base(&History::default(), &History::default(), 1).max_profit(), 10 * PROFIT_PER_PLAYER, "no history: a round of ten");
     }
 }

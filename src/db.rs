@@ -2100,6 +2100,8 @@ pub struct Bet {
     pub odds_x100: i64,
     pub result: Option<String>,
     pub payout: Option<i64>,
+    /// The most it can win over its stake; None for bets from before caps.
+    pub max_profit: Option<i64>,
 }
 
 /// What came of placing a bet.
@@ -2131,6 +2133,7 @@ pub async fn place_bet(
     round_date: &str,
     market: &str,
     stake: i64,
+    max_profit: i64,
     price: impl FnOnce(&[(String, i64)]) -> Option<i64>,
 ) -> Result<Placed> {
     if stake < 1 {
@@ -2171,8 +2174,8 @@ pub async fn place_bet(
     };
     let now = ts(Utc::now());
     let inserted: Option<(i64,)> = sqlx::query_as(
-        "INSERT INTO bets (account_id, round_date, market, stake, odds_x100, placed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "INSERT INTO bets (account_id, round_date, market, stake, odds_x100, placed_at, max_profit)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(account_id, round_date, market) DO NOTHING
          RETURNING id",
     )
@@ -2182,6 +2185,7 @@ pub async fn place_bet(
     .bind(stake)
     .bind(odds_x100)
     .bind(&now)
+    .bind(max_profit)
     .fetch_optional(&mut *tx)
     .await?;
     let Some((bet_id,)) = inserted else {
@@ -2214,16 +2218,16 @@ async fn settle_bets(
     let Some(outcome) = outcome else {
         return void_bets(conn, None, round_date, "called off").await;
     };
-    let open: Vec<(i64, i64, String, i64, i64)> = sqlx::query_as(
-        "SELECT id, account_id, market, stake, odds_x100 FROM bets
+    let open: Vec<(i64, i64, String, i64, i64, Option<i64>)> = sqlx::query_as(
+        "SELECT id, account_id, market, stake, odds_x100, max_profit FROM bets
          WHERE round_date = ?1 AND result IS NULL",
     )
     .bind(round_date)
     .fetch_all(&mut *conn)
     .await?;
-    for (id, account, market, stake, odds) in open {
+    for (id, account, market, stake, odds, cap) in open {
         let won = crate::odds::Market::parse(&market).is_some_and(|m| crate::odds::outcome(m, outcome));
-        let payout = if won { crate::odds::payout(stake, odds) } else { 0 };
+        let payout = if won { crate::odds::payout(stake, odds, cap) } else { 0 };
         sqlx::query("UPDATE bets SET result = ?1, payout = ?2, settled_at = ?3 WHERE id = ?4")
             .bind(if won { "won" } else { "lost" })
             .bind(payout)
@@ -2294,7 +2298,7 @@ async fn void_bets(
 /// that date on, newest first.
 pub async fn bets_of(db: &Db, account_id: i64, since: &str) -> Result<Vec<Bet>> {
     let rows = sqlx::query_as::<_, Bet>(
-        "SELECT id, round_date, market, stake, odds_x100, result, payout FROM bets
+        "SELECT id, round_date, market, stake, odds_x100, result, payout, max_profit FROM bets
          WHERE account_id = ?1 AND round_date >= ?2
          ORDER BY round_date DESC, id DESC",
     )

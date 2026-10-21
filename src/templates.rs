@@ -575,6 +575,8 @@ pub struct QuoteView {
     pub odds_x100: i64,
     /// The chance in hundredths of a percent, for its bar.
     pub bp: i64,
+    /// The most a bet on it can win over its stake today.
+    pub max_profit: i64,
     /// Bet on already today.
     pub taken: bool,
 }
@@ -633,6 +635,10 @@ pub struct BetsTemplate {
     pub book_bets: usize,
     /// Made-up rounds behind the odds; 0 if there were no picks to replay.
     pub sims: u32,
+    /// Players a day on average, and so the most one bet can win over its
+    /// stake ("3 000").
+    pub players: usize,
+    pub max_profit: String,
     /// "8%".
     pub tax: String,
     pub mine: Vec<SlipView>,

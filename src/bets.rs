@@ -20,7 +20,7 @@ use crate::app::{AppError, AppState};
 use crate::db::{self, Placed, Pool};
 use crate::handlers::current_viewer;
 use crate::limits;
-use crate::odds::{self, Base, Market, Quote, Week};
+use crate::odds::{self, Base, Market, Quote, History};
 use crate::round::Round;
 use crate::templates::{self, BetsTemplate, Notice, OfferView, QuoteTemplate, QuoteView, SlipView, UserView};
 
@@ -37,9 +37,10 @@ pub async fn todays_base(state: &AppState) -> Result<Arc<Base>, AppError> {
             return Ok(base.clone());
         }
     }
-    let from = (round.date - chrono::Duration::days(odds::WEEK_DAYS)).format("%Y-%m-%d").to_string();
-    let global = Week::from_tallies(&db::range_tallies(&state.db, Pool::Global, &from, &open).await?);
-    let vienna = Week::from_tallies(&db::range_tallies(&state.db, Pool::Vienna, &from, &open).await?);
+    let day = |n: i64| (round.date - chrono::Duration::days(n)).format("%Y-%m-%d").to_string();
+    let (from, recent) = (day(odds::HISTORY_DAYS), day(odds::RECENT_DAYS));
+    let global = History::from_tallies(&db::range_tallies(&state.db, Pool::Global, &from, &open).await?, &recent);
+    let vienna = History::from_tallies(&db::range_tallies(&state.db, Pool::Vienna, &from, &open).await?, &recent);
     let seed = odds::seed(&open);
     // A few thousand made-up rounds: off the async threads.
     let base = Arc::new(tokio::task::spawn_blocking(move || odds::base(&global, &vienna, seed)).await?);
@@ -85,7 +86,7 @@ pub struct BetsQuery {
 
 fn slip(b: db::Bet) -> SlipView {
     let market = Market::parse(&b.market).map_or_else(|| b.market.clone(), Market::label);
-    let pays = odds::payout(b.stake, b.odds_x100);
+    let pays = odds::payout(b.stake, b.odds_x100, b.max_profit);
     SlipView {
         date: templates::eu(&b.round_date),
         market,
@@ -159,6 +160,7 @@ fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market]) 
         odds: qt.odds_x100.map(odds::odds_label),
         odds_x100: qt.odds_x100.unwrap_or(0),
         bp: qt.chance_bp,
+        max_profit: base.max_profit(),
         taken: taken.contains(&m),
     }
 }
@@ -224,6 +226,8 @@ pub async fn page(
         book_total: book.iter().map(|(_, s)| s).sum(),
         book_bets: book.len(),
         sims: base.sims,
+        players: base.players,
+        max_profit: templates::group_digits(base.max_profit()),
         tax: odds::tax_label(),
         mine: mine.into_iter().map(slip).collect(),
         past: past.into_iter().map(slip).collect(),
@@ -311,7 +315,7 @@ pub async fn place(
     // odds shown, or better if they lengthened since.
     let shown = form.odds;
     let price = |rows: &[(String, i64)]| odds::quote(&base, &parse_book(rows), market).odds_x100.filter(|o| *o >= shown);
-    let code = match db::place_bet(&state.db, viewer.account.id, &open, &market.key(), stake, price).await? {
+    let code = match db::place_bet(&state.db, viewer.account.id, &open, &market.key(), stake, base.max_profit(), price).await? {
         Placed::In => "bet_placed",
         Placed::Already => "bet_twice",
         Placed::BadStake => "bet_cap",
@@ -344,7 +348,7 @@ mod tests {
     }
 
     async fn bet(db: &Db, who: i64, round: &str, market: &str, stake: i64, odds: i64) -> Placed {
-        db::place_bet(db, who, round, market, stake, |_| Some(odds)).await.unwrap()
+        db::place_bet(db, who, round, market, stake, 1_000_000, |_| Some(odds)).await.unwrap()
     }
 
     #[tokio::test]
@@ -460,6 +464,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_win_is_capped_at_the_profit_locked_with_the_bet() {
+        let t = temp_db().await;
+        let (ann, bob, cat) = (player(&t.db, "ann").await, player(&t.db, "bob").await, player(&t.db, "cat").await);
+        plays(&t.db, ann, "2026-10-21", 60).await;
+        plays(&t.db, bob, "2026-10-21", 2).await;
+        plays(&t.db, cat, "2026-10-21", 2).await;
+        // 100 on a long shot at x50, with a cap of 300 over the stake.
+        assert_eq!(db::place_bet(&t.db, ann, "2026-10-21", "range:50:", 100, 300, |_| Some(5000)).await.unwrap(), Placed::In);
+        let slip = &db::bets_of(&t.db, ann, "").await.unwrap()[0];
+        assert_eq!(slip.max_profit, Some(300));
+        assert_eq!(super::slip(slip.clone()).amount, 400, "the slip shows the capped amount");
+        let a0 = db::balance(&t.db, ann).await.unwrap();
+        settle_all(&t.db, "2026-10-22").await.unwrap();
+        // Ann's 60 is the only unique number: she wins the pot and the bet.
+        let pot = db::pot(&t.db, "2026-10-21").await.unwrap().unwrap();
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), a0 + pot.paid + 400, "400, not 5000");
+    }
+
+    #[tokio::test]
     async fn a_round_nobody_played_refunds_its_bets() {
         let t = temp_db().await;
         let ann = player(&t.db, "ann").await;
@@ -499,13 +522,13 @@ mod tests {
         let ann = player(&t.db, "ann").await;
         collect(&t.db, ann, "2026-10-21").await.unwrap();
         let start = db::balance(&t.db, ann).await.unwrap();
-        assert_eq!(db::place_bet(&t.db, ann, "2026-10-21", "none", 10, |_| None).await.unwrap(), Placed::Moved);
+        assert_eq!(db::place_bet(&t.db, ann, "2026-10-21", "none", 10, 1_000_000, |_| None).await.unwrap(), Placed::Moved);
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), start);
         assert!(db::bets_of(&t.db, ann, "").await.unwrap().is_empty());
         // The price sees the bets already in.
         bet(&t.db, ann, "2026-10-21", "range:1:4", 30, 200).await;
         let mut seen = Vec::new();
-        db::place_bet(&t.db, ann, "2026-10-21", "none", 10, |rows| {
+        db::place_bet(&t.db, ann, "2026-10-21", "none", 10, 1_000_000, |rows| {
             seen = rows.to_vec();
             Some(900)
         })
@@ -625,7 +648,7 @@ mod tests {
         assert!(html.contains("your bets today"));
         assert!(html.contains("placed &middot; one bet per range a round") && !html.contains(r#"action="/g/bet""#));
         assert!(html.contains("on the book: 40 pts, 1 bet"));
-        assert!(html.contains(&format!("<td class=\"num b win\">{}</td>", odds::payout(40, o))));
+        assert!(html.contains(&format!("<td class=\"num b win\">{}</td>", odds::payout(40, o, None))));
     }
 
     #[tokio::test]
@@ -663,7 +686,8 @@ mod tests {
         let o = odds_for(&state, "range:5:12").await;
         assert!(html.contains(&format!(r#"name="odds" value="{o}""#)));
         // What it pays is worked out from the stake as it is typed, not for 10.
-        assert!(html.contains(&format!(r#"<dt>if it wins</dt><dd class="pays" data-odds="{o}">"#)) && !html.contains("10 pays"));
+        let cap = todays_base(&state).await.unwrap().max_profit();
+        assert!(html.contains(&format!(r#"<dt>if it wins</dt><dd class="pays" data-odds="{o}" data-cap="{cap}">"#)) && !html.contains("10 pays"));
         // Signed out: the odds, no form.
         let html = body(ask("5", "12", None).await.unwrap()).await;
         assert!(html.contains("winner 5 to 12") && !html.contains(r#"action="/g/bet""#));
@@ -704,13 +728,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn odds_come_from_last_week_and_move_as_people_bet() {
+    async fn odds_come_from_last_month_and_move_as_people_bet() {
         let (_t, state) = app(&[]).await;
         last_week(&state).await;
+        // Three weeks back: in the month, counted once. Two months back: out.
+        let today = Round::current(state.now()).date;
+        for (back, n) in [(20, 10), (60, 50)] {
+            let day = (today - chrono::Duration::days(back)).format("%Y-%m-%d").to_string();
+            for i in 0..n {
+                let who = player(&state.db, &format!("old{back}x{i}")).await;
+                db::insert_guess(&state.db, Pool::Global, &day, who, 7, true).await.unwrap();
+            }
+        }
         let base = todays_base(&state).await.unwrap();
-        assert_eq!((base.picks, base.players, base.sims > 0), (140, 20, true));
+        // The last week twice (280), the older day once (10); players a day
+        // from the real guesses: 150 over 8 rounds.
+        assert_eq!((base.picks, base.players, base.sims > 0), (290, 19, true));
+        assert_eq!(base.max_profit(), 19 * odds::PROFIT_PER_PLAYER);
         let html = bets_page(&state, None, None).await;
-        assert!(html.contains("from last week&rsquo;s picks, replayed 40000&times;"));
+        assert!(html.contains("from last month&rsquo;s picks (the last week twice), replayed 40000&times;"));
+        let most = format!("one bet wins at most <b class=\"win\">+{}</b> (19 players a day &times; 100)", templates::group_digits(1900));
+        assert!(html.contains(&most), "{html}");
 
         let (ann, bob) = (player(&state.db, "ann").await, player(&state.db, "bob").await);
         let (mid, high) = ("range:5:12", "range:1:4");
@@ -742,7 +780,7 @@ mod tests {
         db::insert_guess(&state.db, Pool::Global, &yesterday, bob, 40, true).await.unwrap();
         assert!(Arc::ptr_eq(&todays_base(&state).await.unwrap(), &first), "cached for the round");
         *state.odds_base.lock().unwrap() = None;
-        assert_eq!(todays_base(&state).await.unwrap().picks, 1, "worked out again: yesterday counts");
+        assert_eq!(todays_base(&state).await.unwrap().picks, 2, "worked out again: yesterday counts, twice as recent");
     }
 
     #[tokio::test]

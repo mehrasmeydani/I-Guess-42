@@ -54,7 +54,7 @@
     </tbody>
   </table>
   </div>
-  <p class="hint">{% if sims > 0 %}from last week&rsquo;s picks, replayed {{ sims }}&times;{% else %}no picks last week &middot; a rough guess{% endif %} &middot; moves as people bet &middot; house keeps {{ tax }} &middot; on the book: {{ book_total }} pts, {{ book_bets }} {% if book_bets == 1 %}bet{% else %}bets{% endif %} &middot; ranges lose if nobody wins</p>
+  <p class="hint">{% if sims > 0 %}from last month&rsquo;s picks (the last week twice), replayed {{ sims }}&times;{% else %}no picks last month &middot; a rough guess{% endif %} &middot; moves as people bet &middot; house keeps {{ tax }} &middot; one bet wins at most <b class="win">+{{ max_profit }}</b> ({{ players }} players a day &times; {{ crate::odds::PROFIT_PER_PLAYER }}) &middot; on the book: {{ book_total }} pts, {{ book_bets }} {% if book_bets == 1 %}bet{% else %}bets{% endif %} &middot; ranges lose if nobody wins</p>
 </section>
 
 <section class="sec" style="--b: 2" aria-labelledby="most-h">
