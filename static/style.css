@@ -733,6 +733,8 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
   overflow: hidden;
   white-space: pre;
   color: var(--state);
+  /* A clip to animate to: from "none" it would jump, not fill. */
+  clip-path: inset(0);
   animation: fill 520ms steps(20) 120ms both;
 }
 .analyse-done { color: var(--hi); font-weight: 700; white-space: nowrap; animation: show 1ms 680ms both; }
