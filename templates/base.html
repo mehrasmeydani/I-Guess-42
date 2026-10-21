@@ -54,14 +54,7 @@
       <a {% block nav_round %}{% endblock %} href="{{ pool.base() }}/">round</a>
       <a {% block nav_results %}{% endblock %} href="{{ pool.base() }}/results">results</a>
       <a {% block nav_trends %}{% endblock %} href="{{ pool.base() }}/trends">trends</a>
-      {% match user %}{% when Some with (_u) %}<a {% block nav_me %}{% endblock %} href="{{ pool.base() }}/me">me</a>{% when None %}{% endmatch %}
     </nav>
-    {# Two games, one site - but only 42 students ever learn there are two. #}
-    {% if crate::templates::sees_42(user) %}
-    <nav class="pools" aria-label="pool">
-      <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/">42<span class="long"> vienna</span></a><span aria-hidden="true">/</span><a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/">global</a>
-    </nav>
-    {% endif %}
     <div class="status">
       {# The spinner glyphs are decoration; only the one-off message is read out. #}
       <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>
@@ -69,7 +62,7 @@
         {% when Some with (u) %}
           {# Points and your name; logging out is on the account page. #}
           {% if pool.is_global() %}{% match u.points %}{% when Some with (p) %}<a class="pts" href="/g/points" title="your points">{{ crate::templates::points_label(p) }}</a>{% when None %}{% endmatch %}{% endif %}
-          <a class="who" href="/account" title="your account: {{ u.display_name }}">{{ u.login }}</a>
+          <a class="who" href="{{ pool.base() }}/me" title="your rounds and account">{{ u.login }}</a>
         {% when None %}
           {% block signin_link %}<a class="signin" href="/login">sign in</a>{% endblock %}
       {% endmatch %}

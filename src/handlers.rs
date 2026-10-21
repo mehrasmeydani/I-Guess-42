@@ -1736,7 +1736,7 @@ mod tests {
                 assert!(html.contains(r#"href="/g/results""#));
             }
 
-            // A student sees the switch, on whichever side they are.
+            // A student sees the switch beside the countdown, on whichever side they are.
             let global = global_page(&state, Some("s")).await;
             assert!(global.contains(r#"<a class="on" aria-current="true" href="/g/">global</a>"#));
             let vienna = body(

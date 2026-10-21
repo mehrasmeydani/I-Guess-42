@@ -115,11 +115,11 @@ footer { width: 100%; max-width: 1040px; margin: 0 auto; padding-inline: 20px; }
 .top nav a:hover { background: var(--hi); color: var(--bg); }
 .top nav a.on:hover { background: var(--hi); }
 /* The pool switch: one box, two halves, the one you are in inverted. */
-/* The pool switch: quiet text, "42 vienna / global", the one you are in bright. */
-.top nav.pools { gap: 8px; color: var(--dim); font-size: var(--fs-1); white-space: nowrap; }
-.top nav.pools a { color: var(--dim); }
-.top nav.pools a.on, .top nav.pools a.on:hover { margin: 0; padding: 0; background: none; color: var(--hi); font-weight: 700; }
-.top nav.pools a:not(.on):hover { background: none; color: var(--hi); text-decoration: underline; }
+/* The pool switch, on the round's status line: "42 vienna / global", the
+   round you are in shown as where you are (white inversion). */
+.pools { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; color: var(--dim); white-space: nowrap; }
+.pools a { color: var(--fg); padding: 0 4px; }
+.pools a.on, .pools a.on:hover { background: var(--hi); color: var(--bg); text-decoration: none; font-weight: 700; }
 
 .status { display: flex; align-items: center; gap: 16px; margin-left: auto; color: var(--dim); white-space: nowrap; }
 .status .who { text-decoration: none; }
@@ -944,8 +944,7 @@ details.expand[open] summary .when-open { display: inline; }
   .top nav.mainnav a.on { margin: 0; padding: 0; }
   body { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
   .announce-card { bottom: calc(64px + env(safe-area-inset-bottom)); }
-  .top nav.pools { margin-left: auto; }
-  .status { margin-left: 0; }
+  .status { margin-left: auto; }
 }
 
 @media (max-width: 640px) {
@@ -954,11 +953,9 @@ details.expand[open] summary .when-open { display: inline; }
   .top, main, footer { padding-inline: 16px; }
   .status { gap: 8px; font-size: var(--fs-1); }
   /* "42 / global" and a username cut short, so the top row fits a phone. */
-  .pools .long { display: none; }
-  /* On a phone the top row is logo, pool switch and points; your name and
-     account are a tap away under the "me" tab. */
-  .status .who { display: none; }
   .top { gap: 12px; }
+  .status .who { max-width: 12ch; overflow: hidden; text-overflow: ellipsis; }
+  .pools { margin-left: 0; }
   .brand { font-size: var(--fs-2); }
   .statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .daynav { grid-template-columns: 1fr 1fr; }

@@ -250,7 +250,10 @@ async fn my_rounds_show_the_record_and_every_round_played() {
     assert!(first < second, "newest first");
     assert!(html.contains(r#"<span class="dim">lost</span>"#));
     assert!(html.contains(r#"<b class="win">won</b>"#));
-    assert!(html.contains(r#"class="on" aria-current="page" href="/g/me">me</a>"#));
+    // Reached by the name in the header, not a tab; and on to the account.
+    assert!(html.contains(r#"<a class="who" href="/g/me""#));
+    assert!(!html.contains(r#">me</a>"#), "no me tab");
+    assert!(html.contains(r#"href="/account">account &amp; log out"#));
     // Yesterday's winner sees it as a win, and their best.
     let html = body(handlers::global_me(State(state.clone()), jar("cat")).await.unwrap()).await;
     assert!(html.contains(r#"<dt>best win</dt><dd><span class="win">3</span></dd>"#));
@@ -378,7 +381,7 @@ async fn a_42_students_rounds_stay_in_the_42_round() {
     let (_t, state) = app(&[]).await;
     student(&state.db, 1001, "megardes", "s").await;
     let html = body(handlers::me(State(state.clone()), jar("s")).await.unwrap()).await;
-    assert!(html.contains(r#"href="/me">me</a>"#));
+    assert!(html.contains(r#"<a class="who" href="/me""#), "the name leads to the 42 round's record");
     let resp = handlers::me(State(state.clone()), jar("ann-none")).await.unwrap();
     assert_eq!(location(&resp), "/g/me", "anyone else is sent to the global one");
 }
