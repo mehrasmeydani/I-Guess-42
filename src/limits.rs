@@ -29,6 +29,8 @@ pub const LOGIN_PER_IP: Rule = per_minutes(20, 15);
 pub const SIGNUP_PER_IP: Rule = per_minutes(3, 60);
 /// Bets placed by one account: enough for anyone, too few for a script.
 pub const BETS_PER_ACCOUNT: Rule = per_minutes(30, 1);
+/// A robot-check challenge: good once, and no longer than it lives.
+pub const CAPTCHA_ONCE: Rule = per_minutes(1, 20);
 /// Verification and reset mails for one account or email address.
 pub const MAIL_PER_ADDRESS: Rule = per_minutes(3, 60);
 

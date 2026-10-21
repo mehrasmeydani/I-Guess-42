@@ -37,10 +37,10 @@ pub struct Config {
     pub mail_from: String,
     /// Mails per UTC day, kept under the mail service's free limit.
     pub mail_daily_limit: i64,
-    /// Cloudflare Turnstile keys for the sign-up form. None: no CAPTCHA.
-    pub turnstile_site_key: Option<String>,
-    pub turnstile_secret: Option<String>,
-    pub turnstile_verify_url: String,
+    /// How hard the sign-up form's robot check is (`human.rs`): leading zero
+    /// bits of the hash. CAPTCHA_BITS, default `human::BITS`; 0 makes it free,
+    /// as the tests do.
+    pub captcha_bits: u32,
     /// Key for hashing client addresses (see `signin::ip_hash`). None: no
     /// address-derived data is stored at all.
     pub ip_hash_key: Option<String>,
@@ -112,12 +112,10 @@ impl Config {
                 .trim()
                 .parse()
                 .context("MAIL_DAILY_LIMIT must be a whole number")?,
-            turnstile_site_key: nonempty("TURNSTILE_SITE_KEY"),
-            turnstile_secret: nonempty("TURNSTILE_SECRET"),
-            turnstile_verify_url: opt(
-                "TURNSTILE_VERIFY_URL",
-                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-            ),
+            captcha_bits: opt("CAPTCHA_BITS", &crate::human::BITS.to_string())
+                .trim()
+                .parse()
+                .context("CAPTCHA_BITS must be a whole number")?,
             ip_hash_key: nonempty("IP_HASH_KEY"),
             trust_proxy: opt("TRUST_PROXY", "false") == "true",
             ft_api_url: opt("FT_API_URL", "https://api.intra.42.fr"),

@@ -31,12 +31,16 @@
              {% match errors.password %}{% when Some with (_e) %}aria-invalid="true"{% when None %}{% endmatch %}>
       {% match errors.password %}{% when Some with (e) %}<p class="field-error" id="password-error">{{ e }}</p>{% when None %}{% endmatch %}
       <p class="hint" id="password-hint">10+ characters · a few words work well</p>
-      {% match turnstile_site_key %}
-        {% when Some with (key) %}
-          <div class="cf-turnstile" data-sitekey="{{ key }}" data-theme="dark"></div>
-          <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-        {% when None %}
-      {% endmatch %}
+      {# The robot check (human.rs): app.js solves the challenge when the box
+         is ticked, or on submit. The honeypot field is off-screen; people
+         never see it, form-filling scripts fill it in. #}
+      <div class="captcha" data-bits="{{ captcha_bits }}">
+        <input type="hidden" name="captcha" value="{{ captcha }}">
+        <input type="hidden" name="nonce" value="">
+        <label class="captcha-box"><input type="checkbox" class="captcha-check" required><span class="captcha-text">i&rsquo;m not a robot</span></label>
+        <noscript><p class="field-error">the robot check needs javascript</p></noscript>
+      </div>
+      <div class="hp" aria-hidden="true"><label>website <input name="website" type="text" tabindex="-1" autocomplete="off"></label></div>
       <button type="submit" class="primary">create account</button>
     </form>
     <p class="auth-fine">one confirm mail · resets only on request · <a href="/privacy">privacy</a></p>

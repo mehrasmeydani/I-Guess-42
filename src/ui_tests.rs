@@ -358,7 +358,9 @@ async fn a_failed_sign_in_gets_a_focusable_summary_and_marked_fields() {
             email: "ann@example.com".into(),
             username: "a".into(),
             password: "correct horse battery".into(),
-            turnstile: String::new(),
+            captcha: String::new(),
+            nonce: String::new(),
+            website: String::new(),
         }),
     )
     .await
@@ -375,12 +377,13 @@ async fn the_privacy_page_names_its_bases_processors_and_authority() {
     let html = body(crate::moderation::privacy(State(state), CookieJar::new()).await.unwrap()).await;
     for must in [
         "Art. 6(1)(b) GDPR", "Art. 6(1)(f)", "30 days", "24 hours", "1 hour", "2 days",
-        "Google", "GitHub", "42", "Resend", "Cloudflare", "Data Privacy Framework",
+        "Google", "GitHub", "42", "Resend", "Data Privacy Framework",
         "Datenschutzbehörde", "ig42_session", "ig42_held",
     ] {
         assert!(html.contains(must), "{must}");
     }
     assert!(html.matches("<h2>").count() >= 4, "headed sections");
+    assert!(!html.contains("Cloudflare"), "the robot check is our own: no third party to name");
 }
 
 #[tokio::test]

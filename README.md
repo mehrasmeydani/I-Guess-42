@@ -361,7 +361,7 @@ watching it, and a container restart drops whatever requests are in flight.
 | `RESEND_API_KEY` | no | empty: no mail; email sign-up is off on a live site, and a test instance prints mails to the log |
 | `MAIL_FROM` | no | `i guess low <noreply@iguesslow.com>` |
 | `MAIL_DAILY_LIMIT` | no | `90` (under Resend's free 100 a day; resets get 10 more) |
-| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | empty (no CAPTCHA on sign-up) |
+| `CAPTCHA_BITS` | no | 18 (the sign-up robot check: self-hosted, no keys) |
 | `IP_HASH_KEY` | no | empty: no address-derived data is stored |
 | `TRUST_PROXY` | no | `false`; compose sets it, since Caddy is in front |
 | `MODERATORS` | no | empty (`/mod` answers 404); 42 logins, comma-separated |

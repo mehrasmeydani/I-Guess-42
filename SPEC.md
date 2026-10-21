@@ -871,7 +871,7 @@ keys are unset**: the button disappears and the feature degrades gracefully.
 | `RESEND_API_KEY` | for email login | — | Unset: email+password signup is disabled on the live site; on a test instance, mails are **printed to the log** instead of sent. |
 | `MAIL_FROM` | with Resend | — | e.g. `i guess low <noreply@iguesslow.com>`. |
 | `MAIL_DAILY_LIMIT` | no | `90` | Stays under Resend's free 100/day. Past it, signups show "try again tomorrow" and password resets still go through (they're more important). |
-| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | — | Unset: no CAPTCHA. |
+| `CAPTCHA_BITS` | no | 18 | How hard the sign-up robot check is (self-hosted proof of work, `human.rs`). |
 | `IP_HASH_KEY` | for clustering | — | Random 32+ bytes. Unset: no IP signals are stored. |
 | `MODERATORS` | no | empty | Section 12. |
 

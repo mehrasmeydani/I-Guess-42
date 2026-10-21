@@ -10,6 +10,7 @@ mod demo;
 mod economy;
 mod handlers;
 mod held;
+mod human;
 mod ics;
 mod limits;
 mod mail;

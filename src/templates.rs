@@ -1028,7 +1028,9 @@ pub struct SignupTemplate {
     pub enabled: bool,
     pub email: String,
     pub username: String,
-    pub turnstile_site_key: Option<String>,
+    /// The robot check's challenge for this page (`human.rs`), and how hard.
+    pub captcha: String,
+    pub captcha_bits: u32,
 }
 
 /// A page that only says something: "check your inbox", "that link expired".

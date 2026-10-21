@@ -1167,6 +1167,15 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .markets tr.on td { background: var(--panel); }
 .markets tr.on a { background: var(--hi); color: var(--bg); padding: 0 8px; margin-left: -8px; }
 .teaser { margin-top: 24px; }
+/* The robot check: a box like any checkbox, ticked by the puzzle being
+   solved. The honeypot sits off-screen, out of reach of people. */
+.captcha { margin: 8px 0 16px; }
+.captcha-box { display: inline-flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--edge-strong); cursor: pointer; }
+.captcha-box input { width: 20px; height: 20px; accent-color: var(--state); }
+.captcha.busy .captcha-text { color: var(--fg); }
+.captcha.ok .captcha-box { border-color: var(--state); }
+.captcha.ok .captcha-text { color: var(--state); font-weight: 700; }
+.hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
 /* Results: why the last round's winner won, under its headline. */
 .why { margin: 4px 0 0; color: var(--hi); }
 

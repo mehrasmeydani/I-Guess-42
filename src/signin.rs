@@ -234,7 +234,8 @@ fn signup_page(state: &AppState, notice: Option<Notice>, email: String, username
         enabled: state.cfg.email_signup(),
         email,
         username,
-        turnstile_site_key: state.cfg.turnstile_site_key.clone(),
+        captcha: crate::human::issue(&state.cfg.anon_key, chrono::Utc::now().timestamp(), state.cfg.captcha_bits),
+        captcha_bits: state.cfg.captcha_bits,
     }
 }
 
@@ -248,8 +249,14 @@ pub struct SignupForm {
     pub email: String,
     pub username: String,
     pub password: String,
-    #[serde(rename = "cf-turnstile-response", default)]
-    pub turnstile: String,
+    /// The robot check (`human.rs`): the challenge handed out with the page,
+    /// the browser's answer to it, and the field only scripts fill in.
+    #[serde(default)]
+    pub captcha: String,
+    #[serde(default)]
+    pub nonce: String,
+    #[serde(default)]
+    pub website: String,
 }
 
 /// The page every completed sign-up ends on, new address or not.
@@ -294,7 +301,9 @@ pub async fn signup(
     if let Some(why) = password_problem(&form.password, &email, &username) {
         return refuse("password", why);
     }
-    if !turnstile_passed(&state, &form.turnstile, &ip).await {
+    let first_use = |salt: &str| state.limits.take(&format!("captcha:{salt}"), limits::CAPTCHA_ONCE);
+    if let Err(why) = crate::human::check(&state.cfg.anon_key, &form.captcha, &form.nonce, &form.website, chrono::Utc::now().timestamp(), first_use) {
+        tracing::info!(?why, "sign-up failed the robot check");
         return refuse("", crate::copy::HUMAN_CHECK);
     }
     if !db::username_available(&state.db, &username).await? {
@@ -322,37 +331,6 @@ pub async fn signup(
         NewAccount::UsernameTaken => return refuse("username", crate::copy::USERNAME_TAKEN),
     }
     Ok(check_inbox(&state))
-}
-
-#[derive(Deserialize)]
-struct TurnstileReply {
-    #[serde(default)]
-    success: bool,
-}
-
-/// Whether the Turnstile widget's answer checks out with Cloudflare. Always
-/// true when no Turnstile keys are set. If Cloudflare cannot be reached the
-/// sign-up is let through: a CAPTCHA outage must not lock everyone out, and
-/// the per-address limit still applies.
-async fn turnstile_passed(state: &AppState, response: &str, ip: &ClientIp) -> bool {
-    let Some(secret) = state.cfg.turnstile_secret.as_deref() else {
-        return true;
-    };
-    if response.is_empty() {
-        return false;
-    }
-    let mut form = vec![("secret", secret.to_string()), ("response", response.to_string())];
-    if let Some(addr) = ip.0 {
-        form.push(("remoteip", addr.to_string()));
-    }
-    let sent = state.http.post(&state.cfg.turnstile_verify_url).form(&form).send().await;
-    match sent {
-        Ok(resp) => resp.json::<TurnstileReply>().await.map(|r| r.success).unwrap_or(false),
-        Err(err) => {
-            tracing::warn!(%err, "Turnstile unreachable; letting the sign-up through");
-            true
-        }
-    }
 }
 
 // ----------------------------------------------------------------- /verify
@@ -553,11 +531,15 @@ mod tests {
     }
 
     fn signup_form(email: &str, username: &str, password: &str) -> Form<SignupForm> {
+        // The test config's key and difficulty: an empty key, zero bits.
+        let (captcha, nonce) = crate::human::answered("", 0);
         Form(SignupForm {
             email: email.into(),
             username: username.into(),
             password: password.into(),
-            turnstile: String::new(),
+            captcha,
+            nonce,
+            website: String::new(),
         })
     }
 
@@ -899,43 +881,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_turnstile_check_is_asked_when_configured() {
-        use axum::routing::post;
-        // A stand-in for Cloudflare that passes exactly the answer "good".
-        let fake = axum::Router::new().route(
-            "/siteverify",
-            post(|axum::Form(f): axum::Form<std::collections::HashMap<String, String>>| async move {
-                let ok = f.get("secret").map(String::as_str) == Some("s3cret")
-                    && f.get("response").map(String::as_str) == Some("good");
-                axum::Json(serde_json::json!({ "success": ok }))
-            }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, fake).await.unwrap() });
-
+    async fn the_robot_check_stops_scripts_and_lets_people_through() {
         let mut cfg = config(&["megardes"]);
-        cfg.turnstile_site_key = Some("site".into());
-        cfg.turnstile_secret = Some("s3cret".into());
-        cfg.turnstile_verify_url = format!("http://{addr}/siteverify");
+        cfg.captcha_bits = 8;
+        cfg.anon_key = "k".into();
         let (t, state, _) = app_with(cfg).await;
 
+        // The page hands out a challenge at the configured difficulty.
         let page = body(signup_page_handler(State(state.clone()), CookieJar::new()).await).await;
-        assert!(page.contains(r#"data-sitekey="site""#));
+        assert!(page.contains(r#"name="captcha" value=""#) && page.contains(r#"data-bits="8""#));
+        assert!(page.contains(r#"name="website""#), "the honeypot");
 
-        for answer in ["", "bad"] {
+        let (token, nonce) = crate::human::answered("k", 8);
+        let attempt = |captcha: String, nonce: String, website: &str| {
             let mut form = signup_form("ann@example.com", "ann", PASSWORD);
-            form.0.turnstile = answer.into();
-            let resp = signup(State(state.clone()), no_ip(), form).await.unwrap();
-            assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY, "{answer:?}");
+            form.0.captcha = captcha;
+            form.0.nonce = nonce;
+            form.0.website = website.into();
+            signup(State(state.clone()), no_ip(), form)
+        };
+        // No answer, a wrong one, a filled honeypot, a form sent too fast.
+        let instant = crate::human::issue("k", chrono::Utc::now().timestamp(), 8);
+        let instant_nonce = crate::human::solve(&instant);
+        for (c, n, w) in [
+            (String::new(), String::new(), ""),
+            (token.clone(), "x".to_string(), ""),
+            (token.clone(), nonce.clone(), "http://spam.example"),
+            (instant, instant_nonce, ""),
+        ] {
+            assert_eq!(attempt(c, n, w).await.unwrap().status(), StatusCode::UNPROCESSABLE_ENTITY);
         }
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 0);
 
-        let mut form = signup_form("ann@example.com", "ann", PASSWORD);
-        form.0.turnstile = "good".into();
-        let resp = signup(State(state.clone()), no_ip(), form).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
+        // Solved: in. The same answer again: refused.
+        assert_eq!(attempt(token.clone(), nonce.clone(), "").await.unwrap().status(), StatusCode::OK);
         assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 1);
+        let mut again = signup_form("bob@example.com", "bob", PASSWORD);
+        again.0.captcha = token;
+        again.0.nonce = nonce;
+        let resp = signup(State(state.clone()), no_ip(), again).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY, "one use per challenge");
     }
 
     #[tokio::test]

@@ -395,3 +395,93 @@
     pays.innerHTML = back + ' <small>+' + (back - stake) + (capped ? ' \u00b7 capped' : '') + '</small>';
   });
 })();
+
+// The robot check on the sign-up form (human.rs): find a nonce whose
+// SHA-256 of "salt:nonce" starts with the asked-for number of zero bits.
+// Worked in small slices so the page never freezes; started when the box
+// is ticked, and on submit if it has not finished yet.
+(function () {
+  var box = document.querySelector('.captcha[data-bits]');
+  if (!box) return;
+  var form = box.closest('form');
+  var check = box.querySelector('.captcha-check');
+  var text = box.querySelector('.captcha-text');
+  var token = box.querySelector('input[name=captcha]').value;
+  var nonceField = box.querySelector('input[name=nonce]');
+  var bits = parseInt(box.dataset.bits, 10) || 0;
+  var salt = token.split('.')[0];
+  var K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+  var w = new Int32Array(64);
+  function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
+
+  // The first 32 bits of SHA-256(msg), for an ASCII msg under 56 bytes
+  // (one block): all the check needs.
+  function head(msg) {
+    var i, n = msg.length;
+    for (i = 0; i < 16; i++) w[i] = 0;
+    for (i = 0; i < n; i++) w[i >> 2] |= msg.charCodeAt(i) << (24 - (i % 4) * 8);
+    w[n >> 2] |= 0x80 << (24 - (n % 4) * 8);
+    w[15] = n * 8;
+    for (i = 16; i < 64; i++) {
+      var a = w[i - 15], b = w[i - 2];
+      var s0 = rotr(a, 7) ^ rotr(a, 18) ^ (a >>> 3);
+      var s1 = rotr(b, 17) ^ rotr(b, 19) ^ (b >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+    var A = 0x6a09e667, B = 0xbb67ae85, C = 0x3c6ef372, D = 0xa54ff53a,
+        E = 0x510e527f, F = 0x9b05688c, G = 0x1f83d9ab, H = 0x5be0cd19;
+    for (i = 0; i < 64; i++) {
+      var S1 = rotr(E, 6) ^ rotr(E, 11) ^ rotr(E, 25);
+      var t1 = (H + S1 + ((E & F) ^ (~E & G)) + K[i] + w[i]) | 0;
+      var S0 = rotr(A, 2) ^ rotr(A, 13) ^ rotr(A, 22);
+      var t2 = (S0 + ((A & B) ^ (A & C) ^ (B & C))) | 0;
+      H = G; G = F; F = E; E = (D + t1) | 0; D = C; C = B; B = A; A = (t1 + t2) | 0;
+    }
+    return (A + 0x6a09e667) | 0;
+  }
+  window.__iglHead = head; // for checking against a reference in tests
+
+  var state = 'idle', waiting = false, n = 0;
+  function done() {
+    state = 'done';
+    check.checked = true;
+    box.classList.remove('busy');
+    box.classList.add('ok');
+    text.textContent = 'not a robot ✓';
+    if (waiting) form.submit();
+  }
+  function work() {
+    var end = n + 20000;
+    for (; n < end; n++) {
+      if (Math.clz32(head(salt + ':' + n)) >= bits) { nonceField.value = String(n); return done(); }
+    }
+    setTimeout(work, 0);
+  }
+  function start() {
+    if (state !== 'idle') return;
+    state = 'busy';
+    box.classList.add('busy');
+    text.textContent = 'checking…';
+    work();
+  }
+  check.addEventListener('change', function () {
+    if (state === 'done') { check.checked = true; return; }
+    check.checked = false; // ticked by the check, not by hand
+    start();
+  });
+  form.addEventListener('submit', function (e) {
+    if (state === 'done') return;
+    e.preventDefault();
+    waiting = true;
+    start();
+  });
+})();

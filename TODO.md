@@ -21,8 +21,6 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 - [ ] `IP_HASH_KEY`: a long random string (`openssl rand -hex 32`).
 - [ ] `MODERATORS`: 42 logins, comma-separated.
 - [ ] `IMPRINT_NAME`, `IMPRINT_EMAIL` (and `IMPRINT_ADDRESS` if needed).
-- [ ] Optional: `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` (Cloudflare) for a
-      bot check on sign-up.
 - [ ] Check `FT_CLIENT_SECRET` is current: the live server answered 42's token
       endpoint with 401 `invalid_client` before.
 
