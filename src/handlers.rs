@@ -107,6 +107,19 @@ pub async fn global_index(
     index_in(Pool::Global, state, jar, query).await
 }
 
+/// `POST /g/streak`: credits every streak bonus waiting, then back to the
+/// round. Safe to send twice: each bonus is a ledger row that exists once.
+pub async fn claim_streak(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
+    let Some(viewer) = current_viewer(&state, &jar).await? else {
+        return Ok(Redirect::to("/login").into_response());
+    };
+    if !viewer.account.verified {
+        return Ok(Redirect::to("/g/?msg=unverified").into_response());
+    }
+    let got = crate::economy::claim_streaks(&state.db, viewer.account.id).await?;
+    Ok(Redirect::to(if got > 0 { "/g/?msg=streak_claimed" } else { "/g/" }).into_response())
+}
+
 async fn index_in(
     pool: Pool,
     state: AppState,
@@ -171,6 +184,15 @@ async fn index_in(
         Some(p) => Some(player_record(&state, pool, p, &round_key).await?.0),
         None => None,
     };
+    // Ten days in a row in the global round is worth a bonus, claimed from a
+    // pop-up here: the total waiting, if any.
+    let streak_bonus = match player.filter(|_| pool == Pool::Global) {
+        Some(p) => {
+            let waiting = crate::economy::unclaimed_streaks(&state.db, p).await?.len() as i64;
+            (waiting > 0).then(|| crate::templates::points_label(&(waiting * crate::economy::STREAK_BONUS)))
+        }
+        None => None,
+    };
     // "saved" is said by the confirmation panel itself, not by a notice.
     let just_locked = query.msg.as_deref() == Some("saved") && my_guess_label.is_some();
     let notice = match query.msg.as_deref() {
@@ -187,6 +209,7 @@ async fn index_in(
     };
     Ok(templates::render(&IndexTemplate {
         pool,
+        streak_bonus,
         can_play: player.is_some(),
         signed_in: viewer.is_some(),
         user: viewer.map(UserView::from),

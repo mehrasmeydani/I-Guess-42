@@ -1754,6 +1754,27 @@ pub async fn credit_once(
     Ok(n > 0)
 }
 
+/// Every day an account has a guess in the global round, the open one
+/// included, oldest first. Ghost guesses do not count.
+pub async fn global_play_days(db: &Db, account_id: i64) -> Result<Vec<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT round_date FROM global_guesses WHERE user_id = ?1 AND participates = 1 ORDER BY round_date",
+    )
+    .bind(account_id)
+    .fetch_all(db)
+    .await?)
+}
+
+/// The refs of every ledger row of `kind` an account has, e.g. the streak
+/// bonuses it claimed.
+pub async fn ledger_refs(db: &Db, account_id: i64, kind: &str) -> Result<Vec<String>> {
+    Ok(sqlx::query_scalar("SELECT ref FROM ledger WHERE account_id = ?1 AND kind = ?2")
+        .bind(account_id)
+        .bind(kind)
+        .fetch_all(db)
+        .await?)
+}
+
 /// What came of locking a guess in the global round.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Locked {
@@ -1939,15 +1960,24 @@ pub async fn settle_round(db: &Db, round_date: &str) -> Result<Option<Pot>> {
             .bind(round_date)
             .fetch_one(&mut *tx)
             .await?;
+    // The most picked number; on a tie, the lowest of them.
+    let most: Option<(i64,)> = sqlx::query_as(
+        "SELECT value FROM global_guesses WHERE round_date = ?1 AND participates = 1
+         GROUP BY value ORDER BY COUNT(*) DESC, value LIMIT 1",
+    )
+    .bind(round_date)
+    .fetch_optional(&mut *tx)
+    .await?;
     let stakes = round_stakes(&mut tx, round_date).await?;
     let carried_in = carry_into(&mut tx, round_date).await?;
     let winner_id = winner.map(|w| w.0);
     let winning_value = winner.map(|w| w.1);
     let paid = if winner_id.is_some() { stakes + carried_in } else { 0 };
     let now = ts(Utc::now());
-    // The round's bets, against its winning number. A round nobody played
-    // has no outcome to bet on: its bets are called off and refunded.
-    settle_bets(&mut tx, round_date, (players > 0).then_some(winning_value), &now).await?;
+    // The round's bets, against its winning and most picked numbers. A round
+    // nobody played has no outcome to bet on: its bets are called off.
+    let outcome = crate::odds::Outcome { winner: winning_value, most: most.map(|m| m.0) };
+    settle_bets(&mut tx, round_date, (players > 0).then_some(outcome), &now).await?;
     if let Some(w) = winner_id.filter(|_| paid > 0) {
         sqlx::query(
             "INSERT INTO ledger (account_id, round_date, kind, amount, ref, created_at)
@@ -2049,8 +2079,8 @@ pub enum Placed {
     In,
     /// One bet per market per round; this one is in already.
     Already,
-    /// Over the per-bet or per-round cap.
-    OverCap,
+    /// Not a stake: under 1.
+    BadStake,
     /// Not enough points for the stake.
     Broke,
     /// The round is settled or called off.
@@ -2060,8 +2090,8 @@ pub enum Placed {
     Moved,
 }
 
-/// Places a bet and takes the stake, in one transaction. The caps hold per
-/// bet and per account per round. `price` is given the round's open bets
+/// Places a bet and takes the stake, in one transaction. Any stake from 1
+/// up to the account's points. `price` is given the round's open bets
 /// (market, stake) as they stand inside the transaction, and returns the
 /// odds to place at, or None to refuse: so two bets at once each see the
 /// other, and nobody gets odds the book has already moved past.
@@ -2073,8 +2103,8 @@ pub async fn place_bet(
     stake: i64,
     price: impl FnOnce(&[(String, i64)]) -> Option<i64>,
 ) -> Result<Placed> {
-    if !(1..=crate::odds::MAX_BET).contains(&stake) {
-        return Ok(Placed::OverCap);
+    if stake < 1 {
+        return Ok(Placed::BadStake);
     }
     let mut tx = write_tx(db).await?;
     let closed: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM pots WHERE round_date = ?1")
@@ -2084,9 +2114,8 @@ pub async fn place_bet(
     if closed.is_some() {
         return Ok(Placed::Closed);
     }
-    let (already, staked): (i64, i64) = sqlx::query_as(
-        "SELECT COALESCE(SUM(market = ?3), 0), COALESCE(SUM(stake), 0)
-         FROM bets WHERE account_id = ?1 AND round_date = ?2 AND result IS NULL",
+    let (already,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM bets WHERE account_id = ?1 AND round_date = ?2 AND market = ?3 AND result IS NULL",
     )
     .bind(account_id)
     .bind(round_date)
@@ -2095,9 +2124,6 @@ pub async fn place_bet(
     .await?;
     if already > 0 {
         return Ok(Placed::Already);
-    }
-    if staked + stake > crate::odds::MAX_BETS_PER_ROUND {
-        return Ok(Placed::OverCap);
     }
     let (balance,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE account_id = ?1")
         .bind(account_id)
@@ -2146,16 +2172,16 @@ pub async fn place_bet(
     Ok(Placed::In)
 }
 
-/// Settles a round's open bets. `outcome` is `Some(winning number or None)`
-/// for a round that was played, and `None` for one that cannot be judged
+/// Settles a round's open bets. `outcome` is the round's winning and most picked
+/// numbers for a round that was played, and `None` for one that cannot be judged
 /// (nobody played, or it was called off): those bets are void and refunded.
 async fn settle_bets(
     conn: &mut sqlx::SqliteConnection,
     round_date: &str,
-    outcome: Option<Option<i64>>,
+    outcome: Option<crate::odds::Outcome>,
     now: &str,
 ) -> Result<()> {
-    let Some(winner) = outcome else {
+    let Some(outcome) = outcome else {
         return void_bets(conn, None, round_date, "called off").await;
     };
     let open: Vec<(i64, i64, String, i64, i64)> = sqlx::query_as(
@@ -2166,7 +2192,7 @@ async fn settle_bets(
     .fetch_all(&mut *conn)
     .await?;
     for (id, account, market, stake, odds) in open {
-        let won = crate::odds::Market::parse(&market).is_some_and(|m| crate::odds::outcome(m, winner));
+        let won = crate::odds::Market::parse(&market).is_some_and(|m| crate::odds::outcome(m, outcome));
         let payout = if won { crate::odds::payout(stake, odds) } else { 0 };
         sqlx::query("UPDATE bets SET result = ?1, payout = ?2, settled_at = ?3 WHERE id = ?4")
             .bind(if won { "won" } else { "lost" })

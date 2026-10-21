@@ -8,14 +8,18 @@
 
 {% block content %}
 <section class="sec" style="--b: 0" aria-labelledby="bets-h">
-  <h2 class="section-title" id="bets-h">today's bets <span class="dim scope-inline">close {{ close_time }}{% if can_bet %} &middot; {{ room }} of {{ crate::odds::MAX_BETS_PER_ROUND }} left to stake{% endif %}</span></h2>
+  <h2 class="section-title" id="bets-h">today's bets <span class="dim scope-inline">close {{ close_time }} &middot; odds locked when you bet</span></h2>
   {% include "_notice.html" %}
 
   {# One box: pick a range, its odds under it. Picking is a plain GET, so it
      works without scripts; app.js swaps the quote in as you type. #}
   <div class="betbox">
     <form class="pick" method="get" action="/g/bets" data-quote="/g/bets/quote">
-      <label for="lo">winner from</label>
+      <fieldset class="pick-on">
+        <legend class="sr">bet on</legend>
+        <label><input type="radio" name="on" value="win" class="sr"{% if !on_most %} checked{% endif %}><span>winning number</span></label><label><input type="radio" name="on" value="most" class="sr"{% if on_most %} checked{% endif %}><span>most picked</span></label>
+      </fieldset>
+      <label for="lo">from</label>
       <input id="lo" name="lo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="5" value="{{ lo }}" autocomplete="off" required>
       <label for="hi">to</label>
       <input id="hi" name="hi" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="any" value="{{ hi }}" autocomplete="off">
@@ -30,7 +34,7 @@
   {% else if !can_bet %}
     <p class="hint">confirm your email to bet</p>
   {% else %}
-    <p class="hint">1&ndash;{{ max_bet }} a bet &middot; odds locked when you bet &middot; points only, never money</p>
+    <p class="hint">stake as much as you like, up to your points &middot; points only, never money</p>
   {% endif %}
 </section>
 
@@ -53,8 +57,27 @@
   <p class="hint">{% if sims > 0 %}from last week&rsquo;s picks, replayed {{ sims }}&times;{% else %}no picks last week &middot; a rough guess{% endif %} &middot; moves as people bet &middot; house keeps {{ tax }} &middot; on the book: {{ book_total }} pts, {{ book_bets }} {% if book_bets == 1 %}bet{% else %}bets{% endif %} &middot; ranges lose if nobody wins</p>
 </section>
 
+<section class="sec" style="--b: 2" aria-labelledby="most-h">
+  <h2 class="section-title" id="most-h">the most picked number <span class="dim scope-inline">tap one to bet</span></h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="the most picked number">
+  <table class="grid markets">
+    <thead><tr><th scope="col">range</th><th scope="col" class="num">chance</th><th scope="col" class="num">odds</th></tr></thead>
+    <tbody>
+      {% for o in board_most %}
+        <tr{% if o.on %} class="on"{% endif %}>
+          <td><a href="/g/bets?m={{ o.key }}">{{ o.label }}</a></td>
+          <td class="num dim">{{ o.chance }}%</td>
+          <td class="num b">{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint">the number the most players pick &middot; on a tie, the lowest of them &middot; its own book</p>
+</section>
+
 {% if !mine.is_empty() %}
-<section class="sec" style="--b: 2">
+<section class="sec" style="--b: 3">
   <h2 class="section-title">your bets today</h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="your bets today">
   <table class="grid">
@@ -70,7 +93,7 @@
 {% endif %}
 
 {% if !past.is_empty() %}
-<section class="sec" style="--b: 3">
+<section class="sec" style="--b: 4">
   <h2 class="section-title">past bets <span class="dim scope-inline">last 14 days &middot; net {{ net_label }}</span></h2>
   <div class="table-wrap" tabindex="0" role="region" aria-label="past bets">
   <table class="grid">

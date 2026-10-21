@@ -342,7 +342,8 @@
   var timer = null, asked = 0;
 
   function update() {
-    var q = 'lo=' + encodeURIComponent(lo.value.trim()) + '&hi=' + encodeURIComponent(hi.value.trim());
+    var on = form.querySelector('input[name=on]:checked');
+    var q = 'on=' + (on ? on.value : 'win') + '&lo=' + encodeURIComponent(lo.value.trim()) + '&hi=' + encodeURIComponent(hi.value.trim());
     var n = ++asked;
     // Reloading or sharing the page keeps the range.
     try { history.replaceState(null, '', lo.value.trim() || hi.value.trim() ? '/g/bets?' + q : '/g/bets'); } catch (e) {}
@@ -360,5 +361,8 @@
   }
   lo.addEventListener('input', soon);
   hi.addEventListener('input', soon);
+  // Winner or most picked: the same range, priced on the other book.
+  var kinds = form.querySelectorAll('input[name=on]');
+  for (var k = 0; k < kinds.length; k++) kinds[k].addEventListener('change', update);
   form.addEventListener('submit', function (e) { e.preventDefault(); clearTimeout(timer); update(); });
 })();

@@ -16,7 +16,6 @@
   {% when Some with (o) %}
     {% if !can_bet %}
     {% else if q.taken %}<p class="dim">placed &middot; one bet per range a round</p>
-    {% else if room <= 0 %}<p class="dim">nothing left to stake this round</p>
     {% else %}
     <form method="post" action="/g/bet" class="betform">
       <input type="hidden" name="market" value="{{ q.key }}">

@@ -128,6 +128,7 @@ async fn main() -> Result<()> {
         .route("/g/leaderboard", get(points_pages::leaderboard))
         .route("/me", get(handlers::me))
         .route("/g/guess", post(handlers::global_submit_guess))
+        .route("/g/streak", post(handlers::claim_streak))
         .route("/g/guess/confirm", post(handlers::global_confirm_guess))
         .route("/login", get(signin::login_page_handler))
         .route("/login/42", get(oauth::login_42))

@@ -36,6 +36,24 @@
   {% when None %}
 {% endmatch %}
 
+{# Streak bonus waiting: a pop-up over the page until claimed. The checkbox
+   is "later", so it goes away with JavaScript off too; it comes back on the
+   next visit until the points are claimed. #}
+{% match streak_bonus %}
+  {% when Some with (pts) %}
+    <div class="claim">
+      <input type="checkbox" id="claim-later" class="claim-x sr" aria-label="claim later">
+      <div class="claim-card" role="dialog" aria-labelledby="claim-h">
+        <p class="claim-when">10 days in a row</p>
+        <p class="claim-num" id="claim-h"><b class="win">+{{ pts }}</b></p>
+        <p class="claim-why">a streak bonus, yours to take</p>
+        <form method="post" action="/g/streak" class="claim-form"><button type="submit" class="claim-btn">claim</button></form>
+        <label class="claim-later" for="claim-later">later</label>
+      </div>
+    </div>
+  {% when None %}
+{% endmatch %}
+
 {# The order: how long is left, the box, the tagline, the rules, yesterday. Nothing explains strategy:
    working out that low numbers get crowded is the game (R22.3). #}
 <section class="sec hero" style="--b: 0" aria-labelledby="round-h">

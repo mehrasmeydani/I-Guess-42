@@ -551,6 +551,11 @@ documented like `PARTICIPANT_POINTS` in `points.rs`.
   next round's `carried_in`.
 - **No negative balances.** Stakes and bets are checked against the balance in
   the same transaction that writes them.
+- **Streak bonus.** Every 10th day in a row with a global guess (today's
+  counts) earns 1000, claimed from a pop-up on the round page:
+  `ledger(kind='streak', ref='streak:<day>', +1000)`, once per milestone
+  however often the claim is sent. A missed day starts the count over.
+  Migration 0011 adds the kind (it rebuilds `ledger`, keeping every row).
 - **Ledger only.** No balance column anywhere; balance = `SUM(amount)` over an
   indexed column. That's fast enough for years at this scale.
 
@@ -590,6 +595,7 @@ none. The player picks the bet themselves:
 | `range:A:` | W exists and W ≥ A | from A, "to" left empty |
 | `range:A:A` | W = A | the same number twice |
 | `none` | nobody wins | "or: nobody wins" |
+| `most:A:B`, `most:A:` | M, the most picked number, is in the range (ties: the lowest of them) | the "most picked" switch |
 
 1 ≤ A ≤ B ≤ 1 000 000 000. Ranges **lose** on a no-winner day. That's
 standard bookmaker behaviour and keeps `none` meaningful. The first bets were
@@ -599,8 +605,8 @@ Rules:
 
 - One bet per range per round (DB `UNIQUE` on the market key); any number of
   different ranges, overlapping or not.
-- Stake 1 to `MAX_BET` (100), and all of an account's bets in a round at most
-  `MAX_BETS_PER_ROUND` (200).
+- Any stake from 1 up to the account's points: no other cap.
+- Bets on W and bets on M are separate books: they never move each other.
 - **You don't need to guess to bet**, and betting doesn't affect your guess.
 - Placing a bet inserts the bet and `ledger(kind='bet', ref=bet_id, −stake)` in
   one transaction.
@@ -635,8 +641,11 @@ backed(R) = Σ over open bets b: stake_b × p0(R ∩ b) / p0(b)
 p(R)      = (L × p0(R) + backed(R)) / (L + Σ stake_b),  clamped to [0.01, 0.99]
 ```
 
-A bet on 5–12 makes 5–12 (and ranges overlapping it) likelier and every
-other range less likely, so its odds shorten and theirs lengthen. Only bets
+and then **p(R) = max(p(R), p0(R))**: a bet on 5–12 makes 5–12 (and ranges
+overlapping it) likelier, so their odds shorten; nothing ever pays more than
+its starting odds. With stakes uncapped this matters: if bets could lengthen
+the other side, a big bet on one range would open a false price on the rest
+for the same player to take. Only bets
 move the book; today's guesses never go in (secret until 12:42). A heavy bet
 on one number can hint at what its bettor picked - that is the bettor's own
 choice to make.

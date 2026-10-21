@@ -642,6 +642,26 @@ pub fn player_stats(history: &[(chrono::NaiveDate, i64, bool)], guessed_open: bo
     }
 }
 
+/// The days a streak bonus was earned: every `every`-th day of a run of
+/// consecutive days played (the 10th, 20th, ... day in a row). `days` may be
+/// in any order and hold repeats.
+pub fn streak_milestones(days: &[chrono::NaiveDate], every: i64) -> Vec<chrono::NaiveDate> {
+    let mut days = days.to_vec();
+    days.sort_unstable();
+    days.dedup();
+    let mut out = Vec::new();
+    let mut run = 0;
+    let mut prev: Option<chrono::NaiveDate> = None;
+    for d in days {
+        run = if prev.and_then(|p| p.succ_opt()) == Some(d) { run + 1 } else { 1 };
+        if run % every == 0 {
+            out.push(d);
+        }
+        prev = Some(d);
+    }
+    out
+}
+
 /// The numbers below the winner that more than one player picked: what the
 /// winner got past. With no winner, every number that collided. Lowest
 /// first, at most `limit`.
@@ -660,6 +680,21 @@ mod tests {
 
     fn d(s: &str) -> chrono::NaiveDate {
         chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn a_streak_bonus_comes_every_tenth_day_in_a_row() {
+        let d = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let run = |from: &str, n: i64| (0..n).map(|i| d(from) + chrono::Duration::days(i)).collect::<Vec<_>>();
+        assert!(streak_milestones(&run("2026-10-01", 9), 10).is_empty());
+        assert_eq!(streak_milestones(&run("2026-10-01", 10), 10), vec![d("2026-10-10")]);
+        assert_eq!(streak_milestones(&run("2026-10-01", 25), 10), vec![d("2026-10-10"), d("2026-10-20")]);
+        // A missed day starts over; order and repeats do not matter.
+        let mut broken = run("2026-10-01", 9);
+        broken.extend(run("2026-10-11", 10));
+        broken.reverse();
+        broken.push(d("2026-10-12"));
+        assert_eq!(streak_milestones(&broken, 10), vec![d("2026-10-20")]);
     }
 
     #[test]

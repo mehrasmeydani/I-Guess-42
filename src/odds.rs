@@ -4,14 +4,17 @@
 //!
 //! A bet is on the round's winning number W - the lowest number exactly one
 //! player picked - landing in a range the player chooses, or on there being
-//! no winner at all. Odds come from two things:
+//! no winner at all; or on the most picked number M landing in a range.
+//! Odds come from two things:
 //!
 //! - Last week's picks, replayed: `SIMS` made-up rounds, each with last
 //!   week's usual number of players drawing from what people actually picked.
 //!   How often W lands in a range is its starting chance.
 //! - The book: points already bet count as evidence, like money moving a
-//!   betting exchange. The more is staked on numbers in a range, the likelier
-//!   it looks and the less it pays; ranges nobody backs drift longer.
+//!   bookmaker's prices. The more is staked on numbers in a range, the
+//!   likelier it looks and the less it pays. Odds only ever shorten: a range
+//!   never pays more than its starting odds, so a big bet on one side cannot
+//!   be used to lengthen the other and then bet that at a false price.
 //!
 //! The house keeps `MARGIN_PCT` of fair odds - the tax - so every bet loses a
 //! little on average and the near-certain ones ("1 or more") pay less than
@@ -50,10 +53,6 @@ const ODDS_MAX: i64 = 5000;
 /// The largest number a range may name.
 pub const MAX_LINE: i64 = 1_000_000_000;
 
-/// The most one bet may stake, and the most an account may stake on bets
-/// in one round: what a manipulated round can pay out is bounded.
-pub const MAX_BET: i64 = 100;
-pub const MAX_BETS_PER_ROUND: i64 = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Market {
@@ -61,6 +60,17 @@ pub enum Market {
     Range { lo: i64, hi: Option<i64> },
     /// Nobody wins: every number was picked more than once.
     Nobody,
+    /// M, the most picked number (ties: the lowest of them), is in the
+    /// range: lo <= M, and M <= hi if there is a hi.
+    Most { lo: i64, hi: Option<i64> },
+}
+
+/// What a round came to, as bets are judged: its winning number, if any,
+/// and its most picked number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Outcome {
+    pub winner: Option<i64>,
+    pub most: Option<i64>,
 }
 
 impl Market {
@@ -68,6 +78,18 @@ impl Market {
     pub fn range(lo: i64, hi: Option<i64>) -> Option<Market> {
         let ok = (1..=MAX_LINE).contains(&lo) && hi.is_none_or(|h| (lo..=MAX_LINE).contains(&h));
         ok.then_some(Market::Range { lo, hi })
+    }
+
+    /// The same range, on the most picked number instead.
+    pub fn most(self) -> Market {
+        match self {
+            Market::Range { lo, hi } => Market::Most { lo, hi },
+            m => m,
+        }
+    }
+
+    pub fn is_most(self) -> bool {
+        matches!(self, Market::Most { .. })
     }
 
     /// From the bets page's two boxes: an empty top means "or more".
@@ -80,10 +102,12 @@ impl Market {
         Market::range(lo, hi)
     }
 
-    /// As stored: "range:5:12", "range:10:" (no top), "none".
+    /// As stored: "range:5:12", "range:10:" (no top), "none", "most:1:3".
     pub fn key(self) -> String {
+        let top = |hi: Option<i64>| hi.map(|h| h.to_string()).unwrap_or_default();
         match self {
-            Market::Range { lo, hi } => format!("range:{lo}:{}", hi.map(|h| h.to_string()).unwrap_or_default()),
+            Market::Range { lo, hi } => format!("range:{lo}:{}", top(hi)),
+            Market::Most { lo, hi } => format!("most:{lo}:{}", top(hi)),
             Market::Nobody => "none".to_string(),
         }
     }
@@ -95,10 +119,11 @@ impl Market {
             return Some(Market::Nobody);
         }
         let num = |s: &str| s.parse::<i64>().ok().filter(|_| s.bytes().all(|b| b.is_ascii_digit()));
-        if let Some(rest) = key.strip_prefix("range:") {
+        if let Some((kind, rest)) = key.split_once(':').filter(|(k, _)| *k == "range" || *k == "most") {
             let (lo, hi) = rest.split_once(':')?;
             let hi = if hi.is_empty() { None } else { Some(num(hi)?) };
-            return Market::range(num(lo)?, hi);
+            let range = Market::range(num(lo)?, hi)?;
+            return Some(if kind == "most" { range.most() } else { range });
         }
         if let Some(n) = key.strip_prefix("under:") {
             return Market::range(1, Some(num(n)? - 1));
@@ -117,53 +142,67 @@ impl Market {
             Market::Range { lo, hi: Some(h) } if lo == h => format!("winner exactly {lo}"),
             Market::Range { lo, hi: Some(h) } => format!("winner {lo} to {h}"),
             Market::Nobody => "nobody wins".to_string(),
+            Market::Most { lo: 1, hi: None } => "any most picked".to_string(),
+            Market::Most { lo, hi: None } => format!("most picked {lo} or more"),
+            Market::Most { lo, hi: Some(h) } if lo == h => format!("most picked exactly {lo}"),
+            Market::Most { lo, hi: Some(h) } => format!("most picked {lo} to {h}"),
         }
     }
 
     /// What the bets page's two boxes hold for it.
     pub fn inputs(self) -> (String, String) {
         match self {
-            Market::Range { lo, hi } => (lo.to_string(), hi.map(|h| h.to_string()).unwrap_or_default()),
+            Market::Range { lo, hi } | Market::Most { lo, hi } => (lo.to_string(), hi.map(|h| h.to_string()).unwrap_or_default()),
             Market::Nobody => (String::new(), String::new()),
         }
     }
 
-    /// The outcomes both markets win on, if any.
+    /// The outcomes both markets win on, if any. Bets on the winner and on
+    /// the most picked number never overlap: they are separate books.
     fn overlap(self, other: Market) -> Option<Market> {
+        let meet = |a: i64, x: Option<i64>, b: i64, y: Option<i64>| {
+            let lo = a.max(b);
+            let hi = match (x, y) {
+                (Some(x), Some(y)) => Some(x.min(y)),
+                (h, None) | (None, h) => h,
+            };
+            hi.is_none_or(|h| lo <= h).then_some((lo, hi))
+        };
         match (self, other) {
             (Market::Nobody, Market::Nobody) => Some(Market::Nobody),
-            (Market::Range { lo: a, hi: x }, Market::Range { lo: b, hi: y }) => {
-                let lo = a.max(b);
-                let hi = match (x, y) {
-                    (Some(x), Some(y)) => Some(x.min(y)),
-                    (h, None) | (None, h) => h,
-                };
-                hi.is_none_or(|h| lo <= h).then_some(Market::Range { lo, hi })
-            }
+            (Market::Range { lo: a, hi: x }, Market::Range { lo: b, hi: y }) => meet(a, x, b, y).map(|(lo, hi)| Market::Range { lo, hi }),
+            (Market::Most { lo: a, hi: x }, Market::Most { lo: b, hi: y }) => meet(a, x, b, y).map(|(lo, hi)| Market::Most { lo, hi }),
             _ => None,
         }
     }
 }
 
-/// The ranges the bets page lists ready-made. Together with "nobody wins"
-/// they cover every outcome once, so their chances add up to 100%.
+const BOARD: [(i64, Option<i64>); 8] = [(1, Some(1)), (2, Some(2)), (3, Some(3)), (4, Some(5)), (6, Some(9)), (10, Some(19)), (20, Some(49)), (50, None)];
+
+/// The ranges the bets page lists ready-made for the winner. Together with
+/// "nobody wins" they cover every outcome once, so their chances add up to 100%.
 pub fn board() -> Vec<Market> {
-    let mut v: Vec<Market> = [(1, Some(1)), (2, Some(2)), (3, Some(3)), (4, Some(5)), (6, Some(9)), (10, Some(19)), (20, Some(49)), (50, None)]
-        .into_iter()
-        .map(|(lo, hi)| Market::Range { lo, hi })
-        .collect();
+    let mut v: Vec<Market> = BOARD.into_iter().map(|(lo, hi)| Market::Range { lo, hi }).collect();
     v.push(Market::Nobody);
     v
 }
 
-/// Whether `market` won, given the round's winning number. Ranges lose when
-/// nobody wins, as at any bookmaker; that is what gives "nobody wins" its
-/// meaning.
-pub fn outcome(market: Market, winner: Option<i64>) -> bool {
-    match (market, winner) {
-        (Market::Range { lo, hi }, Some(w)) => lo <= w && hi.is_none_or(|h| w <= h),
-        (Market::Nobody, None) => true,
-        _ => false,
+/// The same ranges for the most picked number, which every played round has.
+pub fn board_most() -> Vec<Market> {
+    BOARD.into_iter().map(|(lo, hi)| Market::Most { lo, hi }).collect()
+}
+
+fn within(lo: i64, hi: Option<i64>, n: i64) -> bool {
+    lo <= n && hi.is_none_or(|h| n <= h)
+}
+
+/// Whether `market` won. Winner ranges lose when nobody wins, as at any
+/// bookmaker; that is what gives "nobody wins" its meaning.
+pub fn outcome(market: Market, o: Outcome) -> bool {
+    match market {
+        Market::Range { lo, hi } => o.winner.is_some_and(|w| within(lo, hi, w)),
+        Market::Nobody => o.winner.is_none(),
+        Market::Most { lo, hi } => o.most.is_some_and(|m| within(lo, hi, m)),
     }
 }
 
@@ -202,6 +241,8 @@ pub struct Base {
     /// (winning number, how many simulated rounds it won), lowest first.
     winners: Vec<(i64, u32)>,
     nobody: u32,
+    /// (most picked number, in how many simulated rounds), lowest first.
+    modes: Vec<(i64, u32)>,
     /// Picks the simulation drew from, and players per simulated round.
     pub picks: usize,
     pub players: usize,
@@ -214,15 +255,18 @@ impl Base {
         let (smooth, share) = if self.sims == 0 {
             (1.0, 0.0)
         } else {
+            let count = |v: &[(i64, u32)], lo, hi| v.iter().filter(|(n, _)| within(lo, hi, *n)).map(|(_, c)| c).sum();
             let hits = match market {
                 Market::Nobody => self.nobody,
-                m => self.winners.iter().filter(|(w, _)| outcome(m, Some(*w))).map(|(_, n)| n).sum(),
+                Market::Range { lo, hi } => count(&self.winners, lo, hi),
+                Market::Most { lo, hi } => count(&self.modes, lo, hi),
             };
             (SMOOTH, f64::from(hits) / f64::from(self.sims))
         };
         let curve = match market {
             Market::Nobody => NOBODY_PRIOR,
             Market::Range { lo, hi } => (1.0 - NOBODY_PRIOR) * curve(lo, hi),
+            Market::Most { lo, hi } => curve(lo, hi),
         };
         (1.0 - smooth) * share + smooth * curve
     }
@@ -246,6 +290,7 @@ fn simulate(picks: &[i64], players: usize, seed: u64) -> Base {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut counts = vec![0u32; values.len()];
     let mut wins = vec![0u32; values.len()];
+    let mut modes = vec![0u32; values.len()];
     let mut nobody = 0;
     for _ in 0..SIMS {
         counts.iter_mut().for_each(|c| *c = 0);
@@ -256,10 +301,16 @@ fn simulate(picks: &[i64], players: usize, seed: u64) -> Base {
             Some(i) => wins[i] += 1,
             None => nobody += 1,
         }
+        // The most picked; on a tie the lowest, as values are in order.
+        let top = counts.iter().copied().max().unwrap_or(0);
+        if let Some(i) = counts.iter().position(|&c| c == top) {
+            modes[i] += 1;
+        }
     }
     Base {
         sims: SIMS,
-        winners: values.into_iter().zip(wins).filter(|(_, n)| *n > 0).collect(),
+        winners: values.iter().copied().zip(wins).filter(|(_, n)| *n > 0).collect(),
+        modes: values.into_iter().zip(modes).filter(|(_, n)| *n > 0).collect(),
         nobody,
         picks: picks.len(),
         players,
@@ -276,7 +327,7 @@ pub fn base(global: &Week, vienna: &Week, seed: u64) -> Base {
         picks.extend(&vienna.picks);
     }
     if picks.is_empty() {
-        return Base { sims: 0, winners: Vec::new(), nobody: 0, picks: 0, players: 0 };
+        return Base { sims: 0, winners: Vec::new(), nobody: 0, modes: Vec::new(), picks: 0, players: 0 };
     }
     let players = global.players().or(vienna.players()).unwrap_or(DEFAULT_PLAYERS).clamp(2, MAX_PLAYERS);
     simulate(&picks, players, seed)
@@ -288,11 +339,13 @@ pub fn seed(round: &str) -> u64 {
 }
 
 /// The chance of `market` now: the starting chance, moved by the points
-/// already on the book. Each bet backs its own range; where that overlaps
-/// `market`, it counts for `market` in proportion to the overlap's share of
-/// the bet's own starting chance.
+/// already on its book (winner bets, or most-picked bets). Each bet backs its
+/// own range; where that overlaps `market`, it counts for `market` in
+/// proportion to the overlap's share of the bet's own starting chance. Never
+/// below the starting chance: bets shorten what they back and lengthen
+/// nothing.
 pub fn chance(base: &Base, book: &[(Market, i64)], market: Market) -> f64 {
-    let total: f64 = book.iter().map(|(_, s)| *s as f64).sum();
+    let total: f64 = book.iter().filter(|(m, _)| m.is_most() == market.is_most()).map(|(_, s)| *s as f64).sum();
     let backed: f64 = book
         .iter()
         .filter_map(|(bet, stake)| {
@@ -301,7 +354,8 @@ pub fn chance(base: &Base, book: &[(Market, i64)], market: Market) -> f64 {
             (own > 0.0).then(|| *stake as f64 * base.chance(both) / own)
         })
         .sum();
-    ((LIQUIDITY * base.chance(market) + backed) / (LIQUIDITY + total)).clamp(P_MIN, P_MAX)
+    let start = base.chance(market);
+    ((LIQUIDITY * start + backed) / (LIQUIDITY + total)).max(start).clamp(P_MIN, P_MAX)
 }
 
 /// Decimal odds offered for chance `p`, in hundredths: fair odds less the
@@ -382,7 +436,7 @@ mod tests {
             (Market::Nobody, None, true),
             (Market::Nobody, Some(1), false),
         ] {
-            assert_eq!(outcome(market, winner), wins, "{market:?} {winner:?}");
+            assert_eq!(outcome(market, Outcome { winner, most: Some(3) }), wins, "{market:?} {winner:?}");
         }
     }
 
@@ -434,12 +488,48 @@ mod tests {
     fn the_board_covers_every_outcome_once() {
         let b = board();
         for w in [Some(1), Some(2), Some(5), Some(9), Some(10), Some(49), Some(50), Some(9999), None] {
-            assert_eq!(b.iter().filter(|m| outcome(**m, w)).count(), 1, "{w:?}");
+            assert_eq!(b.iter().filter(|m| outcome(**m, Outcome { winner: w, most: None })).count(), 1, "{w:?}");
+        }
+        let m = board_most();
+        for most in [1, 2, 5, 9, 10, 49, 50, 9999] {
+            assert_eq!(m.iter().filter(|x| outcome(**x, Outcome { winner: None, most: Some(most) })).count(), 1, "{most}");
         }
         for base in [crowd(), base(&Week::default(), &Week::default(), 1)] {
             let sum: f64 = b.iter().map(|m| base.chance(*m)).sum();
             assert!((sum - 1.0).abs() < 1e-9, "{sum}");
+            let sum: f64 = m.iter().map(|m| base.chance(*m)).sum();
+            assert!((sum - 1.0).abs() < 1e-9, "most picked: {sum}");
         }
+    }
+
+    #[test]
+    fn the_most_picked_number_is_its_own_market() {
+        let most = |lo, hi| r(lo, hi).most();
+        assert_eq!(most(1, Some(3)).key(), "most:1:3");
+        assert_eq!(Market::parse("most:7:"), Some(most(7, None)));
+        assert_eq!(Market::parse("most:9:3"), None);
+        assert_eq!(most(42, Some(42)).label(), "most picked exactly 42");
+        assert_eq!(most(4, Some(9)).label(), "most picked 4 to 9");
+        assert_eq!(most(10, None).label(), "most picked 10 or more");
+        let o = Outcome { winner: Some(7), most: Some(2) };
+        assert!(outcome(most(1, Some(3)), o) && !outcome(most(3, None), o));
+        assert!(outcome(r(5, Some(9)), o) && !outcome(r(1, Some(3)), o), "winner bets go by the winner");
+        // Its own book: winner bets do not move it.
+        let b = crowd();
+        let start = chance(&b, &[], most(1, Some(1)));
+        assert_eq!(chance(&b, &[(r(1, Some(1)), 500)], most(1, Some(1))), start);
+        assert!(chance(&b, &[(most(1, Some(1)), 500)], most(1, Some(1))) > start);
+    }
+
+    #[test]
+    fn the_simulation_counts_the_most_picked_number_lowest_on_a_tie() {
+        // Everyone on 4: 4 is the most picked every time.
+        let b = simulate(&[4], 5, 7);
+        assert!(b.chance(r(4, Some(4)).most()) > 0.9);
+        // Two players on 2 and 9: a tie, so the lowest, 2, whenever they differ.
+        let b = simulate(&[2, 9], 2, 7);
+        let two = b.chance(r(2, Some(2)).most());
+        assert!((0.7..0.8).contains(&two), "2 unless both pick 9: {two}");
     }
 
     #[test]
@@ -486,17 +576,21 @@ mod tests {
     }
 
     #[test]
-    fn bets_shorten_their_range_and_lengthen_the_rest() {
+    fn bets_shorten_what_they_back_and_lengthen_nothing() {
         let b = crowd();
         let target = r(5, Some(12));
         let before = chance(&b, &[], target);
         let backed = chance(&b, &[(r(5, Some(12)), 100)], target);
         let partly = chance(&b, &[(r(1, Some(8)), 100)], target);
         let against = chance(&b, &[(r(50, None), 100)], target);
-        assert!(backed > partly && partly > before && before > against, "{backed} {partly} {before} {against}");
+        assert!(backed > partly && partly > before, "{backed} {partly} {before}");
+        assert_eq!(against, before, "a bet elsewhere never makes this pay more");
+        // A whale on one side cannot open up a false price on the other.
+        let whale = chance(&b, &[(r(1, Some(4)), 1_000_000)], target);
+        assert_eq!(whale, before);
         // And the odds follow.
         let o = |p: f64| offered_odds_x100(p).unwrap();
-        assert!(o(backed) < o(before) && o(before) < o(against));
+        assert!(o(backed) < o(before) && o(before) == o(against));
         // A lot of money moves it a lot, never past certain.
         let flood = vec![(target, 100); 500];
         assert!(chance(&b, &flood, target) > 0.9);

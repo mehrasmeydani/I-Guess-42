@@ -739,6 +739,35 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 button.is-busy { pointer-events: none; }
 
 
+/* ------------------------------------------------ the streak pop-up */
+
+/* Over the middle of the page, the page dimmed behind it. "later" is a
+   checkbox, so it closes without JavaScript. */
+.claim-x:checked ~ .claim-card { display: none; }
+.claim-card {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 30;
+  width: min(360px, calc(100vw - 32px));
+  padding: 24px;
+  background: var(--bg);
+  border: var(--rule);
+  text-align: center;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.7);
+  transform: translate(-50%, -50%);
+  animation: pop 300ms steps(4) both;
+}
+.claim-when { margin: 0; color: var(--fg); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--fs-1); }
+.claim-num { margin: 8px 0 0; font-size: var(--fs-5); line-height: 1; }
+.claim-why { margin: 8px 0 0; color: var(--fg); }
+.claim-form { margin: 24px 0 0; }
+.claim-btn { width: 100%; background: var(--state); border-color: var(--state); color: var(--bg); }
+.claim-btn:hover, .claim-btn:focus-visible { background: var(--hi); border-color: var(--hi); color: var(--bg); }
+.claim-later { display: inline-block; margin-top: 12px; color: var(--dim); cursor: pointer; text-decoration: underline; }
+.claim-later:hover { color: var(--hi); }
+.claim-x:focus-visible ~ .claim-card .claim-later { outline: 3px solid var(--hi); outline-offset: 3px; }
+
 /* ------------------------------------------ the round that just closed */
 
 /* For half an hour after 12:42 the closed round is announced over the page.
@@ -780,6 +809,7 @@ button.is-busy { pointer-events: none; }
 
 @keyframes announce { from { transform: translate(-50%, 150%); } }
 @keyframes land { from { transform: scale(2.6); } }
+@keyframes pop { from { transform: translate(-50%, -50%) scale(1.6); } }
 
 
 /* ---------------------------------------------------------- accessibility */
@@ -1074,6 +1104,15 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .pick input:focus-visible, .betform input:focus-visible { border-color: var(--hi); }
 .pick button, .betform button { padding: 8px 16px; }
 .pick-none { margin-left: 8px; }
+/* What the range is about: the winner or the most picked number, two halves
+   of one box like the round switch. */
+.pick-on { display: flex; flex-basis: 100%; margin: 0 0 4px; padding: 0; border: 0; }
+.pick-on label { cursor: pointer; }
+.pick-on span { display: inline-block; padding: 4px 12px; border: 1px solid var(--edge-strong); color: var(--fg); }
+.pick-on label + label span { border-left: 0; }
+.pick-on input:checked + span { background: var(--hi); border-color: var(--hi); color: var(--bg); font-weight: 700; }
+.pick-on label:hover span { border-color: var(--hi); }
+.pick-on input:focus-visible + span { outline: 3px solid var(--hi); outline-offset: 2px; }
 /* With the script the quote follows the boxes, so the button is not needed. */
 .pick.live button { display: none; }
 .quote-error { margin-top: 16px; }

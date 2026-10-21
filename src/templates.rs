@@ -295,6 +295,8 @@ impl Notice {
 pub struct IndexTemplate {
     /// Which game the page is about; picks link prefixes and pool-only blocks.
     pub pool: Pool,
+    /// Streak bonus points waiting to be claimed, "1 000 pts": the pop-up.
+    pub streak_bonus: Option<String>,
     pub user: Option<UserView>,
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
@@ -579,7 +581,6 @@ pub struct QuoteTemplate {
     pub quote: Option<QuoteView>,
     pub pick_error: Option<&'static str>,
     pub can_bet: bool,
-    pub room: i64,
     pub round_key: String,
     pub tax: String,
 }
@@ -604,6 +605,10 @@ pub struct BetsTemplate {
     /// Why what was typed is not a range.
     pub pick_error: Option<&'static str>,
     pub board: Vec<OfferView>,
+    /// The same for the most picked number.
+    pub board_most: Vec<OfferView>,
+    /// The boxes are about the most picked number, not the winner.
+    pub on_most: bool,
     /// Points on the book today, and how many bets.
     pub book_total: i64,
     pub book_bets: usize,
@@ -613,9 +618,6 @@ pub struct BetsTemplate {
     pub tax: String,
     pub mine: Vec<SlipView>,
     pub past: Vec<SlipView>,
-    /// How much more may be staked on bets this round.
-    pub room: i64,
-    pub max_bet: i64,
     /// Net over the listed past slips, "+40" or "-25".
     pub net_label: String,
 }

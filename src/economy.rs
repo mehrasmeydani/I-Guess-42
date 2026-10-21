@@ -27,6 +27,11 @@ pub const DAILY_GRANT: i64 = 100;
 /// What a guess costs. It goes into the round's pot.
 pub const GUESS_STAKE: i64 = 10;
 
+/// Every this many days in a row played in the global round...
+pub const STREAK_DAYS: i64 = 10;
+/// ...is worth this, once the player claims it.
+pub const STREAK_BONUS: i64 = 1000;
+
 /// How often the settler looks for closed rounds to pay out.
 const SETTLE_EVERY: Duration = Duration::from_secs(30);
 
@@ -36,6 +41,35 @@ pub async fn collect(db: &Db, account_id: i64, open_round: &str) -> Result<()> {
     db::credit_once(db, account_id, open_round, "signup", SIGNUP_BONUS, "signup", None).await?;
     db::credit_once(db, account_id, open_round, "grant", DAILY_GRANT, open_round, None).await?;
     Ok(())
+}
+
+/// Streak bonuses earned and not claimed yet: the days that completed ten
+/// in a row (today's guess counts), each as its ledger ref "streak:<day>".
+pub async fn unclaimed_streaks(db: &Db, account_id: i64) -> Result<Vec<String>> {
+    let days: Vec<chrono::NaiveDate> = db::global_play_days(db, account_id)
+        .await?
+        .iter()
+        .filter_map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .collect();
+    let claimed = db::ledger_refs(db, account_id, "streak").await?;
+    Ok(crate::stats::streak_milestones(&days, STREAK_DAYS)
+        .into_iter()
+        .map(|d| format!("streak:{}", d.format("%Y-%m-%d")))
+        .filter(|r| !claimed.contains(r))
+        .collect())
+}
+
+/// Credits every streak bonus earned and not claimed yet, each at most once
+/// however often this runs. Returns the points credited.
+pub async fn claim_streaks(db: &Db, account_id: i64) -> Result<i64> {
+    let mut got = 0;
+    for r in unclaimed_streaks(db, account_id).await? {
+        let day = r.trim_start_matches("streak:").to_string();
+        if db::credit_once(db, account_id, &day, "streak", STREAK_BONUS, &r, Some("10 days in a row")).await? {
+            got += STREAK_BONUS;
+        }
+    }
+    Ok(got)
 }
 
 /// Pays out every closed global round not settled yet, oldest first.
@@ -98,6 +132,42 @@ mod tests {
 
     async fn rows(db: &Db, sql: &str) -> i64 {
         sqlx::query_as::<_, (i64,)>(sql).fetch_one(db).await.unwrap().0
+    }
+
+    #[tokio::test]
+    async fn ten_days_in_a_row_is_a_bonus_claimed_once() {
+        let (_t, state) = app(&[]).await;
+        let ann = player(&state.db, "ann").await;
+        let today = Round::current(state.now()).date;
+        let day = |back: i64| (today - chrono::Duration::days(back)).format("%Y-%m-%d").to_string();
+        // Nine days in a row, ending yesterday: nothing yet.
+        for back in 1..=9 {
+            plays(&state.db, ann, &day(back), 2).await;
+        }
+        assert!(unclaimed_streaks(&state.db, ann).await.unwrap().is_empty());
+        let index = || handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None }));
+        assert!(!body(index().await.unwrap()).await.contains("claim-card"));
+
+        // Today makes ten: the pop-up offers 1 000.
+        plays(&state.db, ann, &day(0), 2).await;
+        assert_eq!(unclaimed_streaks(&state.db, ann).await.unwrap(), vec![format!("streak:{}", day(0))]);
+        let html = body(index().await.unwrap()).await;
+        assert!(html.contains("claim-card") && html.contains(&format!("+{}", crate::templates::points_label(&STREAK_BONUS))) && html.contains(r#"action="/g/streak""#), "{html}");
+
+        let before = db::balance(&state.db, ann).await.unwrap();
+        let resp = handlers::claim_streak(State(state.clone()), jar("ann")).await.unwrap();
+        assert_eq!(location(&resp), "/g/?msg=streak_claimed");
+        assert_eq!(db::balance(&state.db, ann).await.unwrap(), before + STREAK_BONUS);
+        // Again: nothing more, and the pop-up is gone.
+        let resp = handlers::claim_streak(State(state.clone()), jar("ann")).await.unwrap();
+        assert_eq!(location(&resp), "/g/");
+        assert_eq!(db::balance(&state.db, ann).await.unwrap(), before + STREAK_BONUS);
+        assert!(!body(index().await.unwrap()).await.contains("claim-card"));
+        let html = body(crate::points_pages::points(State(state.clone()), jar("ann")).await.unwrap()).await;
+        assert!(html.contains("streak bonus"));
+        // Signed out: to sign in.
+        let resp = handlers::claim_streak(State(state.clone()), CookieJar::new()).await.unwrap();
+        assert_eq!(location(&resp), "/login");
     }
 
     #[tokio::test]

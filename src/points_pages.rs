@@ -27,6 +27,7 @@ fn what(kind: &str, note: Option<&str>) -> String {
         "adjust" => format!("adjusted by a moderator{}", note.map(|n| format!(": {n}")).unwrap_or_default()),
         "bet" => "bet".to_string(),
         "bet_win" => "bet won".to_string(),
+        "streak" => "streak bonus".to_string(),
         other => other.to_string(),
     }
 }

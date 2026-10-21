@@ -78,6 +78,9 @@ pub struct BetsQuery {
     /// A range as typed: from, and to (empty: or more).
     pub lo: Option<String>,
     pub hi: Option<String>,
+    /// What the typed range is about: "most" for the most picked number,
+    /// anything else for the winning number.
+    pub on: Option<String>,
 }
 
 fn slip(b: db::Bet) -> SlipView {
@@ -109,7 +112,8 @@ impl Pick {
         let typed = filled(&q.lo) || filled(&q.hi);
         let market = match (&q.m, typed) {
             (Some(key), _) => Market::parse(key),
-            (None, true) => Market::from_inputs(q.lo.as_deref().unwrap_or(""), q.hi.as_deref().unwrap_or("")),
+            (None, true) => Market::from_inputs(q.lo.as_deref().unwrap_or(""), q.hi.as_deref().unwrap_or(""))
+                .map(|m| if q.on.as_deref() == Some("most") { m.most() } else { m }),
             (None, false) => None,
         };
         Pick { market, asked: q.m.is_some() || typed, typed }
@@ -128,6 +132,22 @@ impl Pick {
             (None, false) => (String::new(), String::new()),
         }
     }
+}
+
+fn offer_views(base: &Base, book: &[(Market, i64)], markets: Vec<Market>, picked: Option<Market>) -> Vec<OfferView> {
+    markets
+        .into_iter()
+        .map(|m| {
+            let qt = odds::quote(base, book, m);
+            OfferView {
+                key: m.key(),
+                label: m.label(),
+                chance: qt.chance_pct,
+                odds: qt.odds_x100.map(odds::odds_label),
+                on: picked == Some(m),
+            }
+        })
+        .collect()
 }
 
 fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market]) -> QuoteView {
@@ -170,7 +190,6 @@ pub async fn page(
     let can_bet = viewer.as_ref().is_some_and(|v| v.account.verified);
     let (mine, past) = slips(&state, viewer.as_ref(), &round).await?;
     let taken: Vec<Market> = mine.iter().filter_map(|b| Market::parse(&b.market)).collect();
-    let staked: i64 = mine.iter().filter(|b| b.result.is_none()).map(|b| b.stake).sum();
     let net: i64 = past.iter().filter_map(|b| b.payout.map(|p| p - b.stake)).sum();
 
     let base = todays_base(&state).await?;
@@ -199,27 +218,15 @@ pub async fn page(
         nobody_picked: pick.market == Some(Market::Nobody),
         quote,
         pick_error: pick.error(),
-        board: odds::board()
-            .into_iter()
-            .map(|m| {
-                let qt = odds::quote(&base, &book, m);
-                OfferView {
-                    key: m.key(),
-                    label: m.label(),
-                    chance: qt.chance_pct,
-                    odds: qt.odds_x100.map(odds::odds_label),
-                    on: pick.market == Some(m),
-                }
-            })
-            .collect(),
+        on_most: pick.market.is_some_and(Market::is_most) || (pick.market.is_none() && q.on.as_deref() == Some("most")),
+        board: offer_views(&base, &book, odds::board(), pick.market),
+        board_most: offer_views(&base, &book, odds::board_most(), pick.market),
         book_total: book.iter().map(|(_, s)| s).sum(),
         book_bets: book.len(),
         sims: base.sims,
         tax: odds::tax_label(),
         mine: mine.into_iter().map(slip).collect(),
         past: past.into_iter().map(slip).collect(),
-        room: odds::MAX_BETS_PER_ROUND - staked,
-        max_bet: odds::MAX_BET,
         net_label: if net > 0 { format!("+{net}") } else { net.to_string() },
         user: viewer.map(UserView::from),
     }))
@@ -237,7 +244,6 @@ pub async fn quote(
     let pick = Pick::from_query(&q);
     let (mine, _) = slips(&state, viewer.as_ref(), &round).await?;
     let taken: Vec<Market> = mine.iter().filter_map(|b| Market::parse(&b.market)).collect();
-    let staked: i64 = mine.iter().filter(|b| b.result.is_none()).map(|b| b.stake).sum();
     let quote = match pick.market {
         Some(m) => {
             let base = todays_base(&state).await?;
@@ -250,7 +256,6 @@ pub async fn quote(
         quote,
         pick_error: pick.error(),
         can_bet: viewer.as_ref().is_some_and(|v| v.account.verified),
-        room: odds::MAX_BETS_PER_ROUND - staked,
         round_key: round.key(),
         tax: odds::tax_label(),
     });
@@ -309,7 +314,7 @@ pub async fn place(
     let code = match db::place_bet(&state.db, viewer.account.id, &open, &market.key(), stake, price).await? {
         Placed::In => "bet_placed",
         Placed::Already => "bet_twice",
-        Placed::OverCap => "bet_cap",
+        Placed::BadStake => "bet_cap",
         Placed::Broke => "broke",
         Placed::Closed => "bet_closed",
         Placed::Moved => "bet_odds",
@@ -343,7 +348,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_bet_takes_its_stake_once_within_the_caps() {
+    async fn a_bet_takes_any_stake_up_to_the_balance_once() {
         let t = temp_db().await;
         let ann = player(&t.db, "ann").await;
         collect(&t.db, ann, "2026-10-21").await.unwrap();
@@ -352,12 +357,14 @@ mod tests {
         assert_eq!(bet(&t.db, ann, "2026-10-21", "range:1:9", 50, 135).await, Placed::In);
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), start - 50);
         assert_eq!(bet(&t.db, ann, "2026-10-21", "range:1:9", 10, 135).await, Placed::Already, "one per range");
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", 101, 260).await, Placed::OverCap, "per bet");
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", 0, 260).await, Placed::OverCap);
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", 100, 260).await, Placed::In, "both sides is allowed");
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "none", 60, 980).await, Placed::OverCap, "200 a round");
-        assert_eq!(bet(&t.db, ann, "2026-10-21", "none", 50, 980).await, Placed::In);
-        assert_eq!(db::balance(&t.db, ann).await.unwrap(), start - 200);
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", 0, 260).await, Placed::BadStake);
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", -5, 260).await, Placed::BadStake);
+        // No cap but the balance: all of it is fine, a point more is not.
+        let left = start - 50;
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "none", left + 1, 980).await, Placed::Broke);
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "range:10:", left, 260).await, Placed::In, "everything on it");
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), 0);
+        assert_eq!(bet(&t.db, ann, "2026-10-21", "most:1:3", 1, 300).await, Placed::Broke);
     }
 
     #[tokio::test]
@@ -408,6 +415,48 @@ mod tests {
         settle_all(&t.db, "2026-10-22").await.unwrap();
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), a0 + 98);
         assert_eq!(db::balance(&t.db, bob).await.unwrap(), b0);
+    }
+
+    #[tokio::test]
+    async fn most_picked_bets_settle_on_the_most_picked_number_lowest_on_a_tie() {
+        let t = temp_db().await;
+        let who: Vec<i64> = futures_join(&t.db, &["a", "b", "c", "d", "e", "f"]).await;
+        // 3 three times, 1 twice, 8 once: the winner is 8, the most picked 3.
+        for (p, v) in who.iter().zip([3, 3, 3, 1, 1, 8]) {
+            plays(&t.db, *p, "2026-10-21", v).await;
+        }
+        let ann = who[0];
+        for (m, o) in [("most:3:3", 400), ("most:1:2", 300), ("range:8:8", 900), ("most:4:", 500)] {
+            assert_eq!(bet(&t.db, ann, "2026-10-21", m, 10, o).await, Placed::In, "{m}");
+        }
+        let a0 = db::balance(&t.db, ann).await.unwrap();
+        settle_all(&t.db, "2026-10-22").await.unwrap();
+        let slips = db::bets_of(&t.db, ann, "").await.unwrap();
+        let result = |m: &str| slips.iter().find(|b| b.market == m).unwrap().result.clone().unwrap();
+        assert_eq!(result("most:3:3"), "won");
+        assert_eq!(result("most:1:2"), "lost");
+        assert_eq!(result("most:4:"), "lost");
+        assert_eq!(result("range:8:8"), "won", "the winner book is judged on its own");
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), a0 + 40 + 90);
+
+        // A tie for most picked goes to the lowest number.
+        for (p, v) in who.iter().take(4).zip([6, 6, 2, 2]) {
+            plays(&t.db, *p, "2026-10-22", v).await;
+        }
+        bet(&t.db, ann, "2026-10-22", "most:2:2", 10, 300).await;
+        bet(&t.db, ann, "2026-10-22", "most:6:6", 10, 300).await;
+        settle_all(&t.db, "2026-10-23").await.unwrap();
+        let slips = db::bets_of(&t.db, ann, "2026-10-22").await.unwrap();
+        let result = |m: &str| slips.iter().find(|b| b.market == m).unwrap().result.clone().unwrap();
+        assert_eq!((result("most:2:2").as_str(), result("most:6:6").as_str()), ("won", "lost"));
+    }
+
+    async fn futures_join(db: &Db, names: &[&str]) -> Vec<i64> {
+        let mut v = Vec::new();
+        for n in names {
+            v.push(player(db, n).await);
+        }
+        v
     }
 
     #[tokio::test]
@@ -522,7 +571,7 @@ mod tests {
         assert!(!out.contains(r#"action="/g/bet""#), "signed out: no forms");
         let html = bets_page(&state, Some("ann"), None).await;
         assert!(!html.contains(r#"action="/g/bet""#), "nothing picked yet");
-        assert!(html.contains("200 of 200 left to stake"));
+        assert!(html.contains("stake as much as you like, up to your points"));
 
         let html = bets_page_q(&state, Some("ann"), picked("range:5:12")).await;
         assert_eq!(html.matches(r#"action="/g/bet""#).count(), 1);
@@ -534,7 +583,6 @@ mod tests {
         let html = bets_page_q(&state, Some("ann"), BetsQuery { msg: Some("bet_placed".into()), m: Some("range:5:12".into()), ..Default::default() }).await;
         assert!(html.contains("bet placed · settled at 12:42"));
         assert!(html.contains("your bets today"));
-        assert!(html.contains("160 of 200 left to stake"));
         assert!(html.contains("placed &middot; one bet per range a round") && !html.contains(r#"action="/g/bet""#));
         assert!(html.contains("on the book: 40 pts, 1 bet"));
         assert!(html.contains(&format!("<td class=\"num b\">{}</td>", odds::payout(40, o))));
@@ -628,7 +676,7 @@ mod tests {
         place(State(state.clone()), jar("ann"), form(&state, mid, "50", mid0)).await.unwrap();
         let mid1 = odds_for(&state, mid).await;
         assert!(mid1 < mid0, "backed: shorter, {mid0} -> {mid1}");
-        assert!(odds_for(&state, high).await > high0, "not backed: longer");
+        assert_eq!(odds_for(&state, high).await, high0, "not backed: never longer than it started");
         // Bob is shown the new odds; the old ones are gone.
         let resp = place(State(state.clone()), jar("bob"), form(&state, mid, "50", mid0)).await.unwrap();
         assert_eq!(location(&resp), "/g/bets?msg=bet_odds&m=range:5:12");
