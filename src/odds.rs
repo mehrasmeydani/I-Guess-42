@@ -40,10 +40,14 @@ const MAX_PLAYERS: usize = 1000;
 /// Without a month to go on, rounds are imagined this size: about the live
 /// site's average (14.7 a day).
 const DEFAULT_PLAYERS: usize = 15;
-/// Share of every chance taken from the typical crowd (`TYPICAL_PICKS`)
-/// rather than the month's own picks, so a range nobody picked lately is
-/// unlikely, not impossible.
-const SMOOTH: f64 = 0.05;
+/// How many picks the typical crowd (`TYPICAL_PICKS`) is worth against the
+/// month's own: with 8 picks of our own they count for 4%, with 400 for 67%,
+/// with 6000 for 97%. Trust grows with the evidence.
+const PRIOR_PICKS: f64 = 200.0;
+/// The record floor needs this many rounds before it says anything, and
+/// counts as if this many more rounds had not gone the range's way.
+const RECORD_MIN: usize = 10;
+const RECORD_SHRINK: f64 = 10.0;
 /// Of that, the share taken from a 1/n² curve, so that even a range nobody
 /// has ever picked has some chance.
 const CURVE: f64 = 0.1;
@@ -297,6 +301,8 @@ pub struct Base {
     typical: Dist,
     /// What the rounds behind `data` actually came to.
     record: Vec<Outcome>,
+    /// Real guesses behind `data` (the recent week counted once).
+    plays: usize,
     /// Picks the chances were worked out from, and players a round.
     pub picks: usize,
     pub players: usize,
@@ -344,14 +350,18 @@ impl Base {
         if !self.has_data {
             return fallback;
         }
-        let model = (1.0 - SMOOTH) * self.data.share(market) + SMOOTH * fallback;
+        let weight = self.plays as f64 / (self.plays as f64 + PRIOR_PICKS);
+        let model = weight * self.data.share(market) + (1.0 - weight) * fallback;
         // Never below the record: if a range won on 2 of the last 28 days,
-        // it is priced at no less than that, whatever the model says - the
-        // way a bookmaker will not offer odds reality has already beaten.
-        // (One round in hand added to the count, so a single day is not
-        // taken at its word.)
+        // it is priced at no less than about that, whatever the model says -
+        // the way a bookmaker will not offer odds reality has already
+        // beaten. Only once there are enough rounds to mean something, and
+        // shrunk, so a handful of tiny rounds is not taken at its word.
+        if self.record.len() < RECORD_MIN {
+            return model;
+        }
         let hits = self.record.iter().filter(|o| outcome(market, **o)).count();
-        model.max(hits as f64 / (self.record.len() + 1) as f64)
+        model.max(hits as f64 / (self.record.len() as f64 + RECORD_SHRINK))
     }
 }
 
@@ -492,10 +502,11 @@ pub fn base(global: &History, vienna: &History) -> Base {
     }
     let typical = analyse(&typical_picks(), players);
     if picks.is_empty() {
-        return Base { has_data: false, data: Dist::default(), typical, record: Vec::new(), picks: 0, players };
+        return Base { has_data: false, data: Dist::default(), typical, record: Vec::new(), plays: 0, picks: 0, players };
     }
     let record = if global.picks.len() >= MIN_PICKS { global.outcomes.clone() } else { [global.outcomes.clone(), vienna.outcomes.clone()].concat() };
-    Base { has_data: true, data: averaged(&picks, &sizes), typical, record, picks: picks.len(), players }
+    let plays = if global.picks.len() >= MIN_PICKS { global.plays } else { global.plays + vienna.plays };
+    Base { has_data: true, data: averaged(&picks, &sizes), typical, record, plays: plays.max(1), picks: picks.len(), players }
 }
 
 /// `analyse` over several round sizes, averaged, each size worked out once.
@@ -886,11 +897,11 @@ mod tests {
     fn no_range_is_priced_below_its_record() {
         use crate::stats::DayTally;
         let t = |d: &str, v, c| DayTally { round_date: d.into(), value: v, count: c };
-        // Nine rounds: seven won by 4, two nobody won (both picks collided).
+        // Twelve rounds: nine won by 4, three nobody won (both picks collided).
         let mut rows = Vec::new();
-        for day in 1..=9 {
+        for day in 1..=12 {
             let d = format!("2026-10-{day:02}");
-            if day <= 2 {
+            if day <= 3 {
                 rows.push(t(&d, 1, 2));
                 rows.push(t(&d, 3, 2));
             } else {
@@ -900,15 +911,36 @@ mod tests {
             }
         }
         let h = History::from_tallies(&rows, "2026-10-08");
-        assert_eq!(h.outcomes.len(), 9);
-        assert_eq!(h.outcomes.iter().filter(|o| o.winner.is_none()).count(), 2);
+        assert_eq!(h.outcomes.len(), 12);
+        assert_eq!(h.outcomes.iter().filter(|o| o.winner.is_none()).count(), 3);
         assert_eq!(h.outcomes[5], Outcome { winner: Some(4), most: Some(1) });
-        assert_eq!(h.sizes, [4, 4, 5, 5, 5, 5, 5, 5, 5]);
+        assert_eq!(h.sizes[..4], [4, 4, 4, 5]);
         let b = base(&h, &History::default());
-        // Whatever the formula makes of it, nobody won 2 of 9 days: at least
-        // 2 in 10 (a day in hand), so the odds can never beat that record.
-        assert!(b.chance(Market::Nobody) >= 0.2 - 1e-12, "{}", b.chance(Market::Nobody));
-        assert!(offered_odds_x100(b.chance(Market::Nobody)).unwrap() <= 460);
+        // Whatever the formula makes of it, nobody won 3 of 12 days: at
+        // least 3 in 22 (shrunk by ten rounds), so the odds cannot beat that.
+        assert!(b.chance(Market::Nobody) >= 3.0 / 22.0 - 1e-12, "{}", b.chance(Market::Nobody));
+    }
+
+    #[test]
+    fn a_handful_of_tiny_rounds_does_not_set_the_odds() {
+        use crate::stats::DayTally;
+        let t = |d: &str, v, c| DayTally { round_date: d.into(), value: v, count: c };
+        // Four rounds of one to four players, three of them won with a 2:
+        // 8 picks and 4 rounds say almost nothing.
+        let rows = [
+            t("2026-09-24", 2, 1), t("2026-09-24", 7, 2), t("2026-09-24", 9, 1),
+            t("2026-09-25", 2, 1),
+            t("2026-09-26", 2, 1),
+            t("2026-09-29", 5, 2),
+        ];
+        let h = History::from_tallies(&rows, "2026-10-15");
+        let b = base(&h, &History::default());
+        let typical = base(&History::default(), &History::default());
+        let two = b.chance(r(2, Some(2)));
+        assert!(two < 0.3, "not 60%: {two}");
+        assert!((two - typical.chance(r(2, Some(2)))).abs() < 0.05, "close to the typical crowd: {two}");
+        let sum: f64 = board().iter().map(|m| b.chance(*m)).sum();
+        assert!((sum - 1.0).abs() < 1e-9, "no record floor yet, so the board adds up: {sum}");
     }
 
     #[test]

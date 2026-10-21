@@ -640,19 +640,22 @@ Once per open round:
 4. Averaged over the day sizes behind it: the formula is worked out for
    each round's own player count and averaged, not for one average size
    (quiet and busy days play differently).
-5. A range's starting chance p0 = 0.95 × (its chance from steps 3-4)
-   + 0.05 × a typical crowd: the same formula over the 412 real picks of
+5. A range's starting chance p0 = w × (its chance from steps 3-4)
+   + (1 − w) × a typical crowd, w = picks ÷ (picks + 200): the typical crowd
+   counts as 200 picks of evidence, so 8 picks of our own weigh 4%, 400 weigh
+   67%, 6 000 weigh 97%. The typical crowd is the same formula over the 412 real picks of
    the 28 rounds on iguesslow.com up to 21.10.2026 (`TYPICAL_PICKS`), with
    a tenth of that from a 1/n² curve so no range is impossible. With no
    picks at all, the typical crowd alone. It replaced a made-up curve that
    said 1 wins 63% of rounds; on the live site 1 won 14% and 4-5 won 29%,
    which the typical crowd gets (21% and 28%).
-6. Never below the record: a range that won on h of the last d rounds is
-   priced at no less than h / (d + 1). The model underrates two things the
+6. Never below the record: once there are 10 rounds or more, a range that
+   won on h of the last d rounds is priced at no less than h / (d + 10) -
+   shrunk, so a handful of tiny rounds is not taken at its word. The model underrates two things the
    live site shows - nobody winning (1% modelled, 7% seen) and hail marys
    over 50 (0.5% against 3.4%) - and a bookmaker does not offer odds
-   reality has already beaten. On the live data this lifts the board from
-   100% to 115%.
+   reality has already beaten. On the live data this lifts the board a
+   little over 100%.
 
 Back-tested on the live site's rounds, each day predicted from only the
 days before it (average chance given to what then happened): the formula
