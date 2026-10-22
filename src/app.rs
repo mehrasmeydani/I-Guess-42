@@ -94,6 +94,9 @@ impl IntoResponse for AppError {
     }
 }
 
+/// An error page, drawn for nobody in particular: most callers have no
+/// request to hand. `error_pages_know_the_viewer` draws it again on the way
+/// out with the visitor's own header, from the message it leaves here.
 pub fn error_page(status: StatusCode, message: &str) -> Response {
     let body = templates::render(&ErrorTemplate {
         pool: crate::db::Pool::Vienna,
@@ -103,7 +106,47 @@ pub fn error_page(status: StatusCode, message: &str) -> Response {
         status: status.as_u16(),
         message: message.to_string(),
     });
-    (status, body).into_response()
+    let mut resp = (status, body).into_response();
+    resp.extensions_mut().insert(ErrorMessage(message.to_string()));
+    resp
+}
+
+/// What an error page said, for `error_pages_know_the_viewer`.
+#[derive(Clone)]
+struct ErrorMessage(String);
+
+/// Middleware: an error page goes out with the same header as every other
+/// page - the visitor's name, points and account, and the round of the
+/// address they asked for - not "sign in" to someone who is signed in.
+pub async fn error_pages_know_the_viewer(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let jar = axum_extra::extract::cookie::CookieJar::from_headers(req.headers());
+    let global_path = req.uri().path().starts_with("/g");
+    let resp = next.run(req).await;
+    let Some(ErrorMessage(message)) = resp.extensions().get::<ErrorMessage>().cloned() else {
+        return resp;
+    };
+    // If the visitor cannot be looked up (the error may be the database
+    // itself), the page as it was is still a page.
+    let Ok(viewer) = crate::handlers::current_viewer(&state, &jar).await else {
+        return resp;
+    };
+    let sees_42 = viewer.as_ref().is_some_and(|v| v.intra.is_some());
+    let pool = if global_path || !sees_42 { crate::db::Pool::Global } else { crate::db::Pool::Vienna };
+    let page = templates::render(&ErrorTemplate {
+        pool,
+        user: viewer.map(templates::UserView::from),
+        test_mode: state.cfg.test_env(),
+        impersonating: crate::auth::admin_return_token(&jar).is_some(),
+        status: resp.status().as_u16(),
+        message,
+    });
+    let (mut parts, _) = resp.into_parts();
+    parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+    Response::from_parts(parts, page.into_body())
 }
 
 /// The address a request came from: the right-most X-Forwarded-For entry

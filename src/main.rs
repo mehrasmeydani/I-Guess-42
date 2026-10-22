@@ -192,6 +192,7 @@ async fn main() -> Result<()> {
             ),
         )
         .fallback(handlers::not_found)
+        .layer(axum::middleware::from_fn_with_state(state.clone(), app::error_pages_know_the_viewer))
         .layer(axum::middleware::from_fn(platform::page_caching))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
