@@ -34,11 +34,11 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 
 ## 4. Legal
 
-- [ ] Have the privacy page reviewed: legal bases, the wording on Resend's
+- [x] Have the privacy page reviewed: legal bases, the wording on Resend's
       US transfer, the fair-play section (warning, then ban). The robot check
       is self-hosted and sets no cookies.
-- [ ] Decide whether a minimum-age statement is needed (UI/UX spec Q4).
-- [ ] Confirm the retention periods stated on /privacy fit (sessions 30 days,
+- [x] Decide whether a minimum-age statement is needed (UI/UX spec Q4).
+- [x] Confirm the retention periods stated on /privacy fit (sessions 30 days,
       logs capped at 30 MB, emailed links 24 h / 1 h, mail log 2 days).
 
 ## 4b. UI spec v2.0 decisions (docs/ui-spec)
