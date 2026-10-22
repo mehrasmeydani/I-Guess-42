@@ -1600,6 +1600,12 @@ as often as it likes:
   (both ref = the round) in one transaction, or none of them: refused when
   the balance and the grant together are short of the stake, or the round
   was called off. Daily points are for playing, not for visiting.
+- **Test accounts.** A username starting with "test" (any case) marks the
+  maintainers' own accounts on the live site (`db::TEST_ACCOUNTS`): their
+  guesses are ghosts with no stake, so they never win or fill a pot and stay
+  out of results, trends and odds; they are left off the points board, and
+  their bets do not move the odds. Migration 0015 does the same to their
+  earlier guesses.
 - `economy::catch_up` runs after a guess is locked: a player who joined after
   N global rounds is owed N × 135 (`CATCH_UP_PER_ROUND`), paid as a 30th of
   it with each day they play (kind `catchup`, ref = the round), so a late
