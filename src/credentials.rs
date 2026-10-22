@@ -52,6 +52,16 @@ pub fn username_problem(name: &str) -> Option<&'static str> {
     None
 }
 
+/// `username_problem` for a moderator naming an account: a "test" name is
+/// theirs to give, making it a hidden test account (`db::TEST_ACCOUNTS`).
+/// Nobody else may pick one, so no player hides themselves by accident.
+pub fn username_problem_for_moderator(name: &str) -> Option<&'static str> {
+    match username_problem(name) {
+        Some(why) if why == crate::copy::USERNAME_RESERVED && name.starts_with("test") && !RESERVED.contains(&name) => None,
+        other => other,
+    }
+}
+
 /// What someone typed, as a username would be stored: trimmed, lowercase.
 pub fn normalize_username(raw: &str) -> String {
     raw.trim().to_lowercase()
