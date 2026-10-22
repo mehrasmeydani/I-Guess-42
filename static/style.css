@@ -250,7 +250,6 @@ a.tag { color: var(--fg); text-decoration: underline; }
 .menu-only { display: none; }
 /* The phone's own sign-in, beside the menu button; a desktop has the one in the row. */
 .top-signin { display: none; }
-.figures-sec { margin-top: 32px; }
 
 .section-title { margin: 0 0 16px; color: var(--hi); font-size: var(--fs-3); font-weight: 700; }
 .section-title .scope-inline { margin-left: 0; color: var(--dim); }
@@ -1090,6 +1089,9 @@ details.expand[open] summary .when-open { display: inline; }
 @media (max-width: 360px) { .js .top { gap: 8px; } .js .top-stats { gap: 6px; } }
 
 @media (max-width: 640px) {
+  /* Every size is in rem: a 14px base takes everything down an eighth on
+     a phone, in proportion, where 16px read as too large. */
+  html { font-size: 87.5%; }
   /* A phone keeps a 16px gutter: text running into the bezel reads as a page
      that does not fit. */
   .top, main, footer { padding-inline: 16px; }
