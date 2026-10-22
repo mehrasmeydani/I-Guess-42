@@ -24,6 +24,10 @@ pub struct Config {
     /// turns payouts off; see points.rs.
     pub points_api_key: Option<String>,
     pub points_api_url: String,
+    /// Who runs the site, for /imprint. Unset parts are left out.
+    pub imprint_name: Option<String>,
+    pub imprint_address: Option<String>,
+    pub imprint_email: Option<String>,
 }
 
 impl Config {
@@ -45,6 +49,9 @@ impl Config {
             points_api_key: Some(opt("IGLCP_API_KEY", "").trim().to_string())
                 .filter(|k| !k.is_empty()),
             points_api_url: opt("IGLCP_API_URL", crate::points::DEFAULT_API_URL),
+            imprint_name: nonempty("IMPRINT_NAME"),
+            imprint_address: nonempty("IMPRINT_ADDRESS"),
+            imprint_email: nonempty("IMPRINT_EMAIL"),
         })
     }
 
@@ -94,6 +101,11 @@ fn opt(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
 
+/// An env var with something in it, trimmed; None if unset or blank.
+fn nonempty(key: &str) -> Option<String> {
+    std::env::var(key).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +122,9 @@ mod tests {
             allowed_campus_ids: ids.to_vec(),
             points_api_key: None,
             points_api_url: String::new(),
+            imprint_name: None,
+            imprint_address: None,
+            imprint_email: None,
         }
     }
 

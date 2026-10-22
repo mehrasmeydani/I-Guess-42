@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}impressum &middot; i guess low{% endblock %}
+{% block h1 %}impressum{% endblock %}
+
+{% block content %}
+<section class="sec prose" style="--b: 0">
+  <h2 class="page-title">impressum</h2>
+  {% if test_mode %}
+    <p>operator details not shown on test instance</p>
+  {% else %}
+    <p>{{ operator }}</p>
+  {% endif %}
+  <p class="dim">a free game, played for fun. no money changes hands. see also <a href="/privacy">privacy</a>.</p>
+</section>
+{% endblock %}

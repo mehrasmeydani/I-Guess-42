@@ -9,6 +9,12 @@ services:
     build: .
     image: i_guess_42:latest
     restart: unless-stopped
+    # Logs are overwritten as they fill: at most 30 MB, as /privacy says.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file: .env
     environment:
       # Overrides whatever .env says: inside the compose network the app is
@@ -43,6 +49,12 @@ services:
       - caddy_config:/config
     depends_on:
       - app
+    # Caddy's own messages (certificates, errors), capped like the app's.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   game_data:

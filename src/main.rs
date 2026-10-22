@@ -90,6 +90,8 @@ async fn main() -> Result<()> {
         .route("/auth/callback", get(handlers::callback))
         .route("/logout", post(handlers::logout))
         .route("/healthz", get(handlers::healthz))
+        .route("/privacy", get(handlers::privacy))
+        .route("/imprint", get(handlers::imprint))
         // 404 unless ADMIN_LOGINS names the signed-in user.
         .route("/admin", get(handlers::admin))
         .route("/admin/clock", post(handlers::admin_clock))
