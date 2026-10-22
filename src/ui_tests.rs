@@ -241,7 +241,10 @@ async fn the_leaderboard_ranks_points_first_then_wins() {
     assert!(html.contains(r#"class="on" aria-current="page" href="/g/leaderboard">leaders</a>"#));
 
     // Everyone with one win shares first place; nobody is "02" for a tie.
-    let wins_part = &html[wins..];
+    let streaks = html.find(">longest streaks").expect("streaks");
+    assert!(wins < streaks, "streaks after wins");
+    let wins_part = &html[wins..streaks];
+    assert!(html[streaks..].contains(r#"<td class="who">cat</td>"#), "cat has a streak of a day");
     assert!(wins_part.contains(r#"<tr class="r1" title="cat"><td class="num place">01</td>"#), "{wins_part}");
     assert!(!wins_part.contains(">02<"));
 

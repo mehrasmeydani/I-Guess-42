@@ -711,6 +711,20 @@ pub struct BoardTemplate {
     pub rows: Vec<PointsBoardRow>,
     /// The most days won, all-time.
     pub wins: Vec<PointsBoardRow>,
+    /// The longest runs of days in a row, all-time.
+    pub streaks: Vec<StreakBoardRow>,
+}
+
+pub struct StreakBoardRow {
+    pub name: String,
+    pub title: String,
+    /// The longest run of days in a row.
+    pub longest: i64,
+    /// The run still going, 0 if none.
+    pub current: i64,
+    pub pct: i64,
+    pub me: bool,
+    pub rank: i64,
 }
 
 /// One day on the trends timeline.

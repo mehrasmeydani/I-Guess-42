@@ -125,6 +125,40 @@ async fn leaderboard_in(
             PointsBoardRow { name: l.login, title: l.display_name, points: l.wins.to_string(), pct, me, rank }
         })
         .collect();
+    // Longest streaks: each player's runs worked out from the days they
+    // played, longest first, then the one still going.
+    let open_day = chrono::NaiveDate::parse_from_str(&open, "%Y-%m-%d").unwrap_or_else(|_| chrono::Utc::now().date_naive());
+    let mut players: Vec<(i64, String, String, Vec<chrono::NaiveDate>)> = Vec::new();
+    for (id, login, display_name, day) in db::play_days(&state.db, pool).await? {
+        let Ok(day) = chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d") else { continue };
+        match players.last_mut() {
+            Some(p) if p.0 == id => p.3.push(day),
+            _ => players.push((id, login, display_name, vec![day])),
+        }
+    }
+    let mut runs: Vec<(String, String, i64, i64, i64)> = players
+        .into_iter()
+        .map(|(id, login, display_name, days)| {
+            let (longest, current) = crate::stats::longest_and_current_streak(&days, open_day);
+            (login, display_name, longest, current, id)
+        })
+        .collect();
+    runs.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)).then(a.0.cmp(&b.0)));
+    runs.truncate(BOARD as usize);
+    let top_run = runs.first().map_or(1, |r| r.2.max(1));
+    let run_ranks = templates::ranks(&runs.iter().map(|r| r.2).collect::<Vec<_>>());
+    let streaks: Vec<templates::StreakBoardRow> = runs
+        .into_iter()
+        .zip(run_ranks)
+        .map(|((login, display_name, longest, current, id), rank)| {
+            let me = match pool {
+                Pool::Global => me_global.as_deref() == Some(login.as_str()),
+                Pool::Vienna => me_42.as_deref() == Some(login.as_str()),
+            };
+            let shown = templates::LeaderView::new(db::LeaderboardRow { id, login, display_name, wins: 0 }, named);
+            templates::StreakBoardRow { name: shown.login, title: shown.display_name, longest, current, pct: longest * 100 / top_run, me, rank }
+        })
+        .collect();
     let top_points = rows.first().map_or(1, |r| r.points.max(1));
     let point_ranks = templates::ranks(&rows.iter().map(|r| r.points).collect::<Vec<_>>());
     Ok(templates::render(&BoardTemplate {
@@ -133,6 +167,7 @@ async fn leaderboard_in(
         impersonating: false,
         week,
         wins,
+        streaks,
         rows: rows
             .into_iter()
             .zip(point_ranks)

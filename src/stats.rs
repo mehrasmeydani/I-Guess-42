@@ -642,6 +642,19 @@ pub fn player_stats(history: &[(chrono::NaiveDate, i64, bool)], guessed_open: bo
     }
 }
 
+/// A player's longest run of days in a row, and the one still going: a run
+/// is still going if its last day is the open round or the one before it
+/// (today's guess may not be in yet). `days` as for `streak_runs`.
+pub fn longest_and_current_streak(days: &[chrono::NaiveDate], open_round: chrono::NaiveDate) -> (i64, i64) {
+    let runs = streak_runs(days);
+    let longest = runs.iter().map(|r| r.1).max().unwrap_or(0);
+    let current = match runs.last() {
+        Some(&(d, run)) if open_round.pred_opt().is_some_and(|y| d >= y) => run,
+        _ => 0,
+    };
+    (longest, current)
+}
+
 /// Every day played, with how many days in a row it makes: the first day of
 /// a run is 1, a missed day starts over. `days` may be in any order and
 /// hold repeats; the answer is oldest first.
@@ -678,6 +691,18 @@ mod tests {
 
     fn d(s: &str) -> chrono::NaiveDate {
         chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn the_longest_run_and_the_one_still_going() {
+        let d = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let run = |from: &str, n: i64| (0..n).map(|i| d(from) + chrono::Duration::days(i)).collect::<Vec<_>>();
+        // Five in a row early in the month, then three ending yesterday.
+        let mut days = run("2026-10-01", 5);
+        days.extend(run("2026-10-20", 3));
+        assert_eq!(longest_and_current_streak(&days, d("2026-10-23")), (5, 3), "yesterday still counts: today's guess may come");
+        assert_eq!(longest_and_current_streak(&days, d("2026-10-24")), (5, 0), "a day missed: over");
+        assert_eq!(longest_and_current_streak(&[], d("2026-10-24")), (0, 0));
     }
 
     #[test]

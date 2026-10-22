@@ -2042,6 +2042,22 @@ pub async fn leaderboard(
     Ok(rows)
 }
 
+/// Every day each player of `pool` played, the open round included, as
+/// (player id, login, display name, round date), by player and then date:
+/// what the streak leaderboard is worked out from. Guesses that do not
+/// count (ghosts, test accounts, banned) are not days played.
+pub async fn play_days(db: &Db, pool: Pool) -> Result<Vec<(i64, String, String, String)>> {
+    let sql = format!(
+        "SELECT p.id, p.login, p.display_name, g.round_date
+         FROM {} g JOIN {} p ON p.id = g.user_id
+         WHERE g.participates = 1
+         ORDER BY p.id, g.round_date",
+        pool.guesses(),
+        pool.players()
+    );
+    Ok(sqlx::query_as(&sql).fetch_all(db).await?)
+}
+
 /// One closed round a player took part in: what they picked, and what won.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct PlayedRound {
