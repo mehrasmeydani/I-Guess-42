@@ -10,8 +10,7 @@
 		header_up X-Forwarded-Proto {scheme}
 	}
 
-	log {
-		output stdout
-		format console
-	}
+	# No `log` block: Caddy writes no access log without one. An access log
+	# would keep every visitor's address, which /privacy says is never
+	# written down.
 }

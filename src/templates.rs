@@ -518,6 +518,40 @@ pub struct ErrorTemplate {
     pub message: String,
 }
 
+#[derive(Template)]
+#[template(path = "privacy.html")]
+pub struct PrivacyTemplate {
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+}
+
+#[derive(Template)]
+#[template(path = "imprint.html")]
+pub struct ImprintTemplate {
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    /// Who runs the site, as a sentence: see `operator_sentence`.
+    pub operator: String,
+}
+
+/// The imprint's one sentence, from whatever of name, address and contact
+/// is configured. A missing part is left out of the sentence rather than
+/// shown as a placeholder.
+pub fn operator_sentence(name: Option<&str>, address: Option<&str>, email: Option<&str>) -> String {
+    let who = match (name, address) {
+        (Some(n), Some(a)) => format!("i guess low is run by {n}, {a}."),
+        (Some(n), None) => format!("i guess low is run by {n}."),
+        (None, Some(a)) => format!("i guess low is run from {a}."),
+        (None, None) => "i guess low is run by students, for students.".to_string(),
+    };
+    match email {
+        Some(e) => format!("{who} contact: {e}"),
+        None => who,
+    }
+}
+
 /// Render a template, or fall back to a bare 500 if the template itself is broken.
 pub fn render<T: Template>(template: &T) -> Response {
     match template.render() {

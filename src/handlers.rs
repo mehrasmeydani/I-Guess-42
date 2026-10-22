@@ -828,6 +828,32 @@ pub async fn not_found() -> Response {
     error_page(StatusCode::NOT_FOUND, "No such page.")
 }
 
+/// `/privacy`: what the site keeps, why, and for how long.
+pub async fn privacy(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
+    let user = current_user(&state, &jar).await?;
+    Ok(templates::render(&templates::PrivacyTemplate {
+        user: user.map(UserView::from),
+        test_mode: state.cfg.test_mode(),
+        impersonating: auth::admin_return_token(&jar).is_some(),
+    }))
+}
+
+/// `/imprint`: who runs the site, from IMPRINT_NAME, IMPRINT_ADDRESS and
+/// IMPRINT_EMAIL.
+pub async fn imprint(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
+    let user = current_user(&state, &jar).await?;
+    Ok(templates::render(&templates::ImprintTemplate {
+        user: user.map(UserView::from),
+        test_mode: state.cfg.test_mode(),
+        impersonating: auth::admin_return_token(&jar).is_some(),
+        operator: templates::operator_sentence(
+            state.cfg.imprint_name.as_deref(),
+            state.cfg.imprint_address.as_deref(),
+            state.cfg.imprint_email.as_deref(),
+        ),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{names_visible, parse_guess, round_matches};
