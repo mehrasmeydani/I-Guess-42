@@ -68,6 +68,6 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 - [ ] Run the migration check on a copy of the live backup (migrations
       0005-0014, including 0011 and 0014, which rebuild the points ledger):
       `MIGRATE_CHECK_DB=/path/to/backup.db cargo test migrating_a_copy -- --ignored --nocapture`
-- [ ] Push `global` (it is ahead of origin).
+- [x] Push `global` (pushed; push again before merging if it moved).
 - [ ] Merge `global` → `dev` → `main`, bump `version.txt` to 2.0.0, tag the
       merge commit, deploy.
