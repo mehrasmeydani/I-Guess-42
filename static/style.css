@@ -1126,12 +1126,14 @@ details.expand[open] summary .when-open { display: inline; }
      scrolling on a 375x812 phone (R4.2). */
   .premise { margin-top: 32px; font-size: var(--fs-2); }
   .sec { margin-top: 32px; }
+  /* Right under the header: no more than the header's own gap. */
+  main > .sec:first-of-type, .sec.hero { margin-top: 16px; }
   .auth { margin-top: 32px; }
   .auth-card { padding: 24px 20px; }
   .figures { grid-template-columns: 1fr 1fr; }
   .figures p + p { padding-left: 0; border-left: 0; }
-  .figures p:nth-child(2) { padding-left: 16px; border-left: 1px solid #2a2a2a; }
-  .figures p:nth-child(3) { grid-column: 1 / -1; border-top: 1px solid #2a2a2a; }
+  .figures p:nth-child(2) { padding-left: 16px; border-left: var(--rule); }
+  .figures p:nth-child(3) { grid-column: 1 / -1; border-top: var(--rule); }
   .figures b { font-size: var(--fs-4); }
   /* Short lists (most / least picked) stay side by side. */
   .split.duo { grid-template-columns: 1fr 1fr; gap: 0 20px; }
