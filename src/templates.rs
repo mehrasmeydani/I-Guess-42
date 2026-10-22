@@ -637,6 +637,8 @@ pub struct BetsTemplate {
     pub close_time: String,
     pub signed_in: bool,
     pub can_bet: bool,
+    /// False until the global round has been played once (`Base::bets_open`).
+    pub bets_open: bool,
     /// The range boxes, as picked or typed.
     pub lo: String,
     pub hi: String,

@@ -29,6 +29,7 @@ fn what(kind: &str, note: Option<&str>) -> String {
         "bet" => "bet".to_string(),
         "bet_win" => "bet won".to_string(),
         "streak" => "streak bonus".to_string(),
+        "catchup" => "catch-up points".to_string(),
         other => other.to_string(),
     }
 }

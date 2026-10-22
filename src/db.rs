@@ -2109,6 +2109,33 @@ pub async fn credit_once(
     Ok(n > 0)
 }
 
+/// The round an account got its welcome points in: when it joined the
+/// global round. None before it has.
+pub async fn joined_global(db: &Db, account_id: i64) -> Result<Option<String>> {
+    Ok(sqlx::query_scalar("SELECT round_date FROM ledger WHERE account_id = ?1 AND kind = 'signup'")
+        .bind(account_id)
+        .fetch_optional(db)
+        .await?)
+}
+
+/// How many global rounds were played before `round_date`: days with at
+/// least one real guess.
+pub async fn global_rounds_before(db: &Db, round_date: &str) -> Result<i64> {
+    Ok(sqlx::query_scalar("SELECT COUNT(DISTINCT round_date) FROM global_guesses WHERE round_date < ?1 AND participates = 1")
+        .bind(round_date)
+        .fetch_one(db)
+        .await?)
+}
+
+/// What an account has had of one kind of ledger row, all told.
+pub async fn ledger_total(db: &Db, account_id: i64, kind: &str) -> Result<i64> {
+    Ok(sqlx::query_scalar("SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE account_id = ?1 AND kind = ?2")
+        .bind(account_id)
+        .bind(kind)
+        .fetch_one(db)
+        .await?)
+}
+
 /// Every day an account has a guess in the global round, the open one
 /// included, oldest first. Ghost guesses do not count.
 pub async fn global_play_days(db: &Db, account_id: i64) -> Result<Vec<String>> {
@@ -2145,14 +2172,16 @@ pub enum Locked {
     Voided,
 }
 
-/// Locks a guess in the global round and takes its stake, together or not
-/// at all. The stake goes into the round's pot (see `settle_round`).
+/// Locks a guess in the global round, takes its stake and credits the day's
+/// `grant` (points for playing, not for visiting), together or not at all.
+/// The stake goes into the round's pot (see `settle_round`).
 pub async fn lock_global_guess(
     db: &Db,
     round_date: &str,
     account_id: i64,
     value: i64,
     stake: i64,
+    grant: i64,
 ) -> Result<Locked> {
     let mut tx = write_tx(db).await?;
     let voided: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM pots WHERE round_date = ?1")
@@ -2175,7 +2204,8 @@ pub async fn lock_global_guess(
         .bind(account_id)
         .fetch_one(&mut *tx)
         .await?;
-    if balance < stake {
+    // The day's grant comes with the guess, so it counts towards the stake.
+    if balance + grant < stake {
         return Ok(Locked::Broke);
     }
     let now = ts(Utc::now());
@@ -2205,6 +2235,19 @@ pub async fn lock_global_guess(
     .bind(&now)
     .execute(&mut *tx)
     .await?;
+    if grant > 0 {
+        sqlx::query(
+            "INSERT INTO ledger (account_id, round_date, kind, amount, ref, created_at)
+             VALUES (?1, ?2, 'grant', ?3, ?2, ?4)
+             ON CONFLICT(account_id, kind, ref) DO NOTHING",
+        )
+        .bind(account_id)
+        .bind(round_date)
+        .bind(grant)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+    }
     tx.commit().await?;
     Ok(Locked::In)
 }
@@ -2385,7 +2428,7 @@ pub async fn unsettle_from(db: &Db, open_round: &str) -> Result<u64> {
         "DELETE FROM ledger WHERE round_date >= ?1 AND (
              (kind IN ('pot', 'bet_win') AND round_date NOT IN ({CALLED_OFF}))
              OR (kind = 'refund' AND ref LIKE 'bet:%' AND round_date NOT IN ({CALLED_OFF}))
-             OR (kind IN ('grant', 'streak') AND round_date > ?1))"
+             OR (kind IN ('grant', 'streak', 'catchup') AND round_date > ?1))"
     ))
     .bind(open_round)
     .execute(&mut *tx)
@@ -2759,7 +2802,7 @@ pub struct PointsRow {
 }
 
 /// Balances, highest first; or, with `since`, what each account gained from
-/// playing since then - grants and the sign-up bonus left out, so it is not
+/// playing since then - grants, catch-up and the sign-up bonus left out, so it is not
 /// a measure of having turned up.
 pub async fn points_board(db: &Db, since: Option<&str>, limit: i64) -> Result<Vec<PointsRow>> {
     let sql = match since {
@@ -2770,7 +2813,7 @@ pub async fn points_board(db: &Db, since: Option<&str>, limit: i64) -> Result<Ve
         Some(_) => "SELECT a.id, a.username, SUM(l.amount) AS points
                  FROM ledger l JOIN accounts a ON a.id = l.account_id
                  WHERE a.deleted_at IS NULL AND a.banned_at IS NULL
-                   AND l.created_at >= ?1 AND l.kind NOT IN ('grant', 'signup')
+                   AND l.created_at >= ?1 AND l.kind NOT IN ('grant', 'signup', 'catchup')
                  GROUP BY a.id HAVING points != 0 ORDER BY points DESC, a.username LIMIT ?2",
     };
     let rows = sqlx::query_as::<_, PointsRow>(sql)

@@ -137,7 +137,7 @@ async fn index_in(
     let player = viewer.as_ref().and_then(|v| player_in(pool, v));
     // The global round: pay out anything that closed since the settler last
     // looked, so the page never shows an unpaid pot, and hand a player who
-    // turned up their points for today.
+    // turned up their welcome points (the daily ones come with the guess).
     let pot = if pool == Pool::Global {
         crate::economy::settle_all(&state.db, &round_key).await?;
         if let Some(p) = player {
@@ -987,7 +987,7 @@ async fn submit_guess_in(
     }
     if pool == Pool::Global {
         crate::economy::collect(&state.db, player, &round_key).await?;
-        if db::balance(&state.db, player).await? < crate::economy::GUESS_STAKE {
+        if db::balance(&state.db, player).await? + crate::economy::DAILY_GRANT < crate::economy::GUESS_STAKE {
             return Ok(back(pool, "broke"));
         }
     }
@@ -1056,11 +1056,12 @@ async fn confirm_guess_in(
         // The global round: the guess and its stake, together or not at all.
         Pool::Global => {
             crate::economy::collect(&state.db, player, &round_key).await?;
-            match db::lock_global_guess(&state.db, &round_key, player, value, crate::economy::GUESS_STAKE).await? {
+            match db::lock_global_guess(&state.db, &round_key, player, value, crate::economy::GUESS_STAKE, crate::economy::DAILY_GRANT).await? {
                 db::Locked::In => {
                     if let Some(hash) = ip_hash {
                         db::set_guess_ip_hash(&state.db, &round_key, player, &hash).await?;
                     }
+                    crate::economy::catch_up(&state.db, player, &round_key).await?;
                     "saved"
                 }
                 // The same guess again - a double click, a retried request:

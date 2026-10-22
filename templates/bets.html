@@ -20,7 +20,7 @@
         <label><input type="radio" name="on" value="win" class="sr"{% if !on_most %} checked{% endif %}><span>winning number</span></label><label><input type="radio" name="on" value="most" class="sr"{% if on_most %} checked{% endif %}><span>most picked</span></label>
       </fieldset>
       <label for="lo">from</label>
-      <input id="lo" name="lo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="5" value="{{ lo }}" autocomplete="off" required>
+      <input id="lo" name="lo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="1" value="{{ lo }}" autocomplete="off">
       <label for="hi">to</label>
       <input id="hi" name="hi" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="any" value="{{ hi }}" autocomplete="off">
       <button type="submit">see odds</button>
@@ -28,7 +28,9 @@
     </form>
     <div id="quote" aria-live="polite">{% include "_quote.html" %}</div>
   </div>
-  {% if !signed_in %}
+  {% if !bets_open %}
+    <p class="hint">bets open once the global round has been played: its players set how much a bet can win</p>
+  {% else if !signed_in %}
     <p class="hint"><a href="/login">sign in</a> to bet</p>
   {% else if !can_bet %}
     <p class="hint">confirm your email to bet</p>

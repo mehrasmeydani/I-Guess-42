@@ -531,23 +531,23 @@ documented like `PARTICIPANT_POINTS` in `points.rs`.
 | Constant | Default | Meaning |
 |---|---|---|
 | `SIGNUP_BONUS` | 500 | Credited once, when the account is verified (OAuth accounts: on creation). |
-| `DAILY_GRANT` | 100 | Credited once per round to every account that visits `/g` while signed in and verified. |
+| `DAILY_GRANT` | 100 | Credited once per round to every verified account that plays it, with its guess. |
 | `GUESS_STAKE` | 10 | Charged when a guess is confirmed; goes into the pot. |
 | `MAX_BET` | 100 | Largest stake on one bet. |
 | `MAX_BETS_STAKE_PER_ROUND` | 200 | Largest total staked on bets per account per round. |
 
 ### 8.1 Rules
 
-- **Grant.** On the first signed-in `/g` page view of a round, insert
-  `ledger(kind='grant', ref=round_date, +100)`. The `UNIQUE` constraint makes
-  a second credit impossible, even from two tabs at once.
-  - It is "visit to collect", not automatic for everyone, so abandoned
-    accounts don't pile up points and inactive fakes stay poor.
+- **Grant.** Points for playing, not for visiting: locking the day's guess
+  inserts `ledger(kind='grant', ref=round_date, +100)` in the same
+  transaction as the guess and its stake, and the grant counts towards the
+  stake, so a player with nothing left can always play. The `UNIQUE`
+  constraint makes a second credit impossible, even from two tabs at once.
+  An account that only visits, or a fake that never guesses, gets nothing.
 - **Stake.** Confirming a guess inserts the guess and a
-  `ledger(kind='stake', ref=round_date, −10)` row **in one transaction**. If the
-  balance is below 10 the guess is refused ("not enough points — come back
-  tomorrow for your daily 100"). The grant always covers it, so in practice
-  this only happens to someone who bet everything.
+  `ledger(kind='stake', ref=round_date, −10)` row **in one transaction**, with
+  the grant. Since the grant covers the stake, a guess is refused for want
+  of points only if the grant were set below the stake.
 - **Pot.** Pot for round R = all stakes in R + `carried_in` from the last
   unwon rounds. **The winner takes the whole pot.** More players → more
   stakes → bigger pot, which is how "more players, more points" works. No
@@ -561,6 +561,19 @@ documented like `PARTICIPANT_POINTS` in `points.rs`.
   `ledger(kind='streak', ref='streak:<day>', +1000)`, once per milestone
   however often the claim is sent. A missed day starts the count over.
   Migration 0011 adds the kind (it rebuilds `ledger`, keeping every row).
+- **Catch-up.** A player who joins after N global rounds have been played
+  is owed N × 135 (`CATCH_UP_PER_ROUND`: the daily 100, plus the 1000 streak
+  bonus a nine-days-in-ten player reaches about a third of the time), paid
+  as a 30th of it (`CATCH_UP_PARTS`) with each day they lock a guess:
+  `ledger(kind='catchup', ref=round_date)`, once a round. Joining on day
+  120 is owed 16 200, 540 a day on top of the grant for 30 played days.
+  Migration 0014 adds the kind (rebuilding `ledger` as 0011 did). Left out of
+  the "this week" board, like grants. Why not raise the daily points as the
+  game grows: a 180-day simulation (bets included, three growth curves)
+  showed that gives late joiners almost nothing, since the regulars get the
+  raise too; the catch-up brought every month's joiners to about their fair
+  share of the top ten. A smaller bet cap made late joiners worse off, not
+  better: a long shot is how they leapfrog, so the cap stays at n × 1000.
 - **Ledger only.** No balance column anywhere; balance = `SUM(amount)` over an
   indexed column. That's fast enough for years at this scale.
 
@@ -591,13 +604,16 @@ bragging points. Two things keep the leaderboard meaningful:
 ### 9.1 What you bet on
 
 For every global round, open from when the round opens until its 12:42
-deadline. W = that round's winning number (the lowest unique number), or
+deadline - once a global round has been played in the last month. Until
+then the board shows its odds but takes no bets: there are no players yet
+to size the cap by (9.4). W = that round's winning number (the lowest unique number), or
 none. The player picks the bet themselves:
 
 | Market id | Wins when | Typed as |
 |---|---|---|
 | `range:A:B` | W exists and A ≤ W ≤ B | from A to B |
 | `range:A:` | W exists and W ≥ A | from A, "to" left empty |
+| `range:1:B` | W exists and W ≤ B | "from" left empty, to B: "winner B or less" |
 | `range:A:A` | W = A | the same number twice |
 | `none` | nobody wins | "or: nobody wins" |
 | `most:A:B`, `most:A:` | M, the most picked number, is in the range (ties: the lowest of them) | the "most picked" switch |
@@ -629,7 +645,7 @@ Once per open round:
    round's past rounds count for α of one in the record (step 6). The 42
    round is never named on the page.
 2. Players per round n: the month's average per day, blended the same way
-   (else 15), between 2 and 1000.
+   (else 15), between 1 and 1000.
 3. n players each pick one of those picks at random. Each number's count is
    then near enough an independent Poisson count with mean
    λᵥ = n × (its share of the picks), which makes the chances a formula
@@ -641,6 +657,10 @@ Once per open round:
    Exact to any precision, instant, the same on every restart. Checked in the
    tests against 20 000 rounds actually played out; on the local data it
    matched the old 40 000-round simulation to within a point everywhere.
+   Rounds of up to 100 players have their winners and "nobody wins" worked
+   out exactly instead (`odds::exact_winners`, generating functions, n² work
+   per number): Poisson counts also count the day nobody turns up as
+   "nobody wins", which on a two-player day was 13.5 of its 17%.
 4. Averaged over the day sizes behind it: the formula is worked out for
    the rounds' own player counts and averaged, not for one average size
    (quiet and busy days play differently), the sizes grouped into at most 6
@@ -661,7 +681,12 @@ Once per open round:
 6. Lifted to the record: once there are 10 rounds or more, a range that won
    on h of the last d rounds gets at least h / (d + 10) - shrunk, so a
    handful of tiny rounds is not taken at its word - and then the whole
-   board is scaled back so it adds up to exactly 100%. The model underrates two things the
+   board is scaled back so it adds up to exactly 100%. Any other range is
+   the board rows it covers, a partly covered row split by the model's own
+   shares within it, so every range is the sum of its parts: "1 or more" is
+   exactly 100% less "nobody wins" (before, a range off the board was
+   scaled down with the board without being lifted with it, so wide
+   ranges came out too unlikely). The model underrates two things the
    live site shows - nobody winning (1% modelled, 7% seen) and hail marys
    over 50 (0.5% against 3.4%) - and a bookmaker does not offer odds
    reality has already beaten.
@@ -714,8 +739,8 @@ payout         = floor(stake × odds_x100 / 100)     # includes the stake back
   ("1 or more", p ≈ 0.95) would pay under ×1.00, so it is refused: no free
   points for betting on the obvious.
 - **Capped by the size of the game.** All of a player's bets on one round
-  together win at most n × 1000 over their stakes (n = players a day, as in
-  9.2): with 200 players a day, +200 000 - room for a hail mary at long odds,
+  together win at most n × 1000 over their stakes (n = the global round's
+  own players a day over the month, the 42 round not counted): with 200 players a day, +200 000 - room for a hail mary at long odds,
   not for one lucky account to outweigh a month of everyone's play. Per
   player and round, not per bet, so fifty overlapping bets that would all
   win at once share one cap. Checked in the bet's transaction against the

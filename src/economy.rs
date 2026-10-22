@@ -21,8 +21,9 @@ use crate::round::Round;
 
 /// Credited once, the first time a verified account visits the global round.
 pub const SIGNUP_BONUS: i64 = 500;
-/// Credited once per round to a verified account that visits the global
-/// round. Visit to collect: an account nobody uses does not pile up points.
+/// Credited once per round to a verified account that plays it, with its
+/// guess: points for playing, not for turning up, so an account that only
+/// visits does not pile them up.
 pub const DAILY_GRANT: i64 = 100;
 /// What a guess costs. It goes into the round's pot.
 pub const GUESS_STAKE: i64 = 10;
@@ -32,15 +33,51 @@ pub const STREAK_DAYS: i64 = 10;
 /// ...is worth this, once the player claims it.
 pub const STREAK_BONUS: i64 = 1000;
 
+/// A late joiner starts level with the regulars: for every global round
+/// played before they joined they are owed this much, about what a regular
+/// earned from it - the daily 100, and the 1000 streak bonus every tenth
+/// day that someone playing nine days in ten reaches about a third of the
+/// time. Simulated over half a year of growth (fast, slow, a boom then
+/// quiet), it gave players who joined in month five the same chance at
+/// the top ten as those of month one; scaling the daily points with the
+/// number of players did not, since the regulars get the raise too.
+pub const CATCH_UP_PER_ROUND: i64 = 135;
+/// ...paid in this many equal parts, one with each day they play: not all at
+/// once, so an account made to farm it has to play a month for it.
+pub const CATCH_UP_PARTS: i64 = 30;
+
 /// How often the settler looks for closed rounds to pay out.
 const SETTLE_EVERY: Duration = Duration::from_secs(30);
 
-/// The sign-up bonus, if not had yet, and the open round's grant, if not
-/// had yet. For a verified account only; call it whenever one turns up.
+/// The sign-up bonus, if not had yet. For a verified account only; call it
+/// whenever one turns up. The daily grant comes with the day's guess
+/// (`db::lock_global_guess`).
 pub async fn collect(db: &Db, account_id: i64, open_round: &str) -> Result<()> {
     db::credit_once(db, account_id, open_round, "signup", SIGNUP_BONUS, "signup", None).await?;
-    db::credit_once(db, account_id, open_round, "grant", DAILY_GRANT, open_round, None).await?;
     Ok(())
+}
+
+/// What an account is owed for joining late, all told: the global rounds
+/// played before it joined, times `CATCH_UP_PER_ROUND`.
+pub async fn catch_up_owed(db: &Db, account_id: i64) -> Result<i64> {
+    let Some(joined) = db::joined_global(db, account_id).await? else {
+        return Ok(0);
+    };
+    Ok(db::global_rounds_before(db, &joined).await? * CATCH_UP_PER_ROUND)
+}
+
+/// Today's part of the catch-up, once the day's guess is in: a
+/// `CATCH_UP_PARTS`th of what was owed, or what is left of it. Paid once a
+/// round, however often this runs. Returns the points credited.
+pub async fn catch_up(db: &Db, account_id: i64, round: &str) -> Result<i64> {
+    let owed = catch_up_owed(db, account_id).await?;
+    let left = owed - db::ledger_total(db, account_id, "catchup").await?;
+    let part = (owed + CATCH_UP_PARTS - 1) / CATCH_UP_PARTS;
+    let pay = part.min(left);
+    if pay > 0 && db::credit_once(db, account_id, round, "catchup", pay, round, None).await? {
+        return Ok(pay);
+    }
+    Ok(0)
 }
 
 /// Streak bonuses earned and not claimed yet: the days that completed ten
@@ -145,7 +182,7 @@ mod tests {
     /// Enough points to play, and a guess locked for `round`.
     async fn plays(db: &Db, who: i64, round: &str, value: i64) {
         collect(db, who, round).await.unwrap();
-        assert_eq!(db::lock_global_guess(db, round, who, value, GUESS_STAKE).await.unwrap(), Locked::In);
+        assert_eq!(db::lock_global_guess(db, round, who, value, GUESS_STAKE, DAILY_GRANT).await.unwrap(), Locked::In);
     }
 
     async fn rows(db: &Db, sql: &str) -> i64 {
@@ -222,14 +259,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_welcome_and_daily_points_come_once_each() {
+    async fn the_welcome_points_come_once_and_the_daily_ones_with_each_guess() {
         let t = temp_db().await;
         let ann = player(&t.db, "ann").await;
         for _ in 0..3 {
             collect(&t.db, ann, "2026-10-21").await.unwrap();
         }
-        assert_eq!(db::balance(&t.db, ann).await.unwrap(), SIGNUP_BONUS + DAILY_GRANT);
-        // Many at once: still once.
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), SIGNUP_BONUS);
+        // Many visits at once, on another day: still nothing for visiting.
         let tasks: Vec<_> = (0..20)
             .map(|_| {
                 let db = t.db.clone();
@@ -239,25 +276,33 @@ mod tests {
         for task in tasks {
             task.await.unwrap();
         }
-        assert_eq!(db::balance(&t.db, ann).await.unwrap(), SIGNUP_BONUS + 2 * DAILY_GRANT);
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), SIGNUP_BONUS);
+        // Playing: the day's points with the guess, once.
+        plays(&t.db, ann, "2026-10-22", 4).await;
+        assert_eq!(db::lock_global_guess(&t.db, "2026-10-22", ann, 4, GUESS_STAKE, DAILY_GRANT).await.unwrap(), Locked::AlreadySame);
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), SIGNUP_BONUS + DAILY_GRANT - GUESS_STAKE);
     }
 
     #[tokio::test]
     async fn a_guess_and_its_stake_go_in_together_or_not_at_all() {
         let t = temp_db().await;
         let ann = player(&t.db, "ann").await;
-        // No points yet: refused, and nothing written.
-        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", ann, 7, GUESS_STAKE).await.unwrap(), Locked::Broke);
+        // No points and no grant to cover it: refused, and nothing written.
+        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", ann, 7, GUESS_STAKE, 0).await.unwrap(), Locked::Broke);
         assert_eq!(rows(&t.db, "SELECT COUNT(*) FROM global_guesses").await, 0);
         assert_eq!(rows(&t.db, "SELECT COUNT(*) FROM ledger").await, 0);
+        // With nothing but the day's grant, which comes with the guess: in.
+        let bob = player(&t.db, "bob").await;
+        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", bob, 3, GUESS_STAKE, DAILY_GRANT).await.unwrap(), Locked::In);
+        assert_eq!(db::balance(&t.db, bob).await.unwrap(), DAILY_GRANT - GUESS_STAKE);
 
         plays(&t.db, ann, "2026-10-21", 7).await;
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), SIGNUP_BONUS + DAILY_GRANT - GUESS_STAKE);
         // Again with the same number: nothing more taken. Another number: refused.
-        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", ann, 7, GUESS_STAKE).await.unwrap(), Locked::AlreadySame);
-        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", ann, 8, GUESS_STAKE).await.unwrap(), Locked::AlreadyOther);
+        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", ann, 7, GUESS_STAKE, DAILY_GRANT).await.unwrap(), Locked::AlreadySame);
+        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", ann, 8, GUESS_STAKE, DAILY_GRANT).await.unwrap(), Locked::AlreadyOther);
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), SIGNUP_BONUS + DAILY_GRANT - GUESS_STAKE);
-        assert_eq!(rows(&t.db, "SELECT COUNT(*) FROM ledger WHERE kind = 'stake'").await, 1);
+        assert_eq!(rows(&t.db, "SELECT COUNT(*) FROM ledger WHERE kind = 'stake'").await, 2, "ann's and bob's, once each");
     }
 
     #[tokio::test]
@@ -276,7 +321,7 @@ mod tests {
             .iter()
             .map(|&id| {
                 let db = t.db.clone();
-                tokio::spawn(async move { db::lock_global_guess(&db, "2026-10-21", id, 1, GUESS_STAKE).await.unwrap() })
+                tokio::spawn(async move { db::lock_global_guess(&db, "2026-10-21", id, 1, GUESS_STAKE, DAILY_GRANT).await.unwrap() })
             })
             .collect();
         for task in tasks {
@@ -378,7 +423,7 @@ mod tests {
 
         assert!(db::void_round(&t.db, "2026-10-21").await.unwrap());
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), before + GUESS_STAKE);
-        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", bob, 3, GUESS_STAKE).await.unwrap(), Locked::Voided);
+        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", bob, 3, GUESS_STAKE, DAILY_GRANT).await.unwrap(), Locked::Voided);
         assert!(!db::void_round(&t.db, "2026-10-21").await.unwrap(), "once");
         let pot = db::pot(&t.db, "2026-10-21").await.unwrap().unwrap();
         assert!(pot.voided);
@@ -394,7 +439,7 @@ mod tests {
         let (_t, state) = app(&[]).await;
         player(&state.db, "ann").await;
         let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
-        let start = format!("{} pts", crate::templates::group_digits(SIGNUP_BONUS + DAILY_GRANT));
+        let start = format!("{} pts", crate::templates::group_digits(SIGNUP_BONUS));
         assert!(html.contains(&format!(r#"href="/g/points" title="your points">{start}</a>"#)), "{html}");
         assert!(html.contains(r#"<p class="pot"><b class="win">0 pts</b><span>in the pot</span></p>"#));
         assert!(html.contains("lock it in &middot; 10 pts"));
@@ -407,6 +452,42 @@ mod tests {
         let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
         assert!(html.contains(r#"<p class="pot"><b class="win">10 pts</b><span>in the pot</span></p>"#));
         assert!(html.contains(&format!("{} pts</a>", SIGNUP_BONUS + DAILY_GRANT - GUESS_STAKE)));
+    }
+
+    #[tokio::test]
+    async fn a_late_joiner_catches_up_a_part_with_each_day_played() {
+        let (_t, state) = app(&[]).await;
+        let today = Round::current(state.now()).date;
+        let day = |back: i64| (today - chrono::Duration::days(back)).format("%Y-%m-%d").to_string();
+        // Ann played the first three global rounds; bob turns up on the fourth.
+        let ann = player(&state.db, "ann").await;
+        for back in [3, 2, 1] {
+            plays(&state.db, ann, &day(back), 2).await;
+        }
+        assert_eq!(catch_up_owed(&state.db, ann).await.unwrap(), 0, "there from the start");
+        let bob = player(&state.db, "bob").await;
+        collect(&state.db, bob, &day(0)).await.unwrap();
+        let owed = 3 * CATCH_UP_PER_ROUND;
+        assert_eq!(catch_up_owed(&state.db, bob).await.unwrap(), owed);
+
+        // Locking today's guess pays today's part, once.
+        let before = db::balance(&state.db, bob).await.unwrap();
+        let form = Form(GuessForm { guess: "7".into(), round: day(0) });
+        let resp = handlers::global_confirm_guess(State(state.clone()), ClientIp(None), jar("bob"), form).await.unwrap();
+        assert_eq!(location(&resp), "/g?msg=saved");
+        let part = (owed + CATCH_UP_PARTS - 1) / CATCH_UP_PARTS;
+        assert_eq!(db::balance(&state.db, bob).await.unwrap(), before + DAILY_GRANT - GUESS_STAKE + part);
+        assert_eq!(catch_up(&state.db, bob, &day(0)).await.unwrap(), 0, "once a round");
+
+        // Thirty days of play later: all of it, and no more.
+        for ahead in 1..=40 {
+            let d = (today + chrono::Duration::days(ahead)).format("%Y-%m-%d").to_string();
+            catch_up(&state.db, bob, &d).await.unwrap();
+        }
+        assert_eq!(db::ledger_total(&state.db, bob, "catchup").await.unwrap(), owed);
+        // Not a gain from play: left out of the weekly board.
+        let week = db::points_board(&state.db, Some("2000-01-01"), 10).await.unwrap();
+        assert!(week.iter().all(|r| r.id != bob || r.points < owed), "{week:?}");
     }
 
     #[tokio::test]

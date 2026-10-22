@@ -191,7 +191,7 @@ fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market], 
         max_stake: if room.profit <= 0 { 0 } else { by_cap.min(points) },
         // Held back by the guess still to make, not by the cap.
         keeping: points < by_cap,
-        players: base.players,
+        players: base.cap_players(),
         taken: taken.contains(&m),
     }
 }
@@ -220,12 +220,12 @@ pub async fn page(
 
     let pick = Pick::from_query(&q);
 
-    let can_bet = viewer.as_ref().is_some_and(|v| v.account.verified);
+    let base = todays_base(&state).await?;
+    let can_bet = viewer.as_ref().is_some_and(|v| v.account.verified) && base.bets_open();
     let (mine, past) = slips(&state, viewer.as_ref(), &round).await?;
     let taken: Vec<Market> = mine.iter().filter_map(|b| Market::parse(&b.market)).collect();
     let net: i64 = past.iter().filter_map(|b| b.payout.map(|p| p - b.stake)).sum();
 
-    let base = todays_base(&state).await?;
     let book = parse_book(&db::book(&state.db, &open).await?);
     let room = stake_room(&state, &base, viewer.as_ref(), &open).await?;
     let quote = pick.market.map(|m| quote_view(&base, &book, m, &taken, room));
@@ -247,6 +247,7 @@ pub async fn page(
         close_time: round.deadline.with_timezone(&crate::round::TZ).format("%H:%M").to_string(),
         signed_in: viewer.is_some(),
         can_bet,
+        bets_open: base.bets_open(),
         lo,
         hi,
         nobody_picked: pick.market == Some(Market::Nobody),
@@ -275,9 +276,9 @@ pub async fn quote(
     let pick = Pick::from_query(&q);
     let (mine, _) = slips(&state, viewer.as_ref(), &round).await?;
     let taken: Vec<Market> = mine.iter().filter_map(|b| Market::parse(&b.market)).collect();
+    let base = todays_base(&state).await?;
     let quote = match pick.market {
         Some(m) => {
-            let base = todays_base(&state).await?;
             let book = parse_book(&db::book(&state.db, &round.key()).await?);
             let room = stake_room(&state, &base, viewer.as_ref(), &round.key()).await?;
             Some(quote_view(&base, &book, m, &taken, room))
@@ -287,7 +288,7 @@ pub async fn quote(
     let mut resp = templates::render(&QuoteTemplate {
         quote,
         pick_error: pick.error(),
-        can_bet: viewer.as_ref().is_some_and(|v| v.account.verified),
+        can_bet: viewer.as_ref().is_some_and(|v| v.account.verified) && base.bets_open(),
         round_key: round.key(),
         tax: odds::tax_label(),
     });
@@ -341,6 +342,9 @@ pub async fn place(
         return Ok(back("bet_slow", Some(market)));
     }
     let base = todays_base(&state).await?;
+    if !base.bets_open() {
+        return Ok(back("bets_not_open", Some(market)));
+    }
     // Past the cap a bigger stake only risks more: refused, at the odds the
     // visitor saw (better odds only lower the limit, and the cap still holds
     // in the bet's own transaction, with the account's other bets).
@@ -384,7 +388,7 @@ mod tests {
 
     async fn plays(db: &Db, who: i64, round: &str, value: i64) {
         collect(db, who, round).await.unwrap();
-        db::lock_global_guess(db, round, who, value, GUESS_STAKE).await.unwrap();
+        db::lock_global_guess(db, round, who, value, GUESS_STAKE, crate::economy::DAILY_GRANT).await.unwrap();
     }
 
     async fn bet(db: &Db, who: i64, round: &str, market: &str, stake: i64, odds: i64) -> Placed {
@@ -573,13 +577,13 @@ mod tests {
         assert_eq!(keep(all - GUESS_STAKE + 1).await.unwrap(), Placed::KeepForGuess);
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), all, "nothing taken");
         assert_eq!(keep(all - GUESS_STAKE).await.unwrap(), Placed::In);
-        // The 10 left is exactly the guess.
-        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", ann, 7, GUESS_STAKE).await.unwrap(), db::Locked::In);
-        assert_eq!(db::balance(&t.db, ann).await.unwrap(), 0);
+        // The 10 left is exactly the guess, and the day's points come with it.
+        assert_eq!(db::lock_global_guess(&t.db, "2026-10-21", ann, 7, GUESS_STAKE, crate::economy::DAILY_GRANT).await.unwrap(), db::Locked::In);
+        assert_eq!(db::balance(&t.db, ann).await.unwrap(), crate::economy::DAILY_GRANT);
         // Guessed: the rest may all go on bets.
         collect(&t.db, ann, "2026-10-22").await.unwrap();
         let more = db::place_bet(&t.db, ann, "2026-10-22", "none", 1, db::BetLimits { max_profit: 1_000_000, keep: GUESS_STAKE }, |_| Some(500));
-        assert_eq!(more.await.unwrap(), Placed::In, "a new day: grant in, guess not yet, 1 of 100 is fine");
+        assert_eq!(more.await.unwrap(), Placed::In, "a new day, guess not yet: 1 of 100 is fine");
         plays(&t.db, ann, "2026-10-22", 3).await;
         let rest = db::balance(&t.db, ann).await.unwrap();
         let all_in = db::place_bet(&t.db, ann, "2026-10-22", "range:1:9", rest, db::BetLimits { max_profit: 1_000_000, keep: GUESS_STAKE }, |_| Some(200));
@@ -624,12 +628,13 @@ mod tests {
         };
 
         // Past the deadline: the round settles, ann wins the pot and her bet,
-        // and both pick up tomorrow's daily points.
+        // and both have tomorrow's daily points.
         clock("deadline").await.unwrap();
         let tomorrow = Round::current(state.now()).key();
         settle_all(&state.db, &tomorrow).await.unwrap();
-        collect(&state.db, ann, &tomorrow).await.unwrap();
-        collect(&state.db, bob, &tomorrow).await.unwrap();
+        for who in [ann, bob] {
+            db::credit_once(&state.db, who, &tomorrow, "grant", crate::economy::DAILY_GRANT, &tomorrow, None).await.unwrap();
+        }
         assert_eq!(db::balance(&state.db, ann).await.unwrap(), a0 + 20 + 60 + crate::economy::DAILY_GRANT);
         assert!(db::pot(&state.db, &today).await.unwrap().is_some());
 
@@ -699,6 +704,35 @@ mod tests {
         odds_now(state, market).await.unwrap()
     }
 
+    /// Yesterday's global round, with three players: bets are open.
+    async fn yesterday(state: &AppState) {
+        let day = Round::current(state.now()).previous_date().format("%Y-%m-%d").to_string();
+        for (i, v) in [1, 2, 3].into_iter().enumerate() {
+            let who = player(&state.db, &format!("y{i}")).await;
+            db::insert_guess(&state.db, Pool::Global, &day, who, v, true).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn bets_open_once_the_global_round_has_been_played() {
+        let (_t, state) = app(&[]).await;
+        player(&state.db, "ann").await;
+        // Nothing played yet: the odds are shown, nothing can be staked.
+        let html = bets_page_q(&state, Some("ann"), picked("range:5:12")).await;
+        assert!(html.contains("winner 5 to 12") && html.contains("bets open once the global round has been played"));
+        assert!(!html.contains(r#"action="/g/bet""#));
+        let o = odds_for(&state, "range:5:12").await;
+        let resp = place(State(state.clone()), jar("ann"), form(&state, "range:5:12", "10", o)).await.unwrap();
+        assert_eq!(location(&resp), "/g/bets?msg=bets_not_open&m=range:5:12");
+        // The next day: open, the cap sized by the round that was played.
+        yesterday(&state).await;
+        *state.odds_base.lock().unwrap() = None;
+        let base = todays_base(&state).await.unwrap();
+        assert_eq!(base.max_profit(), 3 * odds::PROFIT_PER_PLAYER);
+        let html = bets_page_q(&state, Some("ann"), picked("range:5:12")).await;
+        assert!(html.contains(r#"action="/g/bet""#) && !html.contains("bets open once"));
+    }
+
     /// Last week, as a crowd of 20 a day picking mostly low numbers.
     async fn last_week(state: &AppState) {
         let today = Round::current(state.now()).date;
@@ -717,6 +751,7 @@ mod tests {
     #[tokio::test]
     async fn the_page_shows_the_board_and_a_picked_range_takes_a_bet() {
         let (_t, state) = app(&[]).await;
+        yesterday(&state).await;
         player(&state.db, "ann").await;
         let out = bets_page(&state, None, None).await;
         assert!(out.contains("winner exactly 1") && out.contains("winner 50 or more") && out.contains("nobody wins"));
@@ -748,12 +783,16 @@ mod tests {
     #[tokio::test]
     async fn a_typed_range_is_quoted_and_a_bad_one_is_explained() {
         let (_t, state) = app(&[]).await;
+        yesterday(&state).await;
         player(&state.db, "ann").await;
         let typed = |lo: &str, hi: &str| BetsQuery { lo: Some(lo.into()), hi: Some(hi.into()), ..Default::default() };
         let html = bets_page_q(&state, Some("ann"), typed("7", "")).await;
         assert!(html.contains("winner 7 or more") && html.contains(r#"action="/g/bet""#));
         let html = bets_page_q(&state, Some("ann"), typed("3", "3")).await;
         assert!(html.contains("winner exactly 3"));
+        // From left empty: from 1, said as "or less".
+        let html = bets_page_q(&state, Some("ann"), typed("", "3")).await;
+        assert!(html.contains("winner 3 or less") && html.contains(r#"action="/g/bet""#), "{html}");
         let html = bets_page_q(&state, Some("ann"), typed("12", "5")).await;
         assert!(html.contains("pick a range: whole numbers from 1, low to high"));
         assert!(html.contains(r#"value="12""#), "what was typed stays");
@@ -766,6 +805,7 @@ mod tests {
     #[tokio::test]
     async fn the_quote_box_alone_follows_what_is_typed() {
         let (_t, state) = app(&[]).await;
+        yesterday(&state).await;
         player(&state.db, "ann").await;
         let ask = |lo: &str, hi: &str, token: Option<&str>| {
             let q = BetsQuery { lo: Some(lo.into()), hi: Some(hi.into()), ..Default::default() };
@@ -795,6 +835,7 @@ mod tests {
     #[tokio::test]
     async fn a_bet_is_placed_at_the_odds_shown_or_better_or_not_at_all() {
         let (_t, state) = app(&[]).await;
+        yesterday(&state).await;
         let ann = player(&state.db, "ann").await;
         let o = odds_for(&state, "none").await;
         for (f, code) in [

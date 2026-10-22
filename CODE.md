@@ -1594,11 +1594,17 @@ balance is their sum; `UNIQUE (account_id, kind, ref)` makes each credit and
 charge happen at most once, which is what lets the code that writes them run
 as often as it likes:
 
-- `economy::collect` - the sign-up bonus (ref `signup`) and the day's grant
-  (ref = the round) - runs whenever a verified player shows up.
-- `db::lock_global_guess` writes the guess and its stake (ref = the round) in
-  one transaction, or neither: refused when the balance is short or the round
-  was called off.
+- `economy::collect` - the sign-up bonus (ref `signup`) - runs whenever a
+  verified player shows up.
+- `db::lock_global_guess` writes the guess, its stake and the day's grant
+  (both ref = the round) in one transaction, or none of them: refused when
+  the balance and the grant together are short of the stake, or the round
+  was called off. Daily points are for playing, not for visiting.
+- `economy::catch_up` runs after a guess is locked: a player who joined after
+  N global rounds is owed N × 135 (`CATCH_UP_PER_ROUND`), paid as a 30th of
+  it with each day they play (kind `catchup`, ref = the round), so a late
+  joiner starts level with the regulars without fake accounts getting it in
+  one go.
 - `db::settle_round` pays a closed round's stakes plus whatever rolled in to
   its winner, or rolls the lot on, and writes the `pots` row that marks it
   settled. `economy::run` settles every 30 seconds; the round page settles on
@@ -1612,7 +1618,8 @@ another writer commits in between, instead of waiting.
 
 A bet is on the winning number landing in a range the player picks, or on
 nobody winning. `odds.rs` is pure: ranges and their keys, whether one won,
-the exact chances from last month's picks (a Poisson formula, no simulation) that give each range
+the exact chances from last month's picks (a Poisson formula, worked out
+exactly for rounds of up to 100 players, no simulation) that give each range
 its starting chance, the book that moves it with the points already bet,
 and odds as fair odds less an 8% tax, rounded down to 0.05, at most 10000, and
 not offered below 1.05. Points stay integers: odds are stored in hundredths,

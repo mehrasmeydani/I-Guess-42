@@ -20,7 +20,7 @@ pub fn notice(code: &str) -> Option<(&'static str, &'static str)> {
         "signin" => ("error", "sign in to play"),
         "unverified" => ("error", "confirm your email to play"),
         "held_unverified" => ("error", "confirm your email first · number not entered"),
-        "broke" => ("error", "not enough points · more each day you visit"),
+        "broke" => ("error", "not enough points · more each day you play"),
         "voided" => ("error", "round called off · no more guesses"),
         // signing in
         "welcome" => ("ok", "welcome · pick a number"),
@@ -56,6 +56,7 @@ pub fn notice(code: &str) -> Option<(&'static str, &'static str)> {
         "bet_keep" => ("error", "keep 10 for today's guess · guess first, then bet it all"),
         "bet_over_cap" => ("error", "stake too big: it could win more than your bets may win today"),
         "bet_closed" => ("error", "bets closed · round over"),
+        "bets_not_open" => ("error", "bets open once the global round has been played"),
         "bet_odds" => ("error", "odds moved · check and bet again"),
         "bet_market" => ("error", "pick a range: whole numbers from 1, low to high"),
         "bet_slow" => ("error", "too many bets · wait a minute"),
@@ -169,7 +170,7 @@ mod tests {
             "linked_elsewhere", "unlinked", "renamed", "password_changed", "password_added", "banned",
             "unbanned", "adjusted", "called_off", "added", "added_ghost", "cleared", "not_demo",
             "bad_login", "bad_guess", "bet_placed", "bet_twice", "bet_cap", "bet_closed", "bet_odds",
-            "bet_market", "bet_slow", "streak_claimed", "bet_over_cap", "bet_keep", "warned", "warned_no_mail", "bet_round_cap", "round_changed",
+            "bet_market", "bet_slow", "streak_claimed", "bet_over_cap", "bet_keep", "warned", "warned_no_mail", "bet_round_cap", "round_changed", "bets_not_open",
         ];
         let mut all: Vec<String> = codes.iter().map(|c| notice(c).expect(c).1.to_string()).collect();
         all.extend([

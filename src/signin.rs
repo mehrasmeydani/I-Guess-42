@@ -95,8 +95,12 @@ async fn lock_held(state: &AppState, account_id: i64, held: crate::held::Held) -
     }
     crate::economy::collect(&state.db, account_id, &round).await?;
     Ok(
-        match db::lock_global_guess(&state.db, &round, account_id, held.value, crate::economy::GUESS_STAKE).await? {
-            db::Locked::In | db::Locked::AlreadySame => "/g?msg=saved",
+        match db::lock_global_guess(&state.db, &round, account_id, held.value, crate::economy::GUESS_STAKE, crate::economy::DAILY_GRANT).await? {
+            db::Locked::In => {
+                crate::economy::catch_up(&state.db, account_id, &round).await?;
+                "/g?msg=saved"
+            }
+            db::Locked::AlreadySame => "/g?msg=saved",
             db::Locked::AlreadyOther => "/g?msg=held_existing",
             db::Locked::Broke => "/g?msg=broke",
             db::Locked::Voided => "/g?msg=voided",

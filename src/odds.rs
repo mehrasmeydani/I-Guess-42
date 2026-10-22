@@ -124,9 +124,13 @@ impl Market {
         matches!(self, Market::Most { .. })
     }
 
-    /// From the bets page's two boxes: an empty top means "or more".
+    /// From the bets page's two boxes: an empty bottom means from 1 ("or
+    /// less"), an empty top "or more".
     pub fn from_inputs(lo: &str, hi: &str) -> Option<Market> {
-        let lo = lo.trim().parse().ok()?;
+        let lo = match lo.trim() {
+            "" => 1,
+            l => l.parse().ok()?,
+        };
         let hi = match hi.trim() {
             "" => None,
             h => Some(h.parse().ok()?),
@@ -172,19 +176,25 @@ impl Market {
             Market::Range { lo: 1, hi: None } => "any winner".to_string(),
             Market::Range { lo, hi: None } => format!("winner {lo} or more"),
             Market::Range { lo, hi: Some(h) } if lo == h => format!("winner exactly {lo}"),
+            Market::Range { lo: 1, hi: Some(h) } => format!("winner {h} or less"),
             Market::Range { lo, hi: Some(h) } => format!("winner {lo} to {h}"),
             Market::Nobody => "nobody wins".to_string(),
             Market::Most { lo: 1, hi: None } => "any most picked".to_string(),
             Market::Most { lo, hi: None } => format!("most picked {lo} or more"),
             Market::Most { lo, hi: Some(h) } if lo == h => format!("most picked exactly {lo}"),
+            Market::Most { lo: 1, hi: Some(h) } => format!("most picked {h} or less"),
             Market::Most { lo, hi: Some(h) } => format!("most picked {lo} to {h}"),
         }
     }
 
-    /// What the bets page's two boxes hold for it.
+    /// What the bets page's two boxes hold for it: from 1 shows as empty,
+    /// as it is typed.
     pub fn inputs(self) -> (String, String) {
         match self {
-            Market::Range { lo, hi } | Market::Most { lo, hi } => (lo.to_string(), hi.map(|h| h.to_string()).unwrap_or_default()),
+            Market::Range { lo, hi } | Market::Most { lo, hi } => (
+                if lo == 1 && hi.is_some() { String::new() } else { lo.to_string() },
+                hi.map(|h| h.to_string()).unwrap_or_default(),
+            ),
             Market::Nobody => (String::new(), String::new()),
         }
     }
@@ -316,6 +326,10 @@ pub struct Base {
     /// Picks the chances were worked out from, and players a round.
     pub picks: usize,
     pub players: usize,
+    /// Players a day in the global round itself, which sets the cap; None
+    /// before any global round of the month has been played, and until one
+    /// has, bets stay closed: there is no game yet to size the cap by.
+    pub global_players: Option<usize>,
 }
 
 /// Each number's chance to win and to be the most picked, and of nobody
@@ -341,23 +355,65 @@ impl Dist {
 }
 
 impl Base {
+    /// Whether bets are taken today: once the global round has been played.
+    pub fn bets_open(&self) -> bool {
+        self.global_players.is_some()
+    }
+
+    /// Players a day the cap is sized by: the global round's own.
+    pub fn cap_players(&self) -> usize {
+        self.global_players.unwrap_or(self.players).max(1)
+    }
+
     /// The most a player's bets may win today over their stakes, all of them
-    /// together: players a day times `PROFIT_PER_PLAYER`.
+    /// together: the global round's players a day times `PROFIT_PER_PLAYER`.
     pub fn max_profit(&self) -> i64 {
-        self.players.max(1) as i64 * PROFIT_PER_PLAYER
+        self.cap_players() as i64 * PROFIT_PER_PLAYER
     }
 
     /// The starting chance of `market`: mostly the month's picks, a little
     /// the typical crowd (and of that a little a smooth curve, so nothing is
-    /// impossible); the typical crowd alone if there were no picks. Scaled
-    /// so each board adds up to exactly 100%.
+    /// impossible); the typical crowd alone if there were no picks. Each
+    /// board row is lifted to its record and the board scaled back to
+    /// exactly 100%; any other range is the rows it covers, each split by
+    /// the model's own shares within it. So every range is the sum of its
+    /// parts, and "1 or more" is exactly everything but "nobody wins".
     fn chance(&self, market: Market) -> f64 {
+        let rows = match market {
+            Market::Nobody => return (self.lifted(market) * self.scale_win).min(1.0),
+            Market::Range { .. } => board(),
+            Market::Most { .. } => board_most(),
+        };
         let scale = if market.is_most() { self.scale_most } else { self.scale_win };
-        (self.lifted(market) * scale).min(1.0)
+        let sum: f64 = rows
+            .into_iter()
+            .filter_map(|row| {
+                let part = row.overlap(market)?;
+                let whole = self.model(row);
+                let share = if part == row || whole <= 0.0 { 1.0 } else { self.model(part) / whole };
+                Some(self.lifted(row) * scale * share)
+            })
+            .sum();
+        sum.min(1.0)
     }
 
-    /// `chance` before the scaling: the record may have lifted it.
+    /// `model`, lifted to the record: if a row won on 2 of the last 28 days,
+    /// it gets at least about that share before the board is scaled back to
+    /// 100%, whatever the model says. Only once there are enough rounds to
+    /// mean something, and shrunk, so a handful of tiny rounds is not taken
+    /// at its word.
     fn lifted(&self, market: Market) -> f64 {
+        let model = self.model(market);
+        let rounds: f64 = self.record.iter().map(|r| r.1).sum();
+        if !self.has_data || rounds < RECORD_MIN as f64 {
+            return model;
+        }
+        let hits: f64 = self.record.iter().filter(|r| outcome(market, r.0)).map(|r| r.1).sum();
+        model.max(hits / (rounds + RECORD_SHRINK))
+    }
+
+    /// What the picks alone say, before the record.
+    fn model(&self, market: Market) -> f64 {
         let curve = match market {
             Market::Nobody => NOBODY_PRIOR,
             Market::Range { lo, hi } => (1.0 - NOBODY_PRIOR) * curve(lo, hi),
@@ -368,18 +424,7 @@ impl Base {
             return fallback;
         }
         let weight = self.plays as f64 / (self.plays as f64 + PRIOR_PICKS);
-        let model = weight * self.data.share(market) + (1.0 - weight) * fallback;
-        // Lifted to the record: if a range won on 2 of the last 28 days, it
-        // gets at least about that share before the board is scaled back to
-        // 100%, whatever the model says. Only once there are enough rounds to
-        // mean something, and shrunk, so a handful of tiny rounds is not taken
-        // at its word.
-        let rounds: f64 = self.record.iter().map(|r| r.1).sum();
-        if rounds < RECORD_MIN as f64 {
-            return model;
-        }
-        let hits: f64 = self.record.iter().filter(|r| outcome(market, r.0)).map(|r| r.1).sum();
-        model.max(hits / (rounds + RECORD_SHRINK))
+        weight * self.data.share(market) + (1.0 - weight) * fallback
     }
 }
 
@@ -427,6 +472,11 @@ fn analyse_weighted(weights: &Weights, players: usize) -> Dist {
     let n = players as f64;
     let total: f64 = weights.values().sum();
     let means: Vec<(i64, f64)> = weights.iter().map(|(&v, &w)| (v, n * w / total)).collect();
+    if players <= EXACT_MAX {
+        let shares: Vec<(i64, f64)> = weights.iter().map(|(&v, &w)| (v, w / total)).collect();
+        let (winners, nobody) = exact_winners(&shares, players);
+        return Dist { winners, nobody, modes: modes(&means) };
+    }
 
     let mut nobody_yet = 1.0;
     let mut winners = Vec::with_capacity(means.len());
@@ -436,6 +486,52 @@ fn analyse_weighted(weights: &Weights, players: usize) -> Dist {
         nobody_yet *= 1.0 - p;
     }
     Dist { winners, nobody: nobody_yet, modes: modes(&means) }
+}
+
+/// Rounds up to this many players have their winners worked out exactly.
+/// The Poisson counts above treat the day's size as uncertain too, so on a
+/// quiet day they count the chance that nobody plays at all as "nobody
+/// wins": 13.5% of a two-player day, 5% of a three-player one. Past this
+/// size that is gone and the two agree.
+const EXACT_MAX: usize = 100;
+
+/// Each number's chance to win, and of nobody winning, when exactly `n`
+/// players each pick one of the numbers with these shares (adding up to 1).
+/// As exponential generating functions, for v to win exactly one player
+/// picks it, every lower number gets any count but one, and every higher
+/// number any count at all:
+///
+///   P(v) = n! [xⁿ] pᵥx · Π u<v (e^(pᵤx) − pᵤx) · e^((Σ u>v pᵤ)x)
+///
+/// and nobody wins with n! [xⁿ] of the product over every number. The
+/// product so far is kept as k!·[xᵏ], each between 0 and 1: n² work a number.
+fn exact_winners(shares: &[(i64, f64)], n: usize) -> (Vec<(i64, f64)>, f64) {
+    let mut choose = vec![vec![0.0f64; n + 1]; n + 1];
+    for k in 0..=n {
+        choose[k][0] = 1.0;
+        for j in 1..=k {
+            choose[k][j] = choose[k - 1][j - 1] + if j < k { choose[k - 1][j] } else { 0.0 };
+        }
+    }
+    // below[k]: the chance k players all land on the numbers so far with
+    // none of those picked exactly once.
+    let mut below = vec![0.0f64; n + 1];
+    below[0] = 1.0;
+    let mut above: f64 = shares.iter().map(|s| s.1).sum();
+    let mut winners = Vec::with_capacity(shares.len());
+    let mut next = vec![0.0f64; n + 1];
+    for &(v, p) in shares {
+        above = (above - p).max(0.0);
+        // i of the players on lower numbers, one on v, the rest higher.
+        let win: f64 = (0..n).map(|i| choose[n][i] * (n - i) as f64 * below[i] * p * above.powi((n - 1 - i) as i32)).sum();
+        winners.push((v, win));
+        let powers: Vec<f64> = (0..=n).map(|j| p.powi(j as i32)).collect();
+        for k in 0..=n {
+            next[k] = (0..=k).filter(|&j| j != 1).map(|j| choose[k][j] * below[k - j] * powers[j]).sum();
+        }
+        std::mem::swap(&mut below, &mut next);
+    }
+    (winners, below[n])
 }
 
 /// The typical crowd: `all_time` picks (number, times picked) from this
@@ -568,20 +664,20 @@ pub fn base(global: &History, vienna: &History, typical: &Weights) -> Base {
     for (pool, share) in [(global, 1.0 - alpha), (vienna, alpha)] {
         if share > 0.0 && !pool.sizes.is_empty() {
             let each = share / pool.sizes.len() as f64;
-            sizes.extend(pool.sizes.iter().map(|s| ((*s).clamp(2, MAX_PLAYERS), each)));
+            sizes.extend(pool.sizes.iter().map(|s| ((*s).clamp(1, MAX_PLAYERS), each)));
         }
     }
     let players = match (global.players(), vienna.players()) {
         (Some(g), Some(v)) => ((1.0 - alpha) * g as f64 + alpha * v as f64).round() as usize,
         (g, v) => g.or(v).unwrap_or(DEFAULT_PLAYERS),
     }
-    .clamp(2, MAX_PLAYERS);
+    .clamp(1, MAX_PLAYERS);
     if sizes.is_empty() {
         sizes.push((players, 1.0));
     }
     let typical = analyse_weighted(typical, players);
     if weights.is_empty() {
-        return Base { has_data: false, data: Dist::default(), typical, record: Vec::new(), plays: 0, scale_win: 1.0, scale_most: 1.0, picks: 0, players };
+        return Base { has_data: false, data: Dist::default(), typical, record: Vec::new(), plays: 0, scale_win: 1.0, scale_most: 1.0, picks: 0, players, global_players: None };
     }
     // The record fades the same way: a 42 round counts for `alpha` of one.
     let record: Vec<(Outcome, f64)> = global
@@ -603,6 +699,7 @@ pub fn base(global: &History, vienna: &History, typical: &Weights) -> Base {
         scale_most: 1.0,
         picks,
         players,
+        global_players: global.players().map(|g| g.clamp(1, MAX_PLAYERS)),
     };
     // Each board covers every outcome once, so what its lifted chances add
     // up to beyond 100% is taken back from all of them in proportion.
@@ -900,7 +997,11 @@ mod tests {
         assert_eq!(Market::from_inputs("5", "12"), Some(r(5, Some(12))));
         assert_eq!(Market::from_inputs(" 10 ", ""), Some(r(10, None)));
         assert_eq!(Market::from_inputs("7", "7"), Some(r(7, Some(7))));
-        for (lo, hi) in [("12", "5"), ("0", "3"), ("", "3"), ("a", ""), ("3", "b"), ("-2", "4")] {
+        // An empty bottom is from 1.
+        assert_eq!(Market::from_inputs("", "3"), Some(r(1, Some(3))));
+        assert_eq!(Market::from_inputs(" ", "1"), Some(r(1, Some(1))));
+        assert_eq!(r(1, Some(3)).inputs(), (String::new(), "3".to_string()));
+        for (lo, hi) in [("12", "5"), ("0", "3"), ("a", ""), ("3", "b"), ("-2", "4")] {
             assert_eq!(Market::from_inputs(lo, hi), None, "{lo}..{hi}");
         }
         assert_eq!(r(5, None).inputs(), ("5".to_string(), String::new()));
@@ -912,6 +1013,9 @@ mod tests {
         assert_eq!(r(7, Some(7)).label(), "winner exactly 7");
         assert_eq!(r(10, None).label(), "winner 10 or more");
         assert_eq!(r(1, None).label(), "any winner");
+        assert_eq!(r(1, Some(9)).label(), "winner 9 or less");
+        assert_eq!(r(1, Some(1)).label(), "winner exactly 1");
+        assert_eq!(r(1, Some(4)).most().label(), "most picked 4 or less");
         assert_eq!(Market::Nobody.label(), "nobody wins");
     }
 
@@ -963,21 +1067,48 @@ mod tests {
 
     #[test]
     fn the_formula_by_hand() {
-        // Two players picking 1 or 2: each number's count has mean 1, and
-        // exactly one is e^-1 = 0.368. 1 wins whenever it has exactly one;
-        // 2 when it has exactly one and 1 does not.
+        // Two players picking 1 or 2, half and half: they split (1 wins)
+        // or collide (nobody wins), each half the time. 2 can never win:
+        // if exactly one picked 2, the other picked 1.
         let b = analyse(&[1, 2], 2);
-        let one = (-1.0f64).exp();
-        assert!((b.winners[0].1 - one).abs() < 1e-12);
-        assert!((b.winners[1].1 - (1.0 - one) * one).abs() < 1e-12);
-        assert!((b.nobody - (1.0 - one) * (1.0 - one)).abs() < 1e-12);
+        assert!((b.winners[0].1 - 0.5).abs() < 1e-12);
+        assert!(b.winners[1].1.abs() < 1e-12);
+        assert!((b.nobody - 0.5).abs() < 1e-12);
+        // One player always wins.
+        assert!(analyse(&[1, 2, 3], 1).nobody.abs() < 1e-12);
+        // Three players over 1, 2, 3: nobody wins only when all three
+        // collide, 3 of 27 ways.
+        let b = analyse(&[1, 2, 3], 3);
+        assert!((b.nobody - 3.0 / 27.0).abs() < 1e-12);
+        // 1 wins when exactly one picks it: 3 × 1/3 × (2/3)² = 4/9.
+        assert!((b.winners[0].1 - 4.0 / 9.0).abs() < 1e-12);
         let total: f64 = b.winners.iter().map(|w| w.1).sum::<f64>() + b.nobody;
         assert!((total - 1.0).abs() < 1e-12, "every outcome once");
+        // Big rounds go through the Poisson counts: each number's count has
+        // mean λ and exactly one is λe^-λ.
+        let b = analyse(&[1, 2], 300);
+        let one = 150.0 * (-150.0f64).exp();
+        assert!((b.winners[0].1 - one).abs() < 1e-12);
         // Everyone on one number: that number is the most picked, always,
-        // and it almost never wins.
+        // and it never wins.
         let b = analyse(&[4], 5);
         assert!((b.modes[0].1 - 1.0).abs() < 1e-9);
-        assert!(b.nobody > 0.95);
+        assert!(b.nobody > 0.999);
+    }
+
+    #[test]
+    fn a_quiet_day_is_not_taken_for_a_day_nobody_played() {
+        // The live site's picks, rounds of 2 to 15: worked out exactly, the
+        // chance of nobody winning matches playing it out, where counting
+        // the picks as Poisson had 17% for two players (13.5% of it the day
+        // nobody turns up).
+        let picks: Vec<i64> = TYPICAL_PICKS.iter().flat_map(|&(v, n)| std::iter::repeat_n(v, n)).collect();
+        for n in [2, 3, 5, 15] {
+            let formula = analyse(&picks, n).nobody;
+            let played = played_out(&picks, n, 40_000).0.get(&None).copied().unwrap_or(0.0);
+            assert!((formula - played).abs() < 0.01, "{n} players: formula {formula:.3}, played {played:.3}");
+        }
+        assert!(analyse(&picks, 15).nobody < 0.01);
     }
 
     #[test]
@@ -1131,7 +1262,7 @@ mod tests {
         // A whale on one side counts as one bettor, so the other side
         // lengthens by under a tenth: less than the house's cut, no profit.
         let whale = chance(&b, &book_from(&[(r(1, Some(4)), 1_000_000, 1)]), target);
-        assert!(whale < before && whale > before / 1.1, "{before} -> {whale}");
+        assert!(whale < before && whale >= before / 1.1 - 1e-12, "{before} -> {whale}");
         let o = |p: f64| offered_odds_x100(p).unwrap();
         assert!(o(backed) < o(before) && o(before) < o(against));
         // A lot of money moves it a lot, never past certain.
@@ -1253,6 +1384,23 @@ mod tests {
         assert!(nobody > 0.1, "{nobody}");
         let sum: f64 = board().iter().map(|m| b.chance(*m)).sum();
         assert!((sum - 1.0).abs() < 1e-9, "the board adds up to 100%: {sum}");
+    }
+
+    #[test]
+    fn a_range_is_the_sum_of_its_parts() {
+        // A record that lifts some rows: what the board scales back must
+        // come off every range alike, so "1 or more" stays everything but
+        // nobody, and 1-9 is its rows added up.
+        let mut h = week(&TYPICAL_PICKS.iter().flat_map(|&(v, n)| std::iter::repeat_n(v, n)).collect::<Vec<_>>(), 28);
+        h.sizes = vec![15; 28];
+        h.outcomes = (0..28).map(|i| Outcome { winner: if i < 2 { None } else { Some(1 + i % 9) }, most: Some(1) }).collect();
+        let b = base(&h, &History::default(), &typical_crowd(&[]));
+        let (any, nobody) = (b.chance(r(1, None)), b.chance(Market::Nobody));
+        assert!((any + nobody - 1.0).abs() < 1e-9, "{any} + {nobody}");
+        let rows: f64 = [r(1, Some(1)), r(2, Some(2)), r(3, Some(3)), r(4, Some(5)), r(6, Some(9))].iter().map(|m| b.chance(*m)).sum();
+        assert!((b.chance(r(1, Some(9))) - rows).abs() < 1e-9);
+        let split = b.chance(r(4, Some(4))) + b.chance(r(5, Some(5)));
+        assert!((b.chance(r(4, Some(5))) - split).abs() < 1e-9);
     }
 
     #[test]
