@@ -34,6 +34,11 @@ fn notice_for(code: Option<&str>) -> Option<Notice> {
     Some(if kind == "ok" { Notice::ok(text) } else { Notice::error(text) })
 }
 
+/// Moderators rename without the monthly wait: theirs, and anyone's from /mod.
+fn waits_to_rename(state: &AppState, viewer: &Viewer) -> bool {
+    !viewer.intra.as_ref().is_some_and(|u| state.cfg.is_moderator(&u.login))
+}
+
 /// When the next rename is allowed, if not yet.
 fn next_rename(changed_at: Option<&str>) -> Option<DateTime<Utc>> {
     let changed = DateTime::parse_from_rfc3339(changed_at?).ok()?.with_timezone(&Utc);
@@ -45,7 +50,12 @@ async fn page(state: &AppState, viewer: Viewer, notice: Option<Notice>, status: 
     let id = viewer.account.id;
     let logins = db::account_logins(&state.db, id).await?;
     let password = db::password_email(&state.db, id).await?;
-    let next = next_rename(db::username_changed_at(&state.db, id).await?.as_deref());
+    let waits = waits_to_rename(state, &viewer);
+    let next = if waits {
+        next_rename(db::username_changed_at(&state.db, id).await?.as_deref())
+    } else {
+        None
+    };
     let plays_42 = viewer.account.intra_id.is_some();
 
     let mut views = Vec::new();
@@ -99,7 +109,8 @@ async fn page(state: &AppState, viewer: Viewer, notice: Option<Notice>, status: 
         can_rename: next.is_none(),
         rename_hint: match next {
             Some(when) => format!("you can change it again on {}.", when.format("%-d %B %Y")),
-            None => "3–20 characters: letters, digits, - and _. once a month.".to_string(),
+            None if waits => "3–20 characters: letters, digits, - and _. careful: once you change it, you can't change it again for 30 days.".to_string(),
+            None => "3–20 characters: letters, digits, - and _. moderator: no wait.".to_string(),
         },
         logins: views,
         password_email: password.as_ref().map(|p| p.0.clone()),
@@ -156,9 +167,11 @@ pub async fn rename(
     if let Some(why) = username_problem(&username) {
         return refuse(&state, viewer, why).await;
     }
-    if let Some(next) = next_rename(db::username_changed_at(&state.db, viewer.account.id).await?.as_deref()) {
-        let when = next.format("%-d %B %Y");
-        return refuse(&state, viewer, crate::copy::rename_wait(&when.to_string())).await;
+    if waits_to_rename(&state, &viewer) {
+        if let Some(next) = next_rename(db::username_changed_at(&state.db, viewer.account.id).await?.as_deref()) {
+            let when = next.format("%-d %B %Y");
+            return refuse(&state, viewer, crate::copy::rename_wait(&when.to_string())).await;
+        }
     }
     if !db::rename_account(&state.db, viewer.account.id, &username, true).await? {
         return refuse(&state, viewer, crate::copy::USERNAME_TAKEN).await;
@@ -500,7 +513,7 @@ pub struct WelcomeQuery {
 
 fn after_welcome(then: Option<&str>) -> String {
     then.filter(|t| t.starts_with("/g?") || *t == "/g" || t.starts_with("/g/") && !t.starts_with("//"))
-        .unwrap_or("/g?msg=welcome")
+        .unwrap_or("/g")
         .to_string()
 }
 

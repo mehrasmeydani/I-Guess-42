@@ -491,6 +491,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_accounts_play_out_of_sight() {
+        let t = temp_db().await;
+        let (ann, tester) = (player(&t.db, "ann").await, player(&t.db, "TestPhone").await);
+        // Both play the same day; the test account's 1 would win it.
+        plays(&t.db, ann, "2026-10-21", 5).await;
+        plays(&t.db, tester, "2026-10-21", 1).await;
+        // No stake, so nothing of it in the pot; the day's points all the same.
+        assert_eq!(db::balance(&t.db, tester).await.unwrap(), SIGNUP_BONUS + DAILY_GRANT);
+        assert_eq!(rows(&t.db, "SELECT participates FROM global_guesses g JOIN accounts a ON a.id = g.user_id WHERE a.username = 'testphone'").await, 0);
+        settle_all(&t.db, "2026-10-22").await.unwrap();
+        let pot = db::pot(&t.db, "2026-10-21").await.unwrap().unwrap();
+        assert_eq!((pot.winner_id, pot.stakes, pot.players), (Some(ann), GUESS_STAKE, 1), "ann wins; the test account is not there");
+        // Not on the points board, and its bets do not move the odds.
+        let board = db::points_board(&t.db, None, 10).await.unwrap();
+        assert!(board.iter().all(|r| r.id != tester), "{board:?}");
+        assert!(board.iter().any(|r| r.id == ann));
+        let placed = db::place_bet(&t.db, tester, "2026-10-22", "none", 10, db::BetLimits { max_profit: 1_000_000, keep: 0 }, |_| Some(500));
+        assert_eq!(placed.await.unwrap(), db::Placed::In);
+        assert!(db::book(&t.db, "2026-10-22").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn a_player_without_points_is_told_and_nothing_is_locked() {
         let (_t, state) = app(&[]).await;
         let ann = player(&state.db, "ann").await;

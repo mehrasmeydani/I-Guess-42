@@ -53,6 +53,9 @@
 
   <header class="top">
     <a class="brand" href="{{ pool.base() }}/">i guess <b>low</b></a>
+    {# Your streak (the round page fills it in) and points: in the row at
+       every width, beside the menu button on a phone. #}
+    <span class="top-stats">{% block streak %}{% endblock %}{% match user %}{% when Some with (u) %}{% if pool.is_global() %}{% match u.points %}{% when Some with (p) %}<a class="pts" href="/g/points" title="your points">{{ crate::templates::points_label(p) }}</a>{% when None %}{% endmatch %}{% endif %}{% when None %}{% block top_signin %}<a class="signin top-signin" href="/login">sign in</a>{% endblock %}{% endmatch %}</span>
     {# On a phone everything after the logo lives in a panel that slides in
        from the right (app.js); on a desktop the panel is just the row. #}
     <button type="button" class="menu-btn" aria-controls="menu" aria-expanded="false" hidden>
@@ -60,7 +63,7 @@
     </button>
     <div class="menu" id="menu">
     <nav class="mainnav" aria-label="main">
-      <a {% block nav_round %}{% endblock %} href="{{ pool.base() }}/">round</a>
+      <a {% block nav_round %}{% endblock %} href="{{ pool.base() }}/"><span class="label-wide">round</span><span class="label-menu">home</span></a>
       <a {% block nav_results %}{% endblock %} href="{{ pool.base() }}/results">results</a>
       <a {% block nav_trends %}{% endblock %} href="{{ pool.base() }}/trends">trends</a>
       <a {% block nav_leaders %}{% endblock %} href="{{ pool.base() }}/leaderboard">leaders</a>
@@ -79,14 +82,15 @@
       <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>
       {% match user %}
         {% when Some with (u) %}
-          {# Points, your name (your rounds and account), and log out. #}
-          {% if pool.is_global() %}{% match u.points %}{% when Some with (p) %}<a class="pts" href="/g/points" title="your points">{{ crate::templates::points_label(p) }}</a>{% when None %}{% endmatch %}{% endif %}
+          {# Your name (your rounds and account), and log out. #}
           <a class="who" href="{{ pool.base() }}/me" title="your rounds and account">{{ u.login }}</a>
           <form method="post" action="/logout"><button type="submit" class="out">log out</button></form>
         {% when None %}
           {% block signin_link %}<a class="signin" href="/login">sign in</a>{% endblock %}
       {% endmatch %}
     </div>
+    {# The round page's played / won / best, in the phone menu only. #}
+    {% block menu_stats %}{% endblock %}
     </div>
     <div class="menu-shade" hidden></div>
   </header>

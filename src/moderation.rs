@@ -60,7 +60,7 @@ pub async fn moderation(
         return Ok(gone());
     };
     let notice = match q.msg.as_deref() {
-        Some(code @ ("banned" | "unbanned" | "adjusted" | "called_off" | "warned")) => {
+        Some(code @ ("banned" | "unbanned" | "adjusted" | "called_off" | "warned" | "mod_renamed")) => {
             crate::copy::notice(code).map(|(_, text)| Notice::ok(text))
         }
         Some(code @ "warned_no_mail") => crate::copy::notice(code).map(|(_, text)| Notice::error(text)),
@@ -100,6 +100,39 @@ pub async fn ban(
     let by = viewer.intra.as_ref().map(|u| u.login.as_str()).unwrap_or("?");
     tracing::info!(moderator = by, account = target.id, username = %target.username, reason, "banned");
     Ok(Redirect::to("/mod?msg=banned").into_response())
+}
+
+#[derive(Deserialize)]
+pub struct RenameForm {
+    pub username: String,
+    pub new_username: String,
+}
+
+/// Renames any account, the moderator's own included, without the monthly
+/// wait and without starting one: for a name that offends, impersonates, or
+/// that its owner cannot change back yet.
+pub async fn rename(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<RenameForm>,
+) -> Result<Response, AppError> {
+    let Some(viewer) = moderator(&state, &jar).await? else {
+        return Ok(gone());
+    };
+    let refuse = |why: &'static str| page(&state, viewer.clone(), Some(Notice::error(why)), StatusCode::UNPROCESSABLE_ENTITY);
+    let Some(target) = db::mod_account(&state.db, &normalize_username(&form.username)).await? else {
+        return refuse(crate::copy::NO_SUCH_ACCOUNT).await;
+    };
+    let new = normalize_username(&form.new_username);
+    if let Some(why) = crate::credentials::username_problem(&new) {
+        return refuse(why).await;
+    }
+    if !db::rename_account(&state.db, target.id, &new, false).await? {
+        return refuse(crate::copy::USERNAME_TAKEN).await;
+    }
+    let by = viewer.intra.as_ref().map(|u| u.login.as_str()).unwrap_or("?");
+    tracing::info!(moderator = by, account = target.id, from = %target.username, to = %new, "renamed");
+    Ok(Redirect::to("/mod?msg=mod_renamed").into_response())
 }
 
 /// Warns an account by mail before a ban: the flag's reason, and what comes
@@ -289,6 +322,36 @@ mod tests {
         let (t2, nobody) = setup(&[]).await;
         student(&t2.db, 1001, "megardes", "mod").await;
         assert_eq!(status_of(&nobody, "mod").await, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn moderators_rename_anyone_and_themselves_without_the_wait() {
+        let (t, state) = setup(&["megardes"]).await;
+        student(&t.db, 1001, "megardes", "mod").await;
+        stranger(&t.db, "ann", "ann").await;
+        // Ann renamed herself just now: her own wait has started.
+        sqlx::query("UPDATE accounts SET username = 'rude', username_changed_at = '2099-01-01T00:00:00Z' WHERE username = 'ann'").execute(&t.db).await.unwrap();
+        let ren = |who: &str, to: &str| {
+            let form = Form(RenameForm { username: who.into(), new_username: to.into() });
+            rename(State(state.clone()), jar("mod"), form)
+        };
+        assert_eq!(location(&ren("rude", "ann").await.unwrap()), "/mod?msg=mod_renamed");
+        let (name, changed): (String, Option<String>) = sqlx::query_as("SELECT username, username_changed_at FROM accounts WHERE username = 'ann'").fetch_one(&t.db).await.unwrap();
+        assert_eq!((name.as_str(), changed.as_deref()), ("ann", Some("2099-01-01T00:00:00Z")), "renamed, and no new wait started");
+        // Taken, malformed or unknown: refused.
+        assert_eq!(ren("ann", "megardes").await.unwrap().status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(ren("ann", "a").await.unwrap().status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(ren("nobody", "fine").await.unwrap().status(), StatusCode::UNPROCESSABLE_ENTITY);
+        // Not a moderator: the page is not there.
+        let form = Form(RenameForm { username: "ann".into(), new_username: "x-ann".into() });
+        assert_eq!(rename(State(state.clone()), jar("ann"), form).await.unwrap().status(), StatusCode::NOT_FOUND);
+
+        // Their own account, twice in a row from /account: no wait.
+        for to in ["meg-one", "meg-two"] {
+            let form = Form(crate::account::RenameForm { username: to.into() });
+            let resp = crate::account::rename(State(state.clone()), jar("mod"), form).await.unwrap();
+            assert_eq!(location(&resp), "/account?msg=renamed", "{to}");
+        }
     }
 
     #[tokio::test]

@@ -2195,6 +2195,14 @@ pub enum Locked {
     Voided,
 }
 
+/// Accounts whose username starts with "test", in any case, are the
+/// maintainers' own test accounts on the live site: their guesses are
+/// ghosts (`participates = 0`, no stake), so they never win, fill the pot,
+/// or show in results, trends or odds; they are left off the points
+/// leaderboard, and their bets do not move the odds. A SQL condition on a
+/// username column; LIKE is case-insensitive for ASCII.
+pub const TEST_ACCOUNTS: &str = "LIKE 'test%'";
+
 /// Locks a guess in the global round, takes its stake and credits the day's
 /// `grant` (points for playing, not for visiting), together or not at all.
 /// The stake goes into the round's pot (see `settle_round`).
@@ -2227,6 +2235,12 @@ pub async fn lock_global_guess(
         .bind(account_id)
         .fetch_one(&mut *tx)
         .await?;
+    // A test account plays for free and out of sight (`TEST_ACCOUNTS`).
+    let (test,): (bool,) = sqlx::query_as(&format!("SELECT username {TEST_ACCOUNTS} FROM accounts WHERE id = ?1"))
+        .bind(account_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let stake = if test { 0 } else { stake };
     // The day's grant comes with the guess, so it counts towards the stake.
     if balance + grant < stake {
         return Ok(Locked::Broke);
@@ -2234,13 +2248,14 @@ pub async fn lock_global_guess(
     let now = ts(Utc::now());
     let inserted = sqlx::query(
         "INSERT INTO global_guesses (round_date, user_id, value, submitted_at, participates)
-         VALUES (?1, ?2, ?3, ?4, 1)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(round_date, user_id) DO NOTHING",
     )
     .bind(round_date)
     .bind(account_id)
     .bind(value)
     .bind(&now)
+    .bind(!test)
     .execute(&mut *tx)
     .await?
     .rows_affected();
@@ -2248,16 +2263,18 @@ pub async fn lock_global_guess(
         // Another request got in between; whatever it locked stands.
         return Ok(Locked::AlreadyOther);
     }
-    sqlx::query(
-        "INSERT INTO ledger (account_id, round_date, kind, amount, ref, created_at)
-         VALUES (?1, ?2, 'stake', ?3, ?2, ?4)",
-    )
-    .bind(account_id)
-    .bind(round_date)
-    .bind(-stake)
-    .bind(&now)
-    .execute(&mut *tx)
-    .await?;
+    if stake > 0 {
+        sqlx::query(
+            "INSERT INTO ledger (account_id, round_date, kind, amount, ref, created_at)
+             VALUES (?1, ?2, 'stake', ?3, ?2, ?4)",
+        )
+        .bind(account_id)
+        .bind(round_date)
+        .bind(-stake)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+    }
     if grant > 0 {
         sqlx::query(
             "INSERT INTO ledger (account_id, round_date, kind, amount, ref, created_at)
@@ -2788,7 +2805,10 @@ pub async fn bets_of(db: &Db, account_id: i64, since: &str) -> Result<Vec<Bet>> 
 
 /// The open bets on a round, (market, stake, account): what moves its odds.
 pub async fn book(db: &Db, round_date: &str) -> Result<Vec<(String, i64, i64)>> {
-    Ok(sqlx::query_as("SELECT market, stake, account_id FROM bets WHERE round_date = ?1 AND result IS NULL")
+    Ok(sqlx::query_as(&format!(
+        "SELECT b.market, b.stake, b.account_id FROM bets b JOIN accounts a ON a.id = b.account_id
+         WHERE b.round_date = ?1 AND b.result IS NULL AND NOT (a.username {TEST_ACCOUNTS})"
+    ))
         .bind(round_date)
         .fetch_all(db)
         .await?)
@@ -2829,17 +2849,17 @@ pub struct PointsRow {
 /// a measure of having turned up.
 pub async fn points_board(db: &Db, since: Option<&str>, limit: i64) -> Result<Vec<PointsRow>> {
     let sql = match since {
-        None => "SELECT a.id, a.username, SUM(l.amount) AS points
+        None => format!("SELECT a.id, a.username, SUM(l.amount) AS points
                  FROM ledger l JOIN accounts a ON a.id = l.account_id
-                 WHERE a.deleted_at IS NULL AND a.banned_at IS NULL
-                 GROUP BY a.id ORDER BY points DESC, a.username LIMIT ?2",
-        Some(_) => "SELECT a.id, a.username, SUM(l.amount) AS points
+                 WHERE a.deleted_at IS NULL AND a.banned_at IS NULL AND NOT (a.username {TEST_ACCOUNTS})
+                 GROUP BY a.id ORDER BY points DESC, a.username LIMIT ?2"),
+        Some(_) => format!("SELECT a.id, a.username, SUM(l.amount) AS points
                  FROM ledger l JOIN accounts a ON a.id = l.account_id
-                 WHERE a.deleted_at IS NULL AND a.banned_at IS NULL
+                 WHERE a.deleted_at IS NULL AND a.banned_at IS NULL AND NOT (a.username {TEST_ACCOUNTS})
                    AND l.created_at >= ?1 AND l.kind NOT IN ('grant', 'signup', 'catchup')
-                 GROUP BY a.id HAVING points != 0 ORDER BY points DESC, a.username LIMIT ?2",
+                 GROUP BY a.id HAVING points != 0 ORDER BY points DESC, a.username LIMIT ?2"),
     };
-    let rows = sqlx::query_as::<_, PointsRow>(sql)
+    let rows = sqlx::query_as::<_, PointsRow>(&sql)
         .bind(since.unwrap_or(""))
         .bind(limit)
         .fetch_all(db)

@@ -18,6 +18,18 @@
 </section>
 
 <section class="sec" style="--b: 1">
+  <h2 class="rule"><span>rename an account</span></h2>
+  <form class="authform" method="post" action="/mod/rename">
+    <label for="ren-user">username now</label>
+    <input id="ren-user" name="username" type="text" autocomplete="off" spellcheck="false" required>
+    <label for="ren-new">new username</label>
+    <input id="ren-new" name="new_username" type="text" autocomplete="off" spellcheck="false" required minlength="3" maxlength="20">
+    <p class="hint">any account, yours too · no monthly wait, and none started</p>
+    <button type="submit">rename</button>
+  </form>
+</section>
+
+<section class="sec" style="--b: 1">
   <h2 class="rule"><span>points</span></h2>
   <form class="authform" method="post" action="/mod/adjust">
     <label for="adj-user">username</label>

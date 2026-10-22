@@ -320,7 +320,11 @@ async fn the_round_page_shows_a_players_streak() {
     let (_t, state) = app(&[]).await;
     a_played_day(&state).await;
     let html = body(handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None })).await.unwrap()).await;
-    assert!(html.contains("&#128293; 2 &middot; played 2 &middot; won 1 &middot; best 9"), "{html}");
+    // The streak beside the points at the top; the rest in the phone menu.
+    assert!(html.contains(r#"<a class="streak" href="/g/me" title="days in a row">&#128293; 2</a>"#), "{html}");
+    assert!(html.contains("played 2 &middot; won 1 &middot; best 9"), "{html}");
+    let (top, menu) = (html.find("class=\"top-stats\"").unwrap(), html.find("id=\"menu\"").unwrap());
+    assert!(top < menu, "the streak is outside the menu");
     assert!(html.contains("<title>today's round &middot; i guess low</title>"));
 }
 
@@ -469,7 +473,7 @@ async fn a_new_sso_account_picks_its_username_once_and_goes_on() {
     assert_eq!(db::username_changed_at(&state.db, v.account.id).await.unwrap(), None);
     // Nowhere but the round: no open redirect.
     for evil in ["https://evil.example", "//evil.example", "/account/delete"] {
-        assert_eq!(location(&save("kai", evil).await), "/g?msg=welcome", "{evil}");
+        assert_eq!(location(&save("kai", evil).await), "/g", "{evil}");
     }
 }
 

@@ -11,7 +11,7 @@
     <input id="username" name="username" type="text" autocomplete="username" required
            minlength="3" maxlength="20" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" value="{{ username }}"
            spellcheck="false" aria-describedby="username-hint" {% if !can_rename %}disabled{% endif %}>
-    <p class="hint" id="username-hint">{{ rename_hint }}</p>
+    <p class="hint{% if can_rename && rename_hint.contains("careful") %} warn{% endif %}" id="username-hint">{{ rename_hint }}</p>
     {% if can_rename %}<button type="submit">rename &rarr;</button>{% endif %}
   </form>
 </section>

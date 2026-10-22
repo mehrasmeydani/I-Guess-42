@@ -318,14 +318,15 @@
 // trends to trends. Bets exist only in the global round, so from there the
 // 42 side goes to its round page.
 (function () {
-  var nav = document.querySelector('nav.pools[data-here]');
-  if (!nav) return;
-  var here = nav.dataset.here || '/';
-  var links = nav.querySelectorAll('a[data-pool]');
-  for (var i = 0; i < links.length; i++) {
-    var base = links[i].dataset.pool;
-    var path = (here === '/bets' && base === '') ? '/' : base + here;
-    links[i].setAttribute('href', path === '/g/' || path === '/g' ? '/g/' : path);
+  var navs = document.querySelectorAll('nav.pools[data-here]');
+  for (var n = 0; n < navs.length; n++) {
+    var here = navs[n].dataset.here || '/';
+    var links = navs[n].querySelectorAll('a[data-pool]');
+    for (var i = 0; i < links.length; i++) {
+      var base = links[i].dataset.pool;
+      var path = (here === '/bets' && base === '') ? '/' : base + here;
+      links[i].setAttribute('href', path === '/g/' || path === '/g' ? '/g/' : path);
+    }
   }
 })();
 

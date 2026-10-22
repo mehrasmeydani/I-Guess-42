@@ -3,6 +3,9 @@
 {% block h1 %}today's round{% endblock %}
 {% block nav_round %}class="on" aria-current="page"{% endblock %}
 
+{% block streak %}{% match stats %}{% when Some with (s) %}<a class="streak" href="{{ pool.base() }}/me" title="days in a row">&#128293; {{ s.streak }}</a>{% when None %}{% endmatch %}{% endblock %}
+{% block menu_stats %}{% match stats %}{% when Some with (s) %}<p class="menu-only mystats"><a href="{{ pool.base() }}/me">played {{ s.played }} &middot; won {{ s.won }}{% match s.best %}{% when Some with (b) %} &middot; best {{ b }}{% when None %}{% endmatch %}</a></p>{% when None %}{% endmatch %}{% endblock %}
+
 {% block content %}
 {# The round that just closed, announced over the page for half an hour after
    12:42. The window is measured on the server (announce_left); the checkbox
@@ -60,8 +63,17 @@
   <h2 class="rule" id="round-h"><span>round {{ crate::templates::eu(round_key) }}</span><span class="tag live state">open</span></h2>
   {# Text only: the time is in aria-label, refreshed once a minute, and
      nothing is announced on its own (no aria-live, no role=timer). #}
+  {# On a phone the round switch sits beside the clock, small; on a
+     desktop it is in the header. #}
+  <div class="clock-row">
   <p class="countdown" data-closes-at="{{ closes_at }}" data-server-now="{{ server_now }}"
      aria-label="closes in {{ time_left_spoken }}">{{ time_left }}</p>
+  {% if crate::templates::sees_42(user) %}
+  <nav class="pools pools-clock" aria-label="which round" data-here="/">
+    <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/" data-pool="">42</a><a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/" data-pool="/g">global</a>
+  </nav>
+  {% endif %}
+  </div>
   {# The original's text bar: the server paints a short one that fits the
      narrowest phone, and app.js widens it to the row. #}
   <p class="meter" role="progressbar" aria-label="round gone by"
@@ -76,11 +88,6 @@
       {% when None %}<p class="you"><b>not yet</b><span>{% if !signed_in %}sign in to play{% else if !can_play %}confirm your email to play{% else %}your number goes below &darr;{% endif %}</span></p>
     {% endmatch %}
   </div>
-  {% match stats %}
-    {% when Some with (s) %}
-      <p class="mystats"><a href="{{ pool.base() }}/me">&#128293; {{ s.streak }} &middot; played {{ s.played }} &middot; won {{ s.won }}{% match s.best %}{% when Some with (b) %} &middot; best {{ b }}{% when None %}{% endmatch %}</a></p>
-    {% when None %}
-  {% endmatch %}
 </section>
 
 <section class="sec play" style="--b: 1">
@@ -118,9 +125,11 @@
           </span>
           <button type="submit" class="primary">lock it in{% match stake_label %}{% when Some with (s) %} &middot; {{ s }}{% when None %}{% endmatch %}</button>
         </form>
+        {% if !signed_in %}<p class="hint play-signin"><a href="/login">sign in</a> to play &middot; your number is kept while you do</p>{% endif %}
       {% endif %}
   {% endmatch %}
 </section>
+
 
 <p class="premise">lowest unique number wins</p>
 
