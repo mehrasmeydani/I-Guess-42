@@ -26,6 +26,9 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/static/style.css?v={{ crate::templates::ASSET_VERSION }}">
   <script src="/static/app.js?v={{ crate::templates::ASSET_VERSION }}" defer></script>
+  {# Before the first paint, so the phone menu starts closed rather than
+     flashing open until app.js loads. #}
+  <script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
   <a class="skip" href="#main">skip to content</a>
@@ -50,6 +53,12 @@
 
   <header class="top">
     <a class="brand" href="{{ pool.base() }}/">i guess <b>low</b></a>
+    {# On a phone everything after the logo lives in a panel that slides in
+       from the right (app.js); on a desktop the panel is just the row. #}
+    <button type="button" class="menu-btn" aria-controls="menu" aria-expanded="false" hidden>
+      <span aria-hidden="true">&#9776;</span><span class="sr">menu</span>
+    </button>
+    <div class="menu" id="menu">
     <nav class="mainnav" aria-label="main">
       <a {% block nav_round %}{% endblock %} href="{{ pool.base() }}/">round</a>
       <a {% block nav_results %}{% endblock %} href="{{ pool.base() }}/results">results</a>
@@ -78,6 +87,8 @@
           {% block signin_link %}<a class="signin" href="/login">sign in</a>{% endblock %}
       {% endmatch %}
     </div>
+    </div>
+    <div class="menu-shade" hidden></div>
   </header>
 
   <main id="main" tabindex="-1">
