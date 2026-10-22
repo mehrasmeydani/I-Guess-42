@@ -728,11 +728,12 @@ pub async fn admin_clear(
 
 // -------------------------------------------------------------------- auth
 
-pub async fn login(State(state): State<AppState>) -> Result<Response, AppError> {
+pub async fn login(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
     let state_token = auth::random_token();
     db::store_oauth_state(&state.db, &state_token).await?;
     let url = auth::authorize_url(&state.cfg, &state_token)?;
-    Ok(Redirect::to(&url).into_response())
+    let jar = jar.add(auth::oauth_state_cookie(state_token, state.cfg.secure_cookies));
+    Ok((jar, Redirect::to(&url)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -763,6 +764,16 @@ pub async fn callback(
             "That sign-in link is incomplete. Start again from the home page.",
         ));
     };
+
+    // Checked before the state is used up, so a link opened in someone
+    // else's browser cannot spend it either.
+    if jar.get(auth::OAUTH_STATE_COOKIE).map(|c| c.value()) != Some(state_token.as_str()) {
+        return Ok(error_page(
+            StatusCode::BAD_REQUEST,
+            "That sign-in was started in another browser. Start again from the home page.",
+        ));
+    }
+    let jar = jar.remove(auth::clearing_oauth_state_cookie());
 
     if !db::consume_oauth_state(&state.db, &state_token).await? {
         return Ok(error_page(
@@ -858,6 +869,65 @@ pub async fn imprint(State(state): State<AppState>, jar: CookieJar) -> Result<Re
 mod tests {
     use super::{names_visible, parse_guess, round_matches};
     use crate::db::RoundSummary;
+
+    /// Over real HTTP: starting a sign-in hands the browser its state, and
+    /// the callback refuses a state the browser did not bring, before using
+    /// it up. Adapted from 0xveya's test in #41.
+    #[tokio::test]
+    async fn a_sign_in_only_finishes_in_the_browser_that_started_it() {
+        use crate::{app::AppState, config::Config, db};
+        use axum::{routing::get, Router};
+        use std::sync::Arc;
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        let cfg = Config {
+            client_id: "test".into(),
+            client_secret: "unused".into(),
+            redirect_uri: "http://localhost/auth/callback".into(),
+            database_url: String::new(),
+            bind_addr: String::new(),
+            secure_cookies: true,
+            admin_logins: Vec::new(),
+            allowed_campus_ids: vec![53],
+            points_api_key: None,
+            points_api_url: String::new(),
+            imprint_name: None,
+            imprint_address: None,
+            imprint_email: None,
+        };
+        let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+        let router = Router::new()
+            .route("/login", get(super::login))
+            .route("/auth/callback", get(super::callback))
+            .with_state(AppState::new(pool.clone(), Arc::new(cfg), http.clone()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+        let login = http.get(format!("{base}/login")).send().await.unwrap();
+        assert_eq!(login.status(), 303);
+        let cookie = login.headers()["set-cookie"].to_str().unwrap().to_string();
+        for part in ["ig42_oauth_state=", "HttpOnly", "SameSite=Lax", "Secure", "Path=/auth/callback", "Max-Age=900"] {
+            assert!(cookie.contains(part), "{part} in {cookie}");
+        }
+        let location = reqwest::Url::parse(login.headers()["location"].to_str().unwrap()).unwrap();
+        let token = location.query_pairs().find(|(k, _)| k == "state").unwrap().1.into_owned();
+
+        // No cookie, or another browser's: refused, and the state is still there.
+        let callback = format!("{base}/auth/callback?code=unused&state={token}");
+        for other in [None, Some("ig42_oauth_state=another-browser")] {
+            let mut request = http.get(&callback);
+            if let Some(c) = other {
+                request = request.header("cookie", c);
+            }
+            let response = request.send().await.unwrap();
+            assert_eq!(response.status(), 400);
+            assert!(response.text().await.unwrap().contains("another browser"));
+        }
+        assert!(db::consume_oauth_state(&pool, &token).await.unwrap(), "not used up by the refused tries");
+        server.abort();
+    }
 
     fn round(date: &str, winner: Option<(&str, i64)>) -> RoundSummary {
         RoundSummary {

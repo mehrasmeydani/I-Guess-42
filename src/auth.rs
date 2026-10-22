@@ -155,6 +155,31 @@ pub async fn fetch_me(http: &reqwest::Client, access_token: &str) -> Result<Intr
     resp.json::<IntraUser>().await.context("decoding /v2/me")
 }
 
+/// Holds a sign-in's `state` in the browser that started it, so the
+/// callback only counts in that same browser: otherwise someone could start
+/// a sign-in to their own account and have another person's browser finish
+/// it, signing them in as the attacker (login CSRF). Only sent to the
+/// callback, and gone when the state would have expired anyway.
+pub const OAUTH_STATE_COOKIE: &str = "ig42_oauth_state";
+
+pub fn oauth_state_cookie(state: String, secure: bool) -> Cookie<'static> {
+    let mut cookie = Cookie::new(OAUTH_STATE_COOKIE, state);
+    cookie.set_http_only(true);
+    // Lax still sends it on 42's redirect back, a top-level GET.
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_secure(secure);
+    cookie.set_path("/auth/callback");
+    cookie.set_max_age(CookieDuration::minutes(15));
+    cookie
+}
+
+/// A removal cookie must match the path the original was set on.
+pub fn clearing_oauth_state_cookie() -> Cookie<'static> {
+    let mut cookie = Cookie::new(OAUTH_STATE_COOKIE, "");
+    cookie.set_path("/auth/callback");
+    cookie
+}
+
 pub fn session_cookie(token: String, secure: bool) -> Cookie<'static> {
     let mut cookie = Cookie::new(SESSION_COOKIE, token);
     cookie.set_http_only(true);
