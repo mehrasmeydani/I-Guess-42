@@ -63,8 +63,17 @@
   <h2 class="rule" id="round-h"><span>round {{ crate::templates::eu(round_key) }}</span><span class="tag live state">open</span></h2>
   {# Text only: the time is in aria-label, refreshed once a minute, and
      nothing is announced on its own (no aria-live, no role=timer). #}
+  {# On a phone the round switch sits beside the clock, small; on a
+     desktop it is in the header. #}
+  <div class="clock-row">
   <p class="countdown" data-closes-at="{{ closes_at }}" data-server-now="{{ server_now }}"
      aria-label="closes in {{ time_left_spoken }}">{{ time_left }}</p>
+  {% if crate::templates::sees_42(user) %}
+  <nav class="pools pools-clock" aria-label="which round" data-here="/">
+    <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/" data-pool="">42</a><a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/" data-pool="/g">global</a>
+  </nav>
+  {% endif %}
+  </div>
   {# The original's text bar: the server paints a short one that fits the
      narrowest phone, and app.js widens it to the row. #}
   <p class="meter" role="progressbar" aria-label="round gone by"

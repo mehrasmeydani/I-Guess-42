@@ -248,6 +248,9 @@ a.tag { color: var(--fg); text-decoration: underline; }
 .top-stats .streak { color: var(--fg); text-decoration: none; }
 .top-stats a:hover { background: none; color: var(--hi); text-decoration: underline; }
 .menu-only { display: none; }
+/* The clock, and on a phone the round switch beside it. */
+.clock-row { display: flex; align-items: center; gap: 12px; }
+.pools-clock { display: none; }
 /* The phone's own sign-in, beside the menu button; a desktop has the one in the row. */
 .top-signin { display: none; }
 
@@ -1041,9 +1044,10 @@ details.expand[open] summary .when-open { display: inline; }
     z-index: 40;
     display: flex;
     flex-direction: column;
-    gap: 24px;
-    width: min(84vw, 320px);
-    padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+    gap: 16px;
+    width: min(70vw, 240px);
+    padding: 16px 12px calc(16px + env(safe-area-inset-bottom));
+    font-size: var(--fs-1);
     overflow-y: auto;
     background: var(--bg);
     border-left: var(--rule);
@@ -1058,11 +1062,11 @@ details.expand[open] summary .when-open { display: inline; }
   .js .menu nav.mainnav a {
     display: flex;
     align-items: center;
-    min-height: 48px;
+    min-height: 44px;
     margin: 0;
     padding: 0 8px;
     border-bottom: 1px solid var(--edge);
-    font-size: var(--fs-3);
+    font-size: var(--fs-2);
   }
   .js .menu .pools { order: 1; flex: none; align-self: stretch; }
   .js .menu .menu-only { display: block; order: 2; margin: 0; color: var(--dim); }
@@ -1082,7 +1086,11 @@ details.expand[open] summary .when-open { display: inline; }
     text-decoration: none;
   }
   .js .top-stats .top-signin:hover { background: var(--hi); color: var(--bg); text-decoration: none; }
-  .js .menu .pools a, .js .menu .pools a.on { flex: 1; text-align: center; padding: 10px 0; }
+  .js .menu .pools a, .js .menu .pools a.on { flex: 1; text-align: center; padding: 8px 0; }
+  /* Beside the clock: small, and the menu's own is left to other pages. */
+  .pools-clock { display: inline-flex; flex: none; margin-left: auto; }
+  body:has(.pools-clock) .menu .pools { display: none; }
+  .top .pools-clock a, .pools-clock a, .pools-clock a.on { padding: 6px 10px; }
   .menu-shade { position: fixed; inset: 0; z-index: 39; background: rgb(0 0 0 / 0.6); }
 }
 @media (max-width: 800px) and (prefers-reduced-motion: reduce) { .js .menu { transition: none; } }
