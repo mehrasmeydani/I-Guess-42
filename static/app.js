@@ -485,3 +485,33 @@
     start();
   });
 })();
+
+// The phone menu: everything after the logo, sliding in from the right.
+// Closed by the button, the shade, Escape, or following a link in it.
+(function () {
+  var btn = document.querySelector('.menu-btn');
+  var menu = document.getElementById('menu');
+  var shade = document.querySelector('.menu-shade');
+  if (!btn || !menu || !shade) return;
+  btn.hidden = false;
+
+  function set(open) {
+    menu.classList.toggle('open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    shade.hidden = !open;
+    if (open) {
+      var first = menu.querySelector('a, button');
+      if (first) first.focus();
+    }
+  }
+  btn.addEventListener('click', function () { set(!menu.classList.contains('open')); });
+  shade.addEventListener('click', function () { set(false); btn.focus(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && menu.classList.contains('open')) { set(false); btn.focus(); }
+  });
+  menu.addEventListener('click', function (e) { if (e.target.closest('a')) set(false); });
+  // Back to a desktop width with it open: no shade left over the page.
+  window.addEventListener('resize', function () {
+    if (menu.classList.contains('open') && !window.matchMedia('(max-width: 800px)').matches) set(false);
+  });
+})();
