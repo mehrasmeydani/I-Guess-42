@@ -146,7 +146,8 @@ async fn start(state: &AppState, provider: Provider, link: Option<i64>) -> Resul
             url.into()
         }
     };
-    Ok(Redirect::to(&url).into_response())
+    let jar = CookieJar::new().add(auth::oauth_state_cookie(token, state.cfg.secure_cookies));
+    Ok((jar, Redirect::to(&url)).into_response())
 }
 
 fn unavailable() -> Response {
@@ -196,11 +197,13 @@ pub struct CallbackQuery {
 }
 
 /// The checks every callback starts with: the provider did not refuse, the
-/// link is complete, and its `state` is one we issued, for this provider,
-/// and not used before. Gives the code and the flow, or the page to show.
+/// link is complete, its `state` is the one this browser started with
+/// (`auth::OAUTH_STATE_COOKIE`), and one we issued, for this provider, and
+/// not used before. Gives the code and the flow, or the page to show.
 async fn arrived(
     state: &AppState,
     provider: Provider,
+    jar: &CookieJar,
     query: CallbackQuery,
 ) -> Result<Result<(String, OAuthState), Response>, AppError> {
     if let Some(err) = query.error {
@@ -217,6 +220,11 @@ async fn arrived(
             crate::copy::LINK_INCOMPLETE,
         )));
     };
+    // Checked before the state is used up, so a link opened in someone
+    // else's browser cannot spend it either.
+    if jar.get(auth::OAUTH_STATE_COOKIE).map(|c| c.value()) != Some(token.as_str()) {
+        return Ok(Err(error_page(StatusCode::BAD_REQUEST, crate::copy::LINK_OTHER_BROWSER)));
+    }
     // Consumed before anything else happens, so a state cannot be replayed.
     match db::consume_oauth_state(&state.db, &token).await? {
         Some(flow) if flow.provider == provider.key() => Ok(Ok((code, flow))),
@@ -405,7 +413,7 @@ pub async fn github_callback(
     ip: ClientIp,
     Query(query): Query<CallbackQuery>,
 ) -> Result<Response, AppError> {
-    let (code, flow) = match arrived(&state, Provider::Github, query).await? {
+    let (code, flow) = match arrived(&state, Provider::Github, &jar, query).await? {
         Ok(found) => found,
         Err(page) => return Ok(page),
     };
@@ -482,7 +490,7 @@ pub async fn google_callback(
     ip: ClientIp,
     Query(query): Query<CallbackQuery>,
 ) -> Result<Response, AppError> {
-    let (code, flow) = match arrived(&state, Provider::Google, query).await? {
+    let (code, flow) = match arrived(&state, Provider::Google, &jar, query).await? {
         Ok(found) => found,
         Err(page) => return Ok(page),
     };
@@ -531,7 +539,7 @@ pub async fn callback_42(
     ip: ClientIp,
     Query(query): Query<CallbackQuery>,
 ) -> Result<Response, AppError> {
-    let (code, flow) = match arrived(&state, Provider::Intra, query).await? {
+    let (code, flow) = match arrived(&state, Provider::Intra, &jar, query).await? {
         Ok(found) => found,
         Err(page) => return Ok(page),
     };
@@ -727,7 +735,7 @@ mod tests {
             error: None,
             error_description: None,
         });
-        let j = session.map(jar).unwrap_or_default();
+        let j = session.map(jar).unwrap_or_default().add(axum_extra::extract::cookie::Cookie::new(auth::OAUTH_STATE_COOKIE, st.to_string()));
         let ip = ClientIp(None);
         match provider {
             "github" => github_callback(State(state.clone()), j, ip, q).await.unwrap(),
@@ -749,6 +757,36 @@ mod tests {
 
     async fn count(db: &db::Db, sql: &str) -> i64 {
         sqlx::query_as::<_, (i64,)>(sql).fetch_one(db).await.unwrap().0
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_only_finishes_in_the_browser_that_started_it() {
+        let (t, state, fake) = setup().await;
+        fake.people.lock().unwrap().insert("c1".into(), github_user(583231, "The-Octocat", 400, Some("Octo@Example.com")));
+        // Starting hands this browser the state, for the callbacks only.
+        let resp = login(State(state.clone()), Path("github".into())).await.unwrap();
+        let url = Url::parse(location(&resp)).unwrap();
+        let st = url.query_pairs().find(|(k, _)| k == "state").unwrap().1.to_string();
+        assert_eq!(set_cookie(&resp, auth::OAUTH_STATE_COOKIE).as_deref(), Some(st.as_str()));
+        let raw = resp.headers().get_all(axum::http::header::SET_COOKIE).iter().map(|v| v.to_str().unwrap().to_string()).find(|c| c.starts_with(auth::OAUTH_STATE_COOKIE)).unwrap();
+        assert!(raw.contains("HttpOnly") && raw.contains("SameSite=Lax") && raw.contains("Path=/auth") && raw.contains("Max-Age=900"), "{raw}");
+
+        // The link opened in another browser, with no cookie or a different
+        // one: refused, nothing signed in, and the state not used up.
+        for other in [None, Some("someone-elses")] {
+            let mut j = CookieJar::new();
+            if let Some(v) = other {
+                j = j.add(axum_extra::extract::cookie::Cookie::new(auth::OAUTH_STATE_COOKIE, v));
+            }
+            let q = Query(CallbackQuery { code: Some("c1".into()), state: Some(st.clone()), error: None, error_description: None });
+            let resp = github_callback(State(state.clone()), j, ClientIp(None), q).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+            assert!(body(resp).await.contains(crate::copy::LINK_OTHER_BROWSER));
+        }
+        assert_eq!(count(&t.db, "SELECT COUNT(*) FROM accounts").await, 0);
+        // The browser that started it still can.
+        let resp = back(&state, "github", "c1", &st, None).await;
+        assert_eq!(viewer_of(&state, &resp).await.account.username, "the-octocat");
     }
 
     #[tokio::test]

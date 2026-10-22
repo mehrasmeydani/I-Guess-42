@@ -446,8 +446,11 @@ numbers secret until 12:42.
 
 - Sessions are 32 random alphanumeric characters, stored server-side; the
   cookie is `HttpOnly`, `SameSite=Lax`, `Secure` when configured.
-- The OAuth `state` is single-use, stored server-side, and expires in 15
-  minutes.
+- The OAuth `state` is single-use, stored server-side, expires in 15
+  minutes, and only counts in the browser that started the sign-in: it is
+  also kept in an `HttpOnly`, `SameSite=Lax` cookie (`ig42_oauth_state`,
+  path `/auth`) that the callback must bring back, so a sign-in started by
+  someone else cannot be finished in your browser (login CSRF).
 - `SameSite=Lax` is what stops cross-site guess submissions; there is no
   separate CSRF token.
 - Only students whose **primary** 42 campus is in `ALLOWED_CAMPUS_IDS` play

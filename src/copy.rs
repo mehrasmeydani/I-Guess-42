@@ -151,6 +151,7 @@ pub const NO_DAY: &str = "no closed round that day";
 pub const NO_PROVIDER: &str = "that sign-in isn't available here";
 pub const LINK_INCOMPLETE: &str = "sign-in link incomplete · start again";
 pub const LINK_USED: &str = "sign-in link expired or used · start again";
+pub const LINK_OTHER_BROWSER: &str = "sign-in started in another browser · start again here";
 pub const LINK_OTHER_SESSION: &str = "started in another session · start again from your account page";
 pub const CANT_SIGN_IN: &str = "this account can't sign in";
 pub const GOOGLE_NO_EMAIL: &str = "google confirmed no email · can't use this account";

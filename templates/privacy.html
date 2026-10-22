@@ -48,10 +48,11 @@
   <h2>cookies and storage</h2>
   <ul>
     <li><b>ig42_session</b>: keeps you signed in. set when you sign in; strictly necessary.</li>
+    <li><b>ig42_oauth_state</b>: set when you start signing in with 42, GitHub or Google, so the sign-in only finishes in the browser that started it. gone after 15 minutes at most; strictly necessary.</li>
     <li><b>ig42_held</b>: holds a number you picked before signing in, for up to an hour, so it can be locked once you do. strictly necessary; only set if you pick a number while signed out.</li>
     <li>your browser's local storage remembers that you dismissed the result of a round, so it doesn't pop up again.</li>
   </ul>
-  <p>nothing is set before you sign in or pick a number, so there is no cookie banner. the sign-in providers set their own cookies on their own sites, not on this one.</p>
+  <p>nothing is set before you start signing in or pick a number, so there is no cookie banner. the sign-in providers set their own cookies on their own sites, not on this one.</p>
 
   <h2>your rights</h2>
   <p>you can see, correct, take with you or delete what we hold about you, and object to what we do on the basis of our interests. most of it is on <a href="/account">your account page</a>: rename, remove a login, or delete the account, which removes your username, logins, email, password, 42 login and name, network hashes and any warning or ban reason straight away. your rounds and points stay, under <b>deleted-</b> and a number, so past results and pots still add up. for anything else, write to the contact in the <a href="/imprint">impressum</a>.</p>
