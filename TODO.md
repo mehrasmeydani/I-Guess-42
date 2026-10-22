@@ -21,7 +21,7 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 - [ ] `IP_HASH_KEY`: a long random string (`openssl rand -hex 32`).
 - [ ] `MODERATORS`: 42 logins, comma-separated.
 - [ ] `IMPRINT_NAME`, `IMPRINT_EMAIL` (and `IMPRINT_ADDRESS` if needed).
-- [ ] **`FT_CLIENT_SECRET` is expired: 42 sign-in is broken on the live site
+- [x] **`FT_CLIENT_SECRET` is expired: 42 sign-in is broken on the live site
       now (401 `invalid_client`).** Generate a new secret on the 42 app page,
       put it in the server's `.env`, `docker compose up -d --force-recreate app`.
       42 secrets expire: note the new expiry date and set a reminder. Give
@@ -29,7 +29,7 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 
 ## 3. Open from testing
 
-- [ ] The verification mail never arrived locally. Check Resend → Emails, or
+- [x] The verification mail never arrived locally. Check Resend → Emails, or
       the log line after "send another link", to see where it stops.
 
 ## 4. Legal
@@ -59,7 +59,7 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 ## 5. Tests only a person can do
 
 - [ ] Import a round's `.ics` into Apple Calendar, Google Calendar, Outlook.
-- [x] Paste a public link into WhatsApp and Discord; check the preview cards.
+- [ ] Paste a public link into WhatsApp and Discord; check the preview cards.
 - [ ] Install to the home screen on iOS and Android.
 - [ ] A screen-reader pass (VoiceOver, TalkBack). Automated: 0 axe violations.
 

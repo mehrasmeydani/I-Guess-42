@@ -54,6 +54,12 @@ services:
       - caddy_config:/config
     depends_on:
       - app
+    # Caddy's own messages (certificates, errors), capped like the app's.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   game_data:

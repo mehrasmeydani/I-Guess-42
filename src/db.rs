@@ -707,13 +707,26 @@ pub async fn add_password_login(db: &Db, account_id: i64, email: &str, hash: &st
 }
 
 /// Deletes an account as far as it can be deleted. Every way of signing in
-/// to it goes, with its sessions and links, and its name becomes
-/// `deleted-<id>`. The row itself stays, with its guesses, so the rounds it
-/// played in still add up; they just no longer say who. A 42 student's
-/// `users` row and 42 pool history are not touched: they belong to the
-/// 42 pool, not to this account.
+/// to it goes, with its sessions and links, its network hashes and any
+/// warning or ban reason, and its name becomes `deleted-<id>`. The row
+/// itself stays, with its guesses, so the rounds it played in still add up;
+/// they just no longer say who. A 42 student's `users` row stays too, under
+/// its 42 id, which the 42 round's guesses and coalition payouts hang on,
+/// but loses its login, name and picture: the 42 round's past results say
+/// `deleted-<id>` as well. Signing in with 42 again fills them back in.
 pub async fn delete_account(db: &Db, account_id: i64) -> Result<()> {
     let mut tx = write_tx(db).await?;
+    sqlx::query(
+        "UPDATE users SET login = 'deleted-' || ?1, display_name = 'deleted-' || ?1, image_url = NULL
+         WHERE id = (SELECT intra_id FROM accounts WHERE id = ?1)",
+    )
+    .bind(account_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE global_guesses SET ip_hash = NULL WHERE user_id = ?1")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
     for sql in [
         "DELETE FROM identities WHERE account_id = ?1",
         "DELETE FROM passwords WHERE account_id = ?1",
@@ -725,7 +738,7 @@ pub async fn delete_account(db: &Db, account_id: i64) -> Result<()> {
     }
     sqlx::query(
         "UPDATE accounts SET username = 'deleted-' || id, intra_id = NULL, deleted_at = ?1,
-                             signup_ip_hash = NULL
+                             signup_ip_hash = NULL, warn_reason = NULL, ban_reason = NULL
          WHERE id = ?2",
     )
     .bind(ts(Utc::now()))
@@ -1229,10 +1242,20 @@ pub async fn delete_session(db: &Db, token: &str) -> Result<()> {
     Ok(())
 }
 
-/// Drop sessions, OAuth states and emailed links that have aged out, and
-/// the mail log past the days it is counted for.
+/// How long a guess keeps the hash of the network it came from: long
+/// enough for moderators to see a pattern, not for good.
+pub const GUESS_IP_HASH_DAYS: i64 = 90;
+
+/// Drop sessions, OAuth states and emailed links that have aged out, the
+/// mail log past the days it is counted for, and guesses' network hashes
+/// past `GUESS_IP_HASH_DAYS`.
 pub async fn purge_expired(db: &Db) -> Result<()> {
     let now = ts(Utc::now());
+    let hashes_from = (Utc::now() - chrono::Duration::days(GUESS_IP_HASH_DAYS)).format("%Y-%m-%d").to_string();
+    sqlx::query("UPDATE global_guesses SET ip_hash = NULL WHERE ip_hash IS NOT NULL AND round_date < ?1")
+        .bind(&hashes_from)
+        .execute(db)
+        .await?;
     sqlx::query("DELETE FROM account_sessions WHERE expires_at <= ?1")
         .bind(&now)
         .execute(db)
@@ -3395,6 +3418,22 @@ mod tests {
         assert_eq!(v.account.username, "stranger");
         assert_eq!(v.account.intra_id, None);
         assert!(v.intra.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_guess_forgets_its_network_after_ninety_days() {
+        let t = temp_db().await;
+        let a = signed_in(&t.db, 7, "ann", "a1").await.id;
+        let today = Utc::now().date_naive();
+        let day = |back: i64| (today - chrono::Duration::days(back)).format("%Y-%m-%d").to_string();
+        for back in [GUESS_IP_HASH_DAYS + 1, GUESS_IP_HASH_DAYS - 1] {
+            insert_guess(&t.db, Pool::Global, &day(back), a, 3, true).await.unwrap();
+            set_guess_ip_hash(&t.db, &day(back), a, "abc").await.unwrap();
+        }
+        purge_expired(&t.db).await.unwrap();
+        let kept: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT round_date, ip_hash FROM global_guesses ORDER BY round_date").fetch_all(&t.db).await.unwrap();
+        assert_eq!(kept, vec![(day(GUESS_IP_HASH_DAYS + 1), None), (day(GUESS_IP_HASH_DAYS - 1), Some("abc".into()))]);
     }
 
     #[tokio::test]

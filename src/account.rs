@@ -472,14 +472,20 @@ mod tests {
 
         let r = db::round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
         assert_eq!(r.winner_login, Some(format!("deleted-{id}")));
-        // The 42 pool's record of them is the 42 pool's.
+        // The 42 round's results no longer name them either.
         let r = db::round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
-        assert_eq!(r.winner_login.as_deref(), Some("megardes"));
+        assert_eq!(r.winner_login, Some(format!("deleted-{id}")));
+        let name: (String, Option<String>) = sqlx::query_as("SELECT display_name, image_url FROM users WHERE id = 1001").fetch_one(&t.db).await.unwrap();
+        assert_eq!(name, (format!("deleted-{id}"), None));
 
-        // Signing in with 42 again starts afresh, under their login.
+        // Signing in with 42 again starts afresh, under their login, and
+        // their 42 rounds are theirs again.
+        db::upsert_user(&t.db, 1001, "megardes", "Meg Ardes", None).await.unwrap();
         let fresh = db::account_for_intra(&t.db, 1001, "megardes").await.unwrap();
         assert_ne!(fresh.id, id);
         assert_eq!(fresh.username, "megardes");
+        let r = db::round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
+        assert_eq!(r.winner_login.as_deref(), Some("megardes"));
     }
 }
 
