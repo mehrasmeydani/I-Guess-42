@@ -78,6 +78,7 @@ const GAP: i64 = 10;
 
 /// One number's column.
 pub struct Column {
+    pub value: i64,
     pub label: String,
     /// Whether the label is printed under the axis. Every column still has
     /// its number in the hover text.
@@ -90,14 +91,30 @@ pub struct Column {
     pub count: i64,
     /// Hover text.
     pub title: String,
+    /// The visitor's own pick that day, marked on the chart.
+    pub mine: bool,
 }
 
 /// A number above the chart, listed with its count.
 pub struct TailPick {
+    pub value: i64,
     pub label: String,
     pub count: i64,
     pub won: bool,
     pub title: String,
+    pub mine: bool,
+}
+
+impl Chart {
+    /// Marks the visitor's own pick, wherever it is drawn.
+    pub fn mark_mine(&mut self, value: i64) {
+        for c in &mut self.columns {
+            c.mine = c.value == value;
+        }
+        for t in &mut self.tail {
+            t.mine = t.value == value;
+        }
+    }
 }
 
 pub struct Chart {
@@ -187,6 +204,8 @@ fn build(
             };
             let (kind, note) = style(value, count);
             Column {
+                value,
+                mine: false,
                 label: value.to_string(),
                 show_label: value == 1 || value % step == 0,
                 kind,
@@ -209,6 +228,8 @@ fn build(
         .map(|t| {
             let (kind, note) = style(t.value, t.count);
             TailPick {
+                value: t.value,
+                mine: false,
                 label: crate::templates::group_digits(t.value),
                 count: t.count,
                 won: kind == "win",
@@ -400,7 +421,20 @@ fn avg(xs: impl Iterator<Item = i64>) -> Option<i64> {
     (n > 0).then(|| i64::try_from(total * 100 / n).unwrap_or(i64::MAX))
 }
 
+/// How a range is split for "what changed".
+pub enum Split<'a> {
+    /// Older half against newer half; an odd middle day goes to the newer.
+    Halves,
+    /// Two spans picked by a visitor: days from the first to the last date
+    /// of the first span (inclusive) against every other day given.
+    First(&'a str, &'a str),
+}
+
 pub fn trend(rows: &[DayTally]) -> Trend {
+    trend_split(rows, Split::Halves)
+}
+
+pub fn trend_split(rows: &[DayTally], split: Split) -> Trend {
     let days = by_day(rows);
     let stats: Vec<DayStats> = days.iter().map(|(_, t)| analyse(t)).collect();
 
@@ -424,10 +458,20 @@ pub fn trend(rows: &[DayTally]) -> Trend {
         .collect();
     let wins = sum(&[&won_days]);
 
-    // Split into an older and a newer half; an odd middle day goes to the
-    // newer one.
+    // Which days are compared against which: see `Split`.
     let mid = days.len() / 2;
-    let (old, new) = days.split_at(mid);
+    let in_first: Vec<bool> = days
+        .iter()
+        .enumerate()
+        .map(|(i, (date, _))| match split {
+            Split::Halves => i < mid,
+            Split::First(from, to) => date.as_str() >= from && date.as_str() <= to,
+        })
+        .collect();
+    let pick = |want: bool| -> Vec<&(String, Vec<Tally>)> {
+        days.iter().zip(&in_first).filter(|(_, f)| **f == want).map(|(d, _)| d).collect()
+    };
+    let (old, new) = (pick(true), pick(false));
     let old_totals = sum(&old.iter().map(|(_, t)| t).collect::<Vec<_>>());
     let new_totals = sum(&new.iter().map(|(_, t)| t).collect::<Vec<_>>());
     let old_n: i64 = old_totals.iter().map(|t| t.count).sum();
@@ -475,17 +519,18 @@ pub fn trend(rows: &[DayTally]) -> Trend {
     most.sort_by(|a, b| b.count.cmp(&a.count).then(a.value.cmp(&b.value)));
     most.truncate(TOP);
 
-    let halves = (days.len() >= 2).then(|| {
-        let (a, b) = lines.split_at(mid);
-        let span = |part: &[DayLine]| {
+    let a: Vec<&DayLine> = lines.iter().zip(&in_first).filter(|(_, f)| **f).map(|(l, _)| l).collect();
+    let b: Vec<&DayLine> = lines.iter().zip(&in_first).filter(|(_, f)| !**f).map(|(l, _)| l).collect();
+    let halves = (!a.is_empty() && !b.is_empty()).then(|| {
+        let span = |part: &[&DayLine]| {
             (
                 part.first().map(|d| d.date.clone()).unwrap_or_default(),
                 part.last().map(|d| d.date.clone()).unwrap_or_default(),
             )
         };
         Halves {
-            older: span(a),
-            newer: span(b),
+            older: span(&a),
+            newer: span(&b),
             players: (
                 avg(a.iter().map(|d| d.players)).unwrap_or(0),
                 avg(b.iter().map(|d| d.players)).unwrap_or(0),
@@ -553,33 +598,142 @@ pub fn permille(n: i64) -> String {
 
 // ---------------------------------------------------------- the round bar
 
-/// How many cells the bar is drawn with server-side. The bar should run the
-/// full width of the page, but how many characters that is depends on the
-/// screen, and the server cannot see the screen. So this is the short bar
-/// that fits the narrowest phone without spilling; app.js measures the row
-/// and redraws it wider. A visitor without JavaScript keeps this one.
-const BAR_CELLS: i64 = 30;
-
-/// `[#########-----------]`: the share of the round already gone, as a text
-/// bar. Rounds are taken as a flat 24 hours; on the two DST days a year it is
-/// off by an hour's worth, which is decoration, not game logic. app.js draws
-/// the same bar every second, at [`BAR_CELLS`] or wider.
-pub fn progress_bar(seconds_left: i64) -> (i64, String) {
+/// How far through its 24 hours the open round is, 0-100. Taken as a flat
+/// day; on the two DST days a year it is off by an hour, which is decoration,
+/// not game logic.
+pub fn round_progress(seconds_left: i64) -> i64 {
     const DAY: i64 = 24 * 60 * 60;
-    const CELLS: i64 = BAR_CELLS;
-    let done = (DAY - seconds_left).clamp(0, DAY);
-    let filled = done * CELLS / DAY;
-    let bar = format!(
-        "[{}{}]",
-        "#".repeat(filled as usize),
-        "-".repeat((CELLS - filled) as usize)
-    );
-    (done * 100 / DAY, bar)
+    (DAY - seconds_left).clamp(0, DAY) * 100 / DAY
+}
+
+/// A player's record in one pool, worked out from their guesses (D5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlayerStats {
+    /// Consecutive days with a guess, ending at the open round if they have
+    /// guessed in it, else at the last closed one. A day without a guess
+    /// ends it.
+    pub streak: i64,
+    pub played: i64,
+    pub won: i64,
+    /// The lowest number they ever won with.
+    pub best: Option<i64>,
+}
+
+/// `history` is every closed round they guessed in, as (date, number they
+/// picked, whether it won), in any order. `guessed_open` is whether they
+/// have a guess in the open round, whose day is `last_closed` + 1.
+pub fn player_stats(history: &[(chrono::NaiveDate, i64, bool)], guessed_open: bool, last_closed: chrono::NaiveDate) -> PlayerStats {
+    let days: std::collections::HashSet<chrono::NaiveDate> = history.iter().map(|h| h.0).collect();
+    let mut streak = i64::from(guessed_open);
+    let mut day = last_closed;
+    while days.contains(&day) {
+        streak += 1;
+        match day.pred_opt() {
+            Some(d) => day = d,
+            None => break,
+        }
+    }
+    let wins: Vec<i64> = history.iter().filter(|h| h.2).map(|h| h.1).collect();
+    PlayerStats {
+        streak,
+        played: history.len() as i64 + i64::from(guessed_open),
+        won: wins.len() as i64,
+        best: wins.into_iter().min(),
+    }
+}
+
+/// The days a streak bonus was earned: every `every`-th day of a run of
+/// consecutive days played (the 10th, 20th, ... day in a row). `days` may be
+/// in any order and hold repeats.
+pub fn streak_milestones(days: &[chrono::NaiveDate], every: i64) -> Vec<chrono::NaiveDate> {
+    let mut days = days.to_vec();
+    days.sort_unstable();
+    days.dedup();
+    let mut out = Vec::new();
+    let mut run = 0;
+    let mut prev: Option<chrono::NaiveDate> = None;
+    for d in days {
+        run = if prev.and_then(|p| p.succ_opt()) == Some(d) { run + 1 } else { 1 };
+        if run % every == 0 {
+            out.push(d);
+        }
+        prev = Some(d);
+    }
+    out
+}
+
+/// The numbers below the winner that more than one player picked: what the
+/// winner got past. With no winner, every number that collided. Lowest
+/// first, at most `limit`.
+pub fn collided_below(tallies: &[Tally], winner: Option<i64>, limit: usize) -> Vec<i64> {
+    tallies
+        .iter()
+        .filter(|t| t.count > 1 && winner.is_none_or(|w| t.value < w))
+        .map(|t| t.value)
+        .take(limit)
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn d(s: &str) -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn a_streak_bonus_comes_every_tenth_day_in_a_row() {
+        let d = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let run = |from: &str, n: i64| (0..n).map(|i| d(from) + chrono::Duration::days(i)).collect::<Vec<_>>();
+        assert!(streak_milestones(&run("2026-10-01", 9), 10).is_empty());
+        assert_eq!(streak_milestones(&run("2026-10-01", 10), 10), vec![d("2026-10-10")]);
+        assert_eq!(streak_milestones(&run("2026-10-01", 25), 10), vec![d("2026-10-10"), d("2026-10-20")]);
+        // A missed day starts over; order and repeats do not matter.
+        let mut broken = run("2026-10-01", 9);
+        broken.extend(run("2026-10-11", 10));
+        broken.reverse();
+        broken.push(d("2026-10-12"));
+        assert_eq!(streak_milestones(&broken, 10), vec![d("2026-10-20")]);
+    }
+
+    #[test]
+    fn a_streak_counts_back_from_the_last_round_until_a_day_is_missed() {
+        // Played the 16th to the 18th and the 20th.
+        let h = [
+            (d("2026-10-20"), 5, false),
+            (d("2026-10-18"), 3, true),
+            (d("2026-10-17"), 9, false),
+            (d("2026-10-16"), 2, true),
+        ];
+        // The 19th was missed, so only the 20th counts.
+        let s = player_stats(&h, false, d("2026-10-20"));
+        assert_eq!(s, PlayerStats { streak: 1, played: 4, won: 2, best: Some(2) });
+        // Guessing today adds today.
+        assert_eq!(player_stats(&h, true, d("2026-10-20")).streak, 2);
+        assert_eq!(player_stats(&h, true, d("2026-10-20")).played, 5);
+        // Missing yesterday: no streak until they guess today.
+        assert_eq!(player_stats(&h, false, d("2026-10-21")).streak, 0);
+        assert_eq!(player_stats(&h, true, d("2026-10-21")).streak, 1);
+    }
+
+    #[test]
+    fn a_long_unbroken_run_counts_every_day() {
+        let h: Vec<_> = (1..=12).map(|i| (d(&format!("2026-10-{i:02}")), i, false)).collect();
+        assert_eq!(player_stats(&h, false, d("2026-10-12")).streak, 12);
+        assert_eq!(player_stats(&h, true, d("2026-10-12")).streak, 13);
+        let none = player_stats(&[], false, d("2026-10-12"));
+        assert_eq!(none, PlayerStats::default());
+    }
+
+    #[test]
+    fn the_takeaway_names_what_the_winner_got_past() {
+        let tallies = t(&[(1, 3), (2, 2), (3, 1), (4, 2), (5, 1)]);
+        assert_eq!(collided_below(&tallies, Some(3), 10), [1, 2]);
+        assert_eq!(collided_below(&tallies, None, 10), [1, 2, 4]);
+        assert_eq!(collided_below(&tallies, None, 2), [1, 2]);
+        assert!(collided_below(&t(&[(1, 1)]), Some(1), 10).is_empty());
+    }
 
     fn t(pairs: &[(i64, i64)]) -> Vec<Tally> {
         pairs
@@ -750,16 +904,12 @@ mod tests {
     }
 
     #[test]
-    fn the_progress_bar_fills_as_the_day_goes() {
-        // Bracketed, and as many cells as the server draws -- app.js counts on
-        // both, so neither is free to drift.
-        let cells = BAR_CELLS as usize;
-        assert_eq!(progress_bar(24 * 60 * 60), (0, format!("[{}]", "-".repeat(cells))));
-        assert_eq!(progress_bar(12 * 60 * 60).0, 50);
-        assert_eq!(progress_bar(0), (100, format!("[{}]", "#".repeat(cells))));
-        let (_, half) = progress_bar(12 * 60 * 60);
-        assert_eq!(half.len(), cells + 2);
-        assert_eq!(half.matches('#').count(), cells / 2);
+    fn progress_runs_from_0_to_100_over_the_day() {
+        assert_eq!(round_progress(24 * 60 * 60), 0);
+        assert_eq!(round_progress(12 * 60 * 60), 50);
+        assert_eq!(round_progress(0), 100);
+        assert_eq!(round_progress(-5), 100);
+        assert_eq!(round_progress(30 * 60 * 60), 0);
     }
 
     #[test]

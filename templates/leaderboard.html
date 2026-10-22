@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}leaders &middot; i guess low{% endblock %}
+{% block h1 %}leaderboard{% endblock %}
+{% block path %}{{ pool.base() }}/leaderboard{% endblock %}
+{% block nav_leaders %}class="on" aria-current="page"{% endblock %}
+
+{% block here %}/leaderboard{% endblock %}
+
+{% block content %}
+{# Points first, then the most days won. The 42 round has no points: its
+   players get coalition points from 42, so it shows the wins only. #}
+{% if pool.is_global() %}
+<section class="sec" style="--b: 0" aria-labelledby="board-h">
+  <h2 class="section-title" id="board-h">most points
+    <span class="ranges" aria-label="what to rank by">
+      <a class="{% if !week %}on{% endif %}" {% if !week %}aria-current="true"{% endif %} href="/g/leaderboard">all-time</a>
+      <a class="{% if week %}on{% endif %}" {% if week %}aria-current="true"{% endif %} href="/g/leaderboard?show=week">this week</a>
+    </span>
+  </h2>
+  {% if rows.is_empty() %}
+    <p class="dim">nobody yet</p>
+  {% else %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="most points">
+    <table class="grid leaders-table">
+      <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="score">points</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr class="r{{ r.rank }}{% if r.me %} me{% endif %}" title="{{ r.title }}"><td class="num place">{{ "{:02}"|format(r.rank) }}</td><td class="who">{{ r.name }}{% if r.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score pts"><span class="minibar" style="--w: {{ r.pct }}%"></span><b>{{ r.points }}</b></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="sec" style="--b: 1" aria-labelledby="wins-h">
+  <h2 class="section-title" id="wins-h">most wins</h2>
+  {% if wins.is_empty() %}
+    <p class="dim">no winners yet</p>
+  {% else %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="most wins">
+    <table class="grid leaders-table">
+      <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="score">days won</th></tr></thead>
+      <tbody>
+        {% for l in wins %}
+          <tr class="r{{ l.rank }}{% if l.me %} me{% endif %}" title="{{ l.title }}"><td class="num place">{{ "{:02}"|format(l.rank) }}</td><td class="who">{{ l.name }}{% if l.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score wins"><span class="minibar" style="--w: {{ l.pct }}%"></span><b>{{ l.points }}</b></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

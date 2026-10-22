@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Moderation &middot; i guess low{% endblock %}
+{% block h1 %}moderation{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>ban an account</span></h2>
+  {% include "_notice.html" %}
+  <form class="authform" method="post" action="/mod/ban">
+    <label for="username">username</label>
+    <input id="username" name="username" type="text" autocomplete="off" spellcheck="false" required>
+    <label for="reason">why</label>
+    <input id="reason" name="reason" type="text" autocomplete="off" required maxlength="200">
+    <p class="hint">signed out and kept out · today's guess stops counting ·
+      42 students: shut out of both rounds · closed rounds unchanged</p>
+    <button type="submit" class="danger">ban</button>
+  </form>
+</section>
+
+<section class="sec" style="--b: 1">
+  <h2 class="rule"><span>points</span></h2>
+  <form class="authform" method="post" action="/mod/adjust">
+    <label for="adj-user">username</label>
+    <input id="adj-user" name="username" type="text" autocomplete="off" spellcheck="false" required>
+    <label for="adj-amount">points, negative to take away</label>
+    <input id="adj-amount" name="amount" type="text" inputmode="numeric" autocomplete="off" required>
+    <label for="adj-note">why (the player sees this)</label>
+    <input id="adj-note" name="note" type="text" autocomplete="off" required maxlength="200">
+    <button type="submit">adjust</button>
+  </form>
+  <form class="authform" method="post" action="/mod/void">
+    <label for="void-round">call off a global round that is not settled yet</label>
+    <input id="void-round" name="round" type="text" placeholder="2026-10-21" autocomplete="off" required>
+    <p class="hint">stakes refunded · nobody wins · no more guesses · settled rounds: adjust instead</p>
+    <button type="submit" class="danger">call it off</button>
+  </form>
+</section>
+
+<section class="sec" style="--b: 2">
+  <h2 class="rule"><span>worth a look</span><span class="tag">{{ clusters.len() }}</span></h2>
+  {% if clusters.is_empty() %}
+    <p class="dim">nothing stands out</p>
+  {% else %}
+    {# Serious first: patterns that bend a round, not only a shared network.
+       Each name can be banned from here, with the flag as the reason. #}
+    <table class="history flags">
+      <tbody>
+        {% for c in clusters %}
+          <tr{% if c.serious %} class="serious"{% endif %}>
+            <td>{% if c.serious %}<b class="lose">&#9650;</b> {% endif %}{{ c.why }}</td>
+            <td class="flag-names">
+              {% for name in c.usernames %}
+                {# Warn first, by mail; then ban. #}
+                <span class="flag-name">
+                  <span>{{ name }}</span>{% if warned.contains(name) %} <b class="lose warned-tag">warned</b>{% endif %}
+                  {% if !warned.contains(name) %}
+                  <form method="post" action="/mod/warn" class="inline">
+                    <input type="hidden" name="username" value="{{ name }}">
+                    <input type="hidden" name="reason" value="{{ c.why }}">
+                    <button type="submit" class="ghost">warn</button>
+                  </form>
+                  {% endif %}
+                  <form method="post" action="/mod/ban" class="inline">
+                    <input type="hidden" name="username" value="{{ name }}">
+                    <input type="hidden" name="reason" value="{{ c.why }}">
+                    <button type="submit" class="ghost">ban</button>
+                  </form>
+                </span>
+              {% endfor %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">shared networks are common: a whole school or office can look like one person</p>
+  {% endif %}
+</section>
+
+<section class="sec" style="--b: 2">
+  <h2 class="rule"><span>banned</span><span class="tag">{{ banned.len() }}</span></h2>
+  {% if banned.is_empty() %}
+    <p class="dim">nobody</p>
+  {% else %}
+    <table class="history logins">
+      <tbody>
+        {% for b in banned %}
+          <tr>
+            <td><b>{{ b.username }}</b>{% match b.login %}{% when Some with (l) %} <span class="dim">42: {{ l }}</span>{% when None %}{% endmatch %}</td>
+            <td class="dim">{{ b.ban_reason.as_deref().unwrap_or("") }}</td>
+            <td class="num">
+              <form method="post" action="/mod/unban" class="inline">
+                <input type="hidden" name="username" value="{{ b.username }}">
+                <button type="submit" class="ghost">unban</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endblock %}

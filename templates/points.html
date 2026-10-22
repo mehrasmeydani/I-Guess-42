@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}points &middot; i guess low{% endblock %}
+{% block h1 %}your points{% endblock %}
+{% block path %}/g/points{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="section-title">your points</h2>
+  <p class="takeaway"><b class="win">{{ balance_label }}</b></p>
+  <p><a href="/g/leaderboard">the points leaderboard &rarr;</a></p>
+</section>
+
+<section class="sec" style="--b: 1">
+  <h2 class="section-title">history</h2>
+  {% if rows.is_empty() %}
+    <p class="dim">nothing yet &middot; <a href="/g/">visit the round &rarr;</a></p>
+  {% else %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="points history">
+    <table class="grid">
+      <thead><tr><th scope="col">round</th><th scope="col">what</th><th scope="col" class="num">points</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr><td>{{ crate::templates::eu(r.date) }}</td><td>{{ r.what }}</td><td class="num {% if r.gain %}win{% else %}dim{% endif %}">{{ r.amount }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% endif %}
+  <h3 class="sub">how points work</h3>
+  <dl class="kv">
+    <dt>to start</dt><dd class="win">+{{ bonus }}</dd>
+    <dt>each day you play</dt><dd class="win">+{{ grant }}</dd>
+    <dt>each guess</dt><dd class="lose">&minus;{{ stake }}</dd>
+    <dt>{{ crate::economy::STREAK_DAYS }} days in a row</dt><dd class="win">+{{ crate::economy::STREAK_BONUS }}</dd>
+    <dt>winning a round</dt><dd>the whole pot</dd>
+    <dt>a round nobody wins</dt><dd>its pot rolls over</dd>
+  </dl>
+</section>
+{% endblock %}

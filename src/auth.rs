@@ -10,10 +10,6 @@ use time::Duration as CookieDuration;
 
 use crate::config::Config;
 
-pub const AUTHORIZE_URL: &str = "https://api.intra.42.fr/oauth/authorize";
-pub const TOKEN_URL: &str = "https://api.intra.42.fr/oauth/token";
-pub const ME_URL: &str = "https://api.intra.42.fr/v2/me";
-
 pub const SESSION_COOKIE: &str = "ig42_session";
 /// Parks an admin's own session token while they browse as a demo account, so
 /// they can get back without signing in through 42 again. Test instances only.
@@ -31,7 +27,8 @@ pub fn random_token() -> String {
 }
 
 pub fn authorize_url(cfg: &Config, state: &str) -> Result<String> {
-    let mut url = Url::parse(AUTHORIZE_URL).context("parsing the 42 authorize URL")?;
+    let mut url = Url::parse(&format!("{}/oauth/authorize", cfg.ft_api_url))
+        .context("parsing the 42 authorize URL")?;
     url.query_pairs_mut()
         .append_pair("client_id", &cfg.client_id)
         .append_pair("redirect_uri", &cfg.redirect_uri)
@@ -113,7 +110,7 @@ impl IntraUser {
 
 pub async fn exchange_code(http: &reqwest::Client, cfg: &Config, code: &str) -> Result<String> {
     let resp = http
-        .post(TOKEN_URL)
+        .post(format!("{}/oauth/token", cfg.ft_api_url))
         .form(&[
             ("grant_type", "authorization_code"),
             ("client_id", cfg.client_id.as_str()),
@@ -138,9 +135,9 @@ pub async fn exchange_code(http: &reqwest::Client, cfg: &Config, code: &str) -> 
         .access_token)
 }
 
-pub async fn fetch_me(http: &reqwest::Client, access_token: &str) -> Result<IntraUser> {
+pub async fn fetch_me(http: &reqwest::Client, cfg: &Config, access_token: &str) -> Result<IntraUser> {
     let resp = http
-        .get(ME_URL)
+        .get(format!("{}/v2/me", cfg.ft_api_url))
         .bearer_auth(access_token)
         .send()
         .await
@@ -153,6 +150,24 @@ pub async fn fetch_me(http: &reqwest::Client, access_token: &str) -> Result<Intr
     }
 
     resp.json::<IntraUser>().await.context("decoding /v2/me")
+}
+
+/// Holds a sign-in's `state` in the browser that started it, so the way
+/// back only counts in that same browser: otherwise someone could start a
+/// sign-in to their own account and have another person's browser finish
+/// it, signing them in as the attacker (login CSRF). Only sent to the
+/// callbacks, and gone when the state would have expired anyway.
+pub const OAUTH_STATE_COOKIE: &str = "ig42_oauth_state";
+
+pub fn oauth_state_cookie(state: String, secure: bool) -> Cookie<'static> {
+    let mut cookie = Cookie::new(OAUTH_STATE_COOKIE, state);
+    cookie.set_http_only(true);
+    // Lax still sends it on the provider's redirect back, a top-level GET.
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_secure(secure);
+    cookie.set_path("/auth");
+    cookie.set_max_age(CookieDuration::minutes(15));
+    cookie
 }
 
 pub fn session_cookie(token: String, secure: bool) -> Cookie<'static> {

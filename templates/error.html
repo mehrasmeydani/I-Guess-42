@@ -5,9 +5,8 @@
 
 {% block content %}
 <section class="sec" style="--b: 0">
-  <h2 class="rule"><span>error</span><span class="tag bad">{{ status }}</span></h2>
   <p class="bignumber bad">{{ status }}</p>
-  <p class="message">{{ message }}</p>
-  <a class="btn" href="/">back to the round &rarr;</a>
+  <p class="message">{{ message }}{% if status >= 500 %} &middot; <a href="">retry &rarr;</a>{% endif %}</p>
+  <p><a href="/g/">back to the round &rarr;</a></p>
 </section>
 {% endblock %}

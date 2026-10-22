@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Your account &middot; i guess low{% endblock %}
+{% block h1 %}your account{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>{{ username }}</span>{% if plays_42 %}<span class="tag">42</span>{% endif %}</h2>
+  {% include "_notice.html" %}
+  <form class="authform" method="post" action="/account/username">
+    <label for="username">username</label>
+    <input id="username" name="username" type="text" autocomplete="username" required
+           minlength="3" maxlength="20" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" value="{{ username }}"
+           spellcheck="false" aria-describedby="username-hint" {% if !can_rename %}disabled{% endif %}>
+    <p class="hint" id="username-hint">{{ rename_hint }}</p>
+    {% if can_rename %}<button type="submit">rename &rarr;</button>{% endif %}
+  </form>
+</section>
+
+<section class="sec" style="--b: 0">
+  <form method="post" action="/logout" class="inline">
+    <button type="submit">log out</button>
+  </form>
+</section>
+
+<section class="sec" style="--b: 1">
+  <h2 class="rule"><span>ways to sign in</span></h2>
+  <table class="history logins">
+    <tbody>
+      {% for l in logins %}
+        <tr>
+          <td><b>{{ l.name }}</b></td>
+          <td class="dim">{% if l.linked %}{{ l.detail }}{% else %}not linked{% endif %}</td>
+          <td class="num">
+            {% if l.linked %}
+              {% if l.can_unlink %}
+                <form method="post" action="/account/unlink" class="inline">
+                  <input type="hidden" name="provider" value="{{ l.key }}">
+                  <button type="submit" class="ghost">remove</button>
+                </form>
+              {% else %}<span class="dim">{{ l.why_not }}</span>{% endif %}
+            {% else if l.available %}
+              <a class="btn ghost" href="/link/{{ l.key }}">add &rarr;</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="sec" style="--b: 2">
+  {% match password_email %}
+    {% when Some with (email) %}
+      <h2 class="rule"><span>password</span></h2>
+      <p class="dim">signs in as {{ email }}{% if !password_verified %} &middot; not confirmed yet{% endif %}</p>
+      <form class="authform" method="post" action="/account/password">
+        <label for="current">current password</label>
+        <input id="current" name="current" type="password" autocomplete="current-password" required>
+        <label for="password">new password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+        <p class="hint">signs out every other session</p>
+        <button type="submit">change password &rarr;</button>
+      </form>
+    {% when None %}
+      {% if email_signup %}
+      <h2 class="rule"><span>add an email and password</span></h2>
+      <form class="authform" method="post" action="/account/password">
+        <label for="email">email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required>
+        <label for="password">password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="128">
+        <p class="hint">we mail a confirm link</p>
+        <button type="submit">add &rarr;</button>
+      </form>
+      {% endif %}
+  {% endmatch %}
+</section>
+
+<section class="sec" style="--b: 3">
+  <h2 class="rule"><span>delete your account</span></h2>
+  <p class="dim">logins, password, name: gone for good &middot; your rounds stay as <b>deleted-{{ account_id }}</b>{% if plays_42 %} &middot; 42 round history unchanged{% endif %}</p>
+  <form class="authform" method="post" action="/account/delete">
+    <label for="confirm">type your username to confirm</label>
+    <input id="confirm" name="confirm" type="text" autocomplete="off" spellcheck="false" required>
+    <button type="submit" class="danger">delete my account</button>
+  </form>
+</section>
+{% endblock %}

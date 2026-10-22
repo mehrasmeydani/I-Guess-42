@@ -5,7 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0c0c0c">
   <title>{% block title %}i guess low{% endblock %}</title>
+  <meta name="description" content="{% block description %}lowest unique number wins. one guess a day.{% endblock %}">
+  {# Link previews in chats. Absolute URLs: a preview is fetched by a bot
+     that knows nothing about this page's address. #}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="i guess low">
+  <meta property="og:title" content="{% block og_title %}i guess low{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}lowest unique number wins. one guess a day.{% endblock %}">
+  <meta property="og:url" content="{{ crate::templates::public_url() }}{% block path %}/g/{% endblock %}">
+  <meta property="og:image" content="{{ crate::templates::public_url() }}{% block og_image %}/static/og.png{% endblock %}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="i guess low: lowest unique number wins">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{% block twitter_title %}i guess low{% endblock %}">
+  <meta name="twitter:description" content="{% block twitter_description %}lowest unique number wins. one guess a day.{% endblock %}">
+  <meta name="twitter:image" content="{{ crate::templates::public_url() }}{% block twitter_image %}/static/og.png{% endblock %}">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/static/style.css?v={{ crate::templates::ASSET_VERSION }}">
   <script src="/static/app.js?v={{ crate::templates::ASSET_VERSION }}" defer></script>
 </head>
@@ -13,56 +31,66 @@
   <a class="skip" href="#main">skip to content</a>
 
   {% if test_mode %}
-  <div class="testbanner">
-    <b>test instance</b> &mdash;
+  <aside class="testbanner" aria-label="test instance">
+    <span class="env-chip">[test instance]</span>
     {% if impersonating %}
-      signed in as a demo account.
+      signed in as a demo account.<span class="shifted"></span>
       <form method="post" action="/admin/return" class="inline">
         <button type="submit" class="linkish">back to mine</button>
       </form>
     {% else %}
-      not the live game.
+      not the live game.<span class="shifted"></span>
       {% match user %}
         {% when Some with (_u) %}<a href="/admin">admin</a>
         {% when None %}
       {% endmatch %}
     {% endif %}
-  </div>
+  </aside>
   {% endif %}
 
   <header class="top">
-    <a class="brand" href="/">i guess <b>low</b></a>
-    <nav aria-label="main">
-      <a {% block nav_round %}{% endblock %} href="/">round</a>
-      <a {% block nav_results %}{% endblock %} href="/results">results</a>
-      <a {% block nav_trends %}{% endblock %} href="/trends">trends</a>
+    <a class="brand" href="{{ pool.base() }}/">i guess <b>low</b></a>
+    <nav class="mainnav" aria-label="main">
+      <a {% block nav_round %}{% endblock %} href="{{ pool.base() }}/">round</a>
+      <a {% block nav_results %}{% endblock %} href="{{ pool.base() }}/results">results</a>
+      <a {% block nav_trends %}{% endblock %} href="{{ pool.base() }}/trends">trends</a>
+      <a {% block nav_leaders %}{% endblock %} href="{{ pool.base() }}/leaderboard">leaders</a>
+      {% if pool.is_global() %}<a {% block nav_bets %}{% endblock %} href="/g/bets">bets</a>{% endif %}
     </nav>
+    {# Two games, one site - but only 42 students ever learn there are two.
+       The switch keeps you on the same kind of page (app.js reads where
+       from data-here); without the script it goes to the other round. #}
+    {% if crate::templates::sees_42(user) %}
+    <nav class="pools" aria-label="which round" data-here="{% block here %}/{% endblock %}">
+      <a {% if !pool.is_global() %}class="on" aria-current="true"{% endif %} href="/" data-pool="">42 vienna</a><a {% if pool.is_global() %}class="on" aria-current="true"{% endif %} href="/g/" data-pool="/g">global</a>
+    </nav>
+    {% endif %}
     <div class="status">
       {# The spinner glyphs are decoration; only the one-off message is read out. #}
       <span class="busy"><span class="spin" aria-hidden="true"></span><span class="busy-text" role="status"></span></span>
-      <span class="clock"></span>
       {% match user %}
         {% when Some with (u) %}
-          {# Your login is only your name; logging out is its own button. #}
-          <span class="who" title="{{ u.display_name }}">{{ u.login }}</span>
-          <form method="post" action="/logout" class="inline">
-            <button class="linkish out" type="submit" aria-label="log out {{ u.login }}">log out</button>
-          </form>
+          {# Points, your name (your rounds and account), and log out. #}
+          {% if pool.is_global() %}{% match u.points %}{% when Some with (p) %}<a class="pts" href="/g/points" title="your points">{{ crate::templates::points_label(p) }}</a>{% when None %}{% endmatch %}{% endif %}
+          <a class="who" href="{{ pool.base() }}/me" title="your rounds and account">{{ u.login }}</a>
+          <form method="post" action="/logout"><button type="submit" class="out">log out</button></form>
         {% when None %}
-          <a class="signin" href="/login">log in to play</a>
+          {% block signin_link %}<a class="signin" href="/login">sign in</a>{% endblock %}
       {% endmatch %}
     </div>
   </header>
 
   <main id="main" tabindex="-1">
-    <h1 class="sr">{% block h1 %}i guess low{% endblock %}</h1>
+    {# Every page has exactly one h1: hidden, naming the page, unless the page
+       shows its own title and replaces this block with it. #}
+    {% block heading %}<h1 class="sr">{% block h1 %}i guess low{% endblock %}</h1>{% endblock %}
     {% block content %}{% endblock %}
   </main>
 
   <footer>
-    <span>lowest unique number wins</span>
-    <span>every day 12:42 vienna</span>
-    <span>made by students, for students</span>
+    <span class="tagline">lowest unique number wins</span>
+    <span><span class="tagline">every day </span>12:42 vienna</span>
+    <span class="tagline">made by students, for students</span>
     <span><a href="/privacy">privacy</a> &middot; <a href="/imprint">imprint</a></span>
     <span class="ver">v{{ crate::templates::version() }}</span>
   </footer>

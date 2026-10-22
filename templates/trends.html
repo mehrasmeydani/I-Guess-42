@@ -1,54 +1,87 @@
 {% extends "base.html" %}
-{% block title %}Trends &middot; i guess low{% endblock %}
+{% block title %}trends &middot; i guess low{% endblock %}
+{% block path %}{{ pool.base() }}/trends{% endblock %}
 {% block h1 %}trends{% endblock %}
 {% block nav_trends %}class="on" aria-current="page"{% endblock %}
 
+{% block here %}/trends{% endblock %}
+
 {% block content %}
-<section class="sec" style="--b: 0">
-  <h2 class="rule"><span>trends</span>
-    <span class="ranges">
-      <a class="{% if range == "7" %}on{% endif %}" href="/trends?days=7">7d</a>
-      <a class="{% if range == "30" %}on{% endif %}" href="/trends?days=30">30d</a>
-      <a class="{% if range == "all" %}on{% endif %}" href="/trends?days=all">all</a>
+<section class="sec" style="--b: 0" aria-labelledby="trends-h">
+  <h2 class="section-title" id="trends-h">trends
+    <span class="ranges" aria-label="range">
+      <a class="{% if range == "7" %}on{% endif %}" {% if range == "7" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=7">7d</a>
+      <a class="{% if range == "30" %}on{% endif %}" {% if range == "30" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=30">30d</a>
+      <a class="{% if range == "all" %}on{% endif %}" {% if range == "all" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=all">all</a>
+      <a class="{% if range == "custom" %}on{% endif %}" {% if range == "custom" %}aria-current="true"{% endif %} href="{{ pool.base() }}/trends?days=custom">custom</a>
     </span>
   </h2>
-  <p class="analyse">
-    analysing {{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}, {{ picks }} picks
-    <span class="analyse-bar" aria-hidden="true">[##############################]</span>
-    <span class="analyse-done">done in {{ took }}</span>
-  </p>
+  {# One line, the way a terminal reports a job: what was read, a bar that
+     fills, and how long it took. #}
+  {% if rounds > 0 %}
+  <p class="analyse">analysing {{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}, {{ picks }} picks <span class="analyse-bar" aria-hidden="true">[####################]</span> <span class="analyse-done">done in {{ took }}</span></p>
+  {% endif %}
+  {% if range == "custom" %}
+  {# Two spans side by side: everything below compares span 1 with span 2. #}
+  <form class="spans" method="get" action="{{ pool.base() }}/trends">
+    <input type="hidden" name="days" value="custom">
+    <fieldset>
+      <legend>span 1</legend>
+      <input name="a_from" type="text" inputmode="numeric" placeholder="01.10.2026" value="{{ span_inputs[0] }}" aria-label="span 1 from" autocomplete="off">
+      <span aria-hidden="true">to</span>
+      <input name="a_to" type="text" inputmode="numeric" placeholder="07.10.2026" value="{{ span_inputs[1] }}" aria-label="span 1 to" autocomplete="off">
+    </fieldset>
+    <fieldset>
+      <legend>span 2</legend>
+      <input name="b_from" type="text" inputmode="numeric" placeholder="15.10.2026" value="{{ span_inputs[2] }}" aria-label="span 2 from" autocomplete="off">
+      <span aria-hidden="true">to</span>
+      <input name="b_to" type="text" inputmode="numeric" placeholder="21.10.2026" value="{{ span_inputs[3] }}" aria-label="span 2 to" autocomplete="off">
+    </fieldset>
+    <button type="submit">compare</button>
+  </form>
+  {% match span_error %}{% when Some with (e) %}<p class="notice error" role="alert"><b>error</b> {{ e }}</p>{% when None %}{% endmatch %}
+  {% endif %}
 </section>
 
 {% if rounds == 0 %}
-  <section class="sec" style="--b: 4">
-    <p class="dim">no closed rounds in this range yet.</p>
+  <section class="sec" style="--b: 1">
+    <p class="lead">{% if range == "custom" %}no rounds in these spans{% else %}no data yet &middot; check back after 12:42{% endif %}</p>
   </section>
 {% else %}
 
-<section class="sec" style="--b: 4">
-  <h2 class="rule"><span>what changed</span></h2>
+<section class="sec" style="--b: 1">
+  <h2 class="section-title">what changed</h2>
   {% if changes.is_empty() %}
-    <p class="dim">one round is not a trend. pick a longer range.</p>
+    <p class="dim">{% if range == "custom" %}no rounds in one of the spans{% else %}one round · pick a longer range{% endif %}</p>
   {% else %}
-    <p class="explain">daily averages, <b>before</b> {{ older_range }} vs <b>after</b> {{ newer_range }}</p>
+    {# Averages per day, each side headed by what it is and when. #}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="what changed">
     <table class="grid diff">
+      <thead>
+        <tr>
+          <th scope="col">per day</th>
+          <th scope="col" class="num">{{ older_label }}<span class="when">{{ older_range }}</span></th>
+          <th scope="col" class="num">{{ newer_label }}<span class="when">{{ newer_range }}</span></th>
+          <th scope="col" class="num">change</th>
+        </tr>
+      </thead>
       <tbody>
         {% for c in changes %}
           <tr class="{{ c.dir }}" title="{{ c.explain }}">
             <td class="b">{{ c.label }}</td>
-            <td class="num">
-              <span class="dim">{{ c.before }} &rarr;</span> <span class="after">{{ c.after }}</span>
-              <span class="change">{% if c.dir == "up" %}&#9650;{% else if c.dir == "down" %}&#9660;{% else %}={% endif %}{% if !c.delta.is_empty() %} {{ c.delta }}{% endif %}</span>
-            </td>
+            <td class="num dim">{{ c.before }}</td>
+            <td class="num after">{{ c.after }}</td>
+            <td class="num change">{% if c.dir == "up" %}&#9650;{% else if c.dir == "down" %}&#9660;{% else %}={% endif %}{% if !c.delta.is_empty() %} {{ c.delta }}{% endif %}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
 
     <div class="split pair">
       <div>
         <p class="sub">getting popular</p>
-        {% if rising.is_empty() %}<p class="dim">nothing climbed.</p>{% endif %}
+        {% if rising.is_empty() %}<p class="dim">nothing climbed</p>{% endif %}
         <ol class="ranked">
           {% for m in rising %}
             <li class="up" title="{{ m.delta }}"><b>{{ m.value_label }}</b><span>{{ m.before }} &rarr; <em>{{ m.after }}</em></span></li>
@@ -57,7 +90,7 @@
       </div>
       <div>
         <p class="sub">going out of fashion</p>
-        {% if falling.is_empty() %}<p class="dim">nothing dropped.</p>{% endif %}
+        {% if falling.is_empty() %}<p class="dim">nothing dropped</p>{% endif %}
         <ol class="ranked">
           {% for m in falling %}
             <li class="down" title="{{ m.delta }}"><b>{{ m.value_label }}</b><span>{{ m.before }} &rarr; <em>{{ m.after }}</em></span></li>
@@ -65,13 +98,12 @@
         </ol>
       </div>
     </div>
-    <p class="dim">% = share of all picks. numbers picked only once are left out.</p>
   {% endif %}
 </section>
 
 {# The crowd's favourites over the whole range. #}
 <section class="sec" style="--b: 5">
-  <h2 class="rule"><span>most picked</span><span class="tag">{{ rounds }} {% if rounds == 1 %}round{% else %}rounds{% endif %}</span></h2>
+  <h2 class="section-title">most picked</h2>
   <ol class="ranked">
     {% for t in most %}
       <li><b>{{ t.value_label }}</b><span>{{ t.count }}&times;</span></li>
@@ -80,14 +112,14 @@
 </section>
 
 <section class="sec" style="--b: 6">
-  <h2 class="rule"><span>all picks, added up</span></h2>
+  <h2 class="section-title">all picks, added up</h2>
   <p class="legend">
     <span><i class="win">█</i> won a day</span>
     <span><i class="picked">█</i> never won</span>
   </p>
   {% include "chart.html" %}
-  <details>
-    <summary>every number picked ({{ totals.len() }})</summary>
+  <details class="expand">
+    <summary><span class="when-closed">view as a table ({{ totals.len() }} numbers)</span><span class="when-open">hide the table</span></summary>
     <table class="grid narrow">
       <thead><tr><th class="num">number</th><th class="num">picks</th></tr></thead>
       <tbody>
@@ -100,13 +132,14 @@
 </section>
 
 <section class="sec" style="--b: 7">
-  <h2 class="rule"><span>day by day</span><span class="tag">newest first</span></h2>
+  <h2 class="section-title">day by day</h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="day by day">
   <table class="grid">
     <thead><tr><th>date</th><th>players</th><th>winning number</th></tr></thead>
     <tbody>
       {% for d in days %}
         <tr>
-          <td><a href="/day/{{ d.date }}">{{ d.date }}</a></td>
+          <td><a href="{{ pool.base() }}/day/{{ d.date }}">{{ crate::templates::eu(d.date) }}</a></td>
           <td class="barcell"><span class="minibar" style="--w: {{ d.players_pct }}%"></span><b>{{ d.players }}</b></td>
           {% match d.winner_label %}
             {% when Some with (w) %}<td class="barcell win{% if d.winner_outlier %} outlier{% endif %}"{% if d.winner_outlier %} title="far above the rest of the day's picks; left out of the averages"{% endif %}>{% if !d.winner_outlier %}<span class="minibar" style="--w: {{ d.winner_pct }}%"></span>{% endif %}<b>{{ w }}</b>{% if d.winner_outlier %} <span class="dim">outlier</span>{% endif %}</td>
@@ -116,6 +149,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </section>
 {% endif %}
 {% endblock %}

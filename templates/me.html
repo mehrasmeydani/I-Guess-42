@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}my rounds &middot; i guess low{% endblock %}
+{% block h1 %}my rounds{% endblock %}
+{% block path %}{{ pool.base() }}/me{% endblock %}
+
+{% block here %}/me{% endblock %}
+
+{% block content %}
+<section class="sec" style="--b: 0">
+  <h2 class="section-title">my record</h2>
+  <p><a class="btn" href="/account">account details &rarr;</a></p>
+  {% if cannot_play %}
+    <p class="dim">confirm your email to play</p>
+  {% else %}
+  <dl class="statgrid">
+    <div><dt>streak</dt><dd>{{ stats.streak }} <span class="dim">{% if stats.streak == 1 %}day{% else %}days{% endif %}</span></dd></div>
+    <div><dt>played</dt><dd>{{ stats.played }}</dd></div>
+    <div><dt>won</dt><dd>{{ stats.won }}</dd></div>
+    <div><dt>best win</dt><dd>{% match best_label %}{% when Some with (b) %}<span class="win">{{ b }}</span>{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</dd></div>
+  </dl>
+  {% endif %}
+</section>
+
+<section class="sec" style="--b: 1">
+  <h2 class="section-title">every round you played</h2>
+  {% if rounds.is_empty() %}
+    <p class="dim">nothing yet: rounds show up here once they close. <a href="{{ pool.base() }}/">play today's round &rarr;</a></p>
+  {% else %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="your rounds">
+    <table class="grid">
+      <thead><tr><th scope="col">date</th><th scope="col" class="num">your pick</th><th scope="col" class="num">winner</th><th scope="col">result</th></tr></thead>
+      <tbody>
+        {% for r in rounds %}
+          <tr><td><a href="{{ pool.base() }}/day/{{ r.date }}">{{ crate::templates::eu(r.date) }}</a></td><td class="num">{{ r.pick }}</td><td class="num">{% match r.winner %}{% when Some with (w) %}{{ w }}{% when None %}<span class="dim">nobody</span>{% endmatch %}</td><td>{% if r.won %}<b class="win">won</b>{% else %}<span class="dim">lost</span>{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if !older.is_empty() %}
+      <details class="expand">
+        <summary><span class="when-closed">show {{ older.len() }} older rounds</span><span class="when-open">hide older rounds</span></summary>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="your older rounds">
+        <table class="grid">
+          <thead><tr><th scope="col">date</th><th scope="col" class="num">your pick</th><th scope="col" class="num">winner</th><th scope="col">result</th></tr></thead>
+          <tbody>
+            {% for r in older %}
+              <tr><td><a href="{{ pool.base() }}/day/{{ r.date }}">{{ crate::templates::eu(r.date) }}</a></td><td class="num">{{ r.pick }}</td><td class="num">{% match r.winner %}{% when Some with (w) %}{{ w }}{% when None %}<span class="dim">nobody</span>{% endmatch %}</td><td>{% if r.won %}<b class="win">won</b>{% else %}<span class="dim">lost</span>{% endif %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </details>
+    {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

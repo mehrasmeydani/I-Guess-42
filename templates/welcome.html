@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}pick a username &middot; i guess low{% endblock %}
+{% block heading %}{% endblock %}
+
+{% block content %}
+<section class="sec auth" style="--b: 0">
+  <div class="auth-card">
+    <h1 class="auth-title">pick a username</h1>
+    <p class="auth-sub">shown next to your results · public</p>
+    {% match error %}
+      {% when Some with (e) %}<div class="error-summary" role="alert" tabindex="-1"><p><b>error</b> {{ e }}</p></div>
+      {% when None %}
+    {% endmatch %}
+    <form class="authform" method="post" action="/welcome">
+      <input type="hidden" name="then" value="{{ then }}">
+      <label for="username">username</label>
+      <input id="username" name="username" type="text" autocomplete="username" required
+             minlength="3" maxlength="20" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" value="{{ username }}"
+             spellcheck="false" autocapitalize="none" aria-describedby="username-hint"
+             {% match error %}{% when Some with (_e) %}aria-invalid="true"{% when None %}{% endmatch %}>
+      <p class="hint" id="username-hint">3&ndash;20 · a-z, 0-9, - and _</p>
+      <button type="submit" class="primary">play</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

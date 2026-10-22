@@ -22,7 +22,9 @@
   </form>
   <p class="hint">
     The offset lives in memory and only shifts which round is open. It resets
-    when the process restarts, and never affects session expiry.
+    when the process restarts, and never affects session expiry. Moving it
+    back (reset, &minus;1 day) undoes what rounds still open again paid out:
+    pots, bet winnings, and daily points and streak bonuses for days to come.
   </p>
 </section>
 
@@ -34,6 +36,10 @@
              spellcheck="false" pattern="[a-zA-Z0-9-]+" required>
       <input name="guess" type="text" inputmode="numeric" pattern="[0-9 ,_]*"
              placeholder="number" autocomplete="off" required>
+      <select name="pool" aria-label="pool">
+        <option value="vienna">42 vienna</option>
+        <option value="global">global</option>
+      </select>
       <button type="submit">Add</button>
     </div>
     <label class="check">
@@ -86,12 +92,16 @@
   <p>
     <b>{{ demo_counts.0 }}</b> bot players, <b>{{ demo_counts.1 }}</b> bot guesses.
   </p>
+  {% for p in pools %}
   <form method="post" action="/admin/demo" class="inline">
+    <input type="hidden" name="pool" value="{{ p.key }}">
+    <span class="dim">{{ p.label }}</span>
     <button type="submit" name="days" value="30">+30 days</button>
     <button type="submit" name="days" value="90">+90 days</button>
     <button type="submit" name="days" value="180">+180 days</button>
     <button type="submit" name="days" value="365">+365 days</button>
   </form>
+  {% endfor %}
   <form method="post" action="/admin/demo/remove" class="inline">
     <button type="submit" class="ghost">Remove all bots and their guesses</button>
   </form>
@@ -105,15 +115,16 @@
   </p>
 </section>
 
+{% for p in pools %}
 <section class="card admin">
-  <p class="eyebrow">Open round &mdash; {{ guesses.len() }} guess{% if guesses.len() != 1 %}es{% endif %}</p>
-  {% if guesses.is_empty() %}
+  <p class="eyebrow">Open round, {{ p.label }} &mdash; {{ p.guesses.len() }} guess{% if p.guesses.len() != 1 %}es{% endif %}</p>
+  {% if p.guesses.is_empty() %}
     <p class="empty">Nothing submitted yet.</p>
   {% else %}
     <table class="history">
       <thead><tr><th>Player</th><th class="num">Number</th></tr></thead>
       <tbody>
-        {% for g in guesses %}
+        {% for g in p.guesses %}
           <tr>
             <td class="who">
               {{ g.display_name }} <span class="login">{{ g.login }}</span>
@@ -130,9 +141,11 @@
     </p>
   {% endif %}
   <form method="post" action="/admin/clear" class="inline">
+    <input type="hidden" name="pool" value="{{ p.key }}">
     <button type="submit" class="ghost">Clear this round</button>
   </form>
 </section>
+{% endfor %}
 
 {% match last_round %}
   {% when Some with (r) %}

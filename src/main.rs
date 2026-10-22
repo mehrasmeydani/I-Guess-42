@@ -1,13 +1,34 @@
+mod account;
 mod app;
+mod bets;
 mod auth;
 mod config;
+mod copy;
+mod credentials;
 mod db;
 mod demo;
+mod economy;
 mod handlers;
+mod held;
+mod human;
+mod ics;
+mod limits;
+mod mail;
+mod moderation;
+mod oauth;
+mod odds;
+mod og;
+mod platform;
 mod points;
+mod points_pages;
 mod round;
+mod signin;
 mod stats;
 mod templates;
+#[cfg(test)]
+mod testkit;
+#[cfg(test)]
+mod ui_tests;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,6 +80,10 @@ async fn main() -> Result<()> {
         .build()
         .context("building the HTTP client")?;
 
+    templates::init_site(templates::Site {
+        public_url: cfg.public_url.clone(),
+        anon_key: cfg.anon_key.clone(),
+    });
     let cfg = Arc::new(cfg);
     if cfg.test_mode() {
         tracing::warn!(admins = ?cfg.admin_logins, "TEST MODE: /admin is reachable");
@@ -77,6 +102,8 @@ async fn main() -> Result<()> {
         (None, _) => {}
     }
     let state = AppState::new(db, cfg, http);
+    // In-game points: fake ones, so they run on test instances too.
+    tokio::spawn(economy::run(state.clone()));
 
     let router = Router::new()
         .route("/", get(handlers::index))
@@ -86,12 +113,62 @@ async fn main() -> Result<()> {
         .route("/trends", get(handlers::trends))
         .route("/guess", post(handlers::submit_guess))
         .route("/guess/confirm", post(handlers::confirm_guess))
-        .route("/login", get(handlers::login))
-        .route("/auth/callback", get(handlers::callback))
+        // The global pool: the same pages over its own guesses.
+        .route("/g", get(handlers::global_index))
+        .route("/g/", get(handlers::global_index))
+        .route("/g/results", get(handlers::global_results))
+        .route("/g/day/{date}", get(handlers::global_day))
+        .route("/g/day/{date}/og.png", get(handlers::global_day_image))
+        .route("/day/{date}/og.png", get(handlers::day_image))
+        .route("/g/trends", get(handlers::global_trends))
+        .route("/g/me", get(handlers::global_me))
+        .route("/g/points", get(points_pages::points))
+        .route("/g/bets", get(bets::page))
+        .route("/g/bets/quote", get(bets::quote))
+        .route("/g/bet", post(bets::place))
+        .route("/g/leaderboard", get(points_pages::leaderboard))
+        .route("/leaderboard", get(points_pages::vienna_leaderboard))
+        .route("/me", get(handlers::me))
+        .route("/g/guess", post(handlers::global_submit_guess))
+        .route("/g/streak", post(handlers::claim_streak))
+        .route("/g/guess/confirm", post(handlers::global_confirm_guess))
+        .route("/login", get(signin::login_page_handler))
+        .route("/login/42", get(oauth::login_42))
+        .route("/login/{provider}", get(oauth::login))
+        .route("/link/{provider}", get(oauth::link))
+        .route("/auth/github/callback", get(oauth::github_callback))
+        .route("/auth/google/callback", get(oauth::google_callback))
+        .route("/login/email", post(signin::login_email))
+        .route("/signup", get(signin::signup_page_handler).post(signin::signup))
+        .route("/verify", get(signin::verify_page).post(signin::verify))
+        .route("/verify/resend", post(signin::resend_verification))
+        .route("/forgot", get(signin::forgot_page).post(signin::forgot))
+        .route("/reset", get(signin::reset_page_handler).post(signin::reset))
+        .route("/auth/callback", get(oauth::callback_42))
         .route("/logout", post(handlers::logout))
+        .route("/account", get(account::account))
+        .route("/welcome", get(account::welcome).post(account::welcome_save))
+        .route("/account/username", post(account::rename))
+        .route("/account/unlink", post(account::unlink))
+        .route("/account/password", post(account::password))
+        .route("/account/delete", post(account::delete))
+        // 404 unless MODERATORS names the signed-in 42 login.
+        .route("/mod", get(moderation::moderation))
+        .route("/mod/ban", post(moderation::ban))
+        .route("/mod/warn", post(moderation::warn))
+        .route("/mod/unban", post(moderation::unban))
+        .route("/mod/adjust", post(moderation::adjust))
+        .route("/mod/void", post(moderation::void))
+        .route("/privacy", get(moderation::privacy))
+        .route("/imprint", get(moderation::imprint))
         .route("/healthz", get(handlers::healthz))
-        .route("/privacy", get(handlers::privacy))
-        .route("/imprint", get(handlers::imprint))
+        .route("/api/round", get(handlers::round_now))
+        .route("/manifest.webmanifest", get(platform::manifest))
+        .route("/robots.txt", get(platform::robots))
+        .route("/sitemap.xml", get(platform::sitemap))
+        .route_service("/favicon.ico", tower_http::services::ServeFile::new("static/favicon.ico"))
+        .route("/round/{file}", get(handlers::calendar))
+        .route("/g/round/{file}", get(handlers::global_calendar))
         // 404 unless ADMIN_LOGINS names the signed-in user.
         .route("/admin", get(handlers::admin))
         .route("/admin/clock", post(handlers::admin_clock))
@@ -114,6 +191,7 @@ async fn main() -> Result<()> {
             ),
         )
         .fallback(handlers::not_found)
+        .layer(axum::middleware::from_fn(platform::page_caching))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -131,8 +209,12 @@ async fn main() -> Result<()> {
         }
     }
 
-    axum::serve(listener, router)
-        .await
+    // With the peer address attached, for ClientIp when no proxy says otherwise.
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
         .context("running the server")?;
     Ok(())
 }

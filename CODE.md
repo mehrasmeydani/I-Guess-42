@@ -34,6 +34,7 @@ away all the answers.
 - [`src/db.rs` — storage and the winner query](#srcdbrs--storage-and-the-winner-query)
 - [`src/auth.rs` — signing in with 42](#srcauthrs--signing-in-with-42)
 - [`src/handlers.rs` — the routes](#srchandlersrs--the-routes)
+- [Accounts and signing in](#accounts-and-signing-in)
 - [`src/templates.rs` — view models](#srctemplatesrs--view-models)
 - [`templates/` — the HTML](#templates--the-html)
 - [`static/` — CSS and the countdown](#static--css-and-the-countdown)
@@ -156,20 +157,20 @@ and a URL parse error can all be `?`-ed in the same function.
 ### `Option`
 
 Rust has no null. "Might not exist" is `Option<T>`, and the compiler forces you
-to handle the missing case. This project uses it for the signed-in user
-(`Option<User>`), a round's winner (`Option<WinnerView>`), a user's avatar
+to handle the missing case. This project uses it for the signed-in visitor
+(`Option<Viewer>`), a round's winner (`Option<WinnerView>`), a user's avatar
 (`Option<String>`), and a player's guess (`Option<i64>`).
 
 The `let ... else` form appears repeatedly:
 
 ```rust
-let Some(user) = current_user(&state, &jar).await? else {
+let Some(viewer) = current_viewer(&state, &jar).await? else {
     return Ok(Redirect::to("/?msg=login_required").into_response());
 };
 ```
 
-Read it as: bind `user` if there is one, otherwise run the block, which must
-diverge (return, break, panic). After it, `user` is a plain `User`.
+Read it as: bind `viewer` if there is one, otherwise run the block, which must
+diverge (return, break, panic). After it, `viewer` is a plain `Viewer`.
 
 ### Ownership, briefly
 
@@ -917,7 +918,7 @@ generator, you have handed out everyone's account.
 ### Building the authorize URL
 
 ```rust
-let mut url = Url::parse(AUTHORIZE_URL)?;
+let mut url = Url::parse(&format!("{}/oauth/authorize", cfg.ft_api_url))?;
 url.query_pairs_mut()
     .append_pair("client_id", &cfg.client_id)
     .append_pair("redirect_uri", &cfg.redirect_uri)
@@ -934,10 +935,14 @@ intermittent-looking OAuth failures.
 `response_type=code` selects this flow. `scope=public` is the minimum 42
 offers — ask for no more than you need.
 
+`ft_api_url` is `https://api.intra.42.fr` unless `FT_API_URL` says otherwise,
+which only tests do: they point it at a fake server so the whole callback runs
+for real (see `oauth.rs`).
+
 ### The exchange
 
 ```rust
-let resp = http.post(TOKEN_URL)
+let resp = http.post(format!("{}/oauth/token", cfg.ft_api_url))
     .form(&[
         ("grant_type", "authorization_code"),
         ("client_id", cfg.client_id.as_str()),
@@ -1056,7 +1061,7 @@ Each flag defends against something specific:
 - **`Max-Age`** — 30 days. Without it the cookie dies when the browser closes.
 
 The cookie holds only the random token. Everything else lives server-side in
-the `sessions` table, which is what makes sign-out able to actually revoke a
+the `account_sessions` table, which is what makes sign-out able to actually revoke a
 session rather than merely asking the browser to forget it.
 
 ```rust
@@ -1080,16 +1085,32 @@ One function per route, plus the shared helpers.
 ### Finding the visitor
 
 ```rust
-async fn current_user(state: &AppState, jar: &CookieJar) -> Result<Option<User>, AppError> {
+async fn current_viewer(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
     let Some(token) = auth::session_token(jar) else {
         return Ok(None);
     };
-    Ok(db::user_for_session(&state.db, &token).await?)
+    Ok(db::viewer_for_session(&state.db, &token).await?)
 }
 ```
 
 Called at the top of nearly every handler. `Ok(None)` means "nobody is signed
 in", which is not an error — every page works logged out.
+
+A `Viewer` is two things: the **account** that signed in, and the **42 player**
+it plays as, if any:
+
+```rust
+pub struct Viewer {
+    pub account: Account,     // always there
+    pub intra: Option<User>,  // the `users` row, for 42 students
+}
+```
+
+Today every account is a 42 one, but the 42 pool never assumes it. Guessing
+needs `viewer.intra` (no 42 player → `/?msg=not_42`), the guess is stored under
+the **intra id, never the account id**, and `names_visible` asks for
+`intra.is_some()` rather than "is signed in", so a stranger with an account
+cannot read 42 students' logins.
 
 This is a plain function rather than a custom extractor. An extractor would be
 more idiomatic axum; a function is less machinery and easier to read, and the
@@ -1248,57 +1269,21 @@ values are only exposed on `/admin`.
 
 ### `callback`
 
-```rust
-if let Some(err) = query.error {
-    let detail = query.error_description.unwrap_or(err);
-    return Ok(error_page(StatusCode::BAD_REQUEST,
-        &format!("42 refused the sign-in: {detail}")));
-}
+The 42 callback moved to `oauth.rs` (`callback_42`) when GitHub and Google
+joined it; see [Accounts and signing in](#accounts-and-signing-in) below. The
+ideas from the original are all still there:
 
-let (Some(code), Some(state_token)) = (query.code, query.state) else {
-    return Ok(error_page(StatusCode::BAD_REQUEST, "That sign-in link is incomplete..."));
-};
+- the provider's own refusal (`?error=`) is shown, escaped by Askama;
+- the `state` is consumed **before** the token exchange, in one statement, so
+  no work is done for a request that cannot prove it started the flow and a
+  state cannot be replayed;
+- the access token is used and dropped, never stored;
+- `upsert_user` refreshes the display name and avatar at every sign-in.
 
-if !db::consume_oauth_state(&state.db, &state_token).await? {
-    return Ok(error_page(StatusCode::BAD_REQUEST, "That sign-in link has expired..."));
-}
-
-let access_token = auth::exchange_code(&state.http, &state.cfg, &code).await?;
-let me = auth::fetch_me(&state.http, &access_token).await?;
-
-if !state.cfg.campus_allowed(me.primary_campus_id()) {
-    return Ok(error_page(StatusCode::FORBIDDEN,
-        "This game is only open to students of this campus..."));
-}
-
-db::upsert_user(&state.db, me.id, &me.login, me.display_name(), me.image_url()).await?;
-
-let session = auth::random_token();
-db::create_session(&state.db, &session, me.id, auth::SESSION_TTL_DAYS).await?;
-
-let jar = jar.add(auth::session_cookie(session, state.cfg.secure_cookies));
-Ok((jar, Redirect::to("/")).into_response())
-```
-
-The `state` check is the security-critical line, and it comes **before** the
-token exchange — no work is done for a request that cannot prove it started the
-flow. `consume_oauth_state` deletes the row as it checks, in one statement, so
-a state cannot be replayed.
-
-The campus check sits **before** `upsert_user`: someone from another campus
-leaves no user row and gets no session. The refusal names their home campus
-when 42 provides it, so a confused visitor knows why.
-
-`upsert_user` means the login refreshes the display name and avatar every time,
-so a changed intra profile propagates without extra machinery.
-
-The access token is used twice and then dropped. It is never stored — the app
-has no further use for the 42 API, so keeping it would be pure liability.
-
-Returning `(jar, Redirect)` works because `CookieJar` implements
-`IntoResponseParts`: the tuple becomes a response with the `Set-Cookie` header
-attached. `Redirect::to` is `303 See Other`, the correct status for
-"POST/action finished, now go GET this".
+What changed is the campus check. It used to turn other campuses away; now it
+only decides whether the student plays the **42 Vienna** round. Anyone else
+signing in with 42 gets an account for the global round and no `users` row, so
+the 42 round never hears of them.
 
 ### `healthz`
 
@@ -1317,17 +1302,19 @@ that goes through the normal query layer would test less.
 ### The admin handlers
 
 ```rust
-async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<Option<User>, AppError> {
+async fn require_admin(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
     if !state.cfg.test_mode() {
         return Ok(None);
     }
-    Ok(current_user(state, jar).await?
-        .filter(|u| state.cfg.is_admin(&u.login)))
+    Ok(current_viewer(state, jar).await?
+        .filter(|v| is_admin(state, v)))
 }
 ```
 
-Two gates: the instance must be in test mode, and the signed-in user must be
-listed. `Option::filter` turns "signed in but not an admin" into `None`.
+Two gates: the instance must be in test mode, and the signed-in visitor's
+**42 login** must be listed. `is_admin` checks `viewer.intra`, never the
+account's username: usernames will be choosable, and anyone could pick
+`megardes`. `Option::filter` turns "signed in but not an admin" into `None`.
 
 Every admin handler starts the same way, and a `None` becomes a **404, not a
 403**:
@@ -1415,6 +1402,244 @@ An unchecked HTML checkbox sends **nothing at all**, rather than a false value.
 `#[serde(default)]` plus `Option` is how you read one: absent means unchecked.
 Getting this wrong gives a form that fails to submit whenever the box is
 cleared.
+
+---
+
+## Accounts and signing in
+
+Everything since the global round arrived, in one place.
+
+### Two pools, one set of queries
+
+`db::Pool` is `Vienna` or `Global`. Every query that reads or writes guesses
+takes one, and the pool picks two table names:
+
+| | guesses | names from | id stored |
+|---|---|---|---|
+| `Pool::Vienna` | `guesses` | `users` | intra id |
+| `Pool::Global` | `global_guesses` | `global_players` (a view over `accounts`) | account id |
+
+Both tables have the same columns (`global_guesses.user_id` holds an
+*account* id), and the view has the same columns as `users`, so each query is
+written once with the two names spliced in. The names only ever come from the
+enum, never from input. The handlers are written once too: `index_in(pool,
+…)`, `results_in`, `day_in`, `trends_in`, with one thin route function per
+pool, and every template has a `pool` field whose `base()` (`""` or `"/g"`)
+prefixes its links.
+
+The 42 round is only shown to 42 students. Every 42-round handler starts
+with `outside_42`, which sends anyone else (signed out, or signed in another
+way) to the same page of the global round; `templates::sees_42` hides the
+pool switch, and the word "global", from them; and `global_players` names
+everyone by username alone, so not even a "(42)" tag gives a student away.
+
+Who may play is `player_in(pool, viewer)`: in the 42 round, the viewer's
+intra id (no 42 player, no form, and `/guess` refuses); in the global round,
+their account id, if the account is **verified**. Who may see names is
+`names_visible(pool, viewer)`: 42 students only in the 42 round, anyone signed
+in in the global one.
+
+### Accounts, identities, sessions
+
+An **account** is a person. It has a username and, for a 42 student,
+`intra_id` pointing at their `users` row. An **identity** is one way of
+signing in: `(provider, subject)`, where subject is the intra id, the GitHub
+id, Google's `sub`, or the email. Sessions belong to accounts.
+
+One email, one account. A GitHub or Google sign-in brings a verified
+address; if an account has proven it (`db::email_owner`: a confirmed
+password, or another provider), the login is added to that account and the
+visitor signed in. An unconfirmed password on the address is dropped first
+(`db::drop_unproven_login`): otherwise anyone could sign up with someone
+else's address and wait for them to arrive by Google.
+
+### `oauth.rs` — 42, GitHub, Google
+
+One flow for three providers. `start` stores a single-use `state` with the
+provider's name, the linking account if any, and (GitHub, Google) a PKCE
+verifier, then redirects. `arrived` checks the callback: no provider refusal,
+code and state present, state consumed and **for this provider**. Then each
+provider's own calls say who the visitor is, and:
+
+- **linking** (`/link/{provider}`, from the account page) adds the identity to
+  the account that started it. `finish_link` insists the session finishing
+  the flow is that same account; otherwise an attacker could start linking on
+  their own account and have a victim's browser finish it, tying the victim's
+  login to the attacker.
+- **signing in** finds the identity's account, or makes one: verified at once,
+  username built from the GitHub login or the email's start
+  (`credentials::username_from`, numbered until free). GitHub accounts younger
+  than `GITHUB_MIN_ACCOUNT_AGE_DAYS` cannot make one: a fresh GitHub account
+  is the cheapest fake there is.
+
+Google is asked who someone is through its userinfo endpoint with the access
+token, over TLS, rather than by checking an ID token's signature.
+
+### `signin.rs` and `credentials.rs` — email and password
+
+The rules (`credentials.rs`) are plain functions over two regexes: usernames
+match `^[a-z0-9][a-z0-9_-]{2,19}$`, with reserved words and every 42 login
+excluded; emails match the WHATWG pattern browsers use for `type="email"`,
+tightened to need a dot in the domain, and disposable domains are refused (a
+bundled CC0 list). The same email pattern decides whether the sign-in field
+holds an email or a username; passwords 10–128 characters,
+not one of the common ones (a bundled list), not the email or username. No
+"must contain a digit" rules, after NIST 800-63B.
+
+Hashing is argon2id at OWASP's baseline, run on the blocking pool behind a
+four-permit semaphore so a burst of sign-ins cannot take 19 MiB each without
+limit. `verify_password(_, None)` still hashes, against a decoy, so an unknown
+email takes as long as a wrong password.
+
+The pages are written so a visitor learns nothing they did not know:
+
+- **sign up** ends on "check your inbox" whether the address was new or not.
+  A known address gets a mail telling its owner, and no second account. Nobody
+  is signed in until they open the link, so not even a cookie differs.
+- **verify** and **reset** links are 64 random characters; only their SHA-256
+  is stored. Opening one shows a button and spends nothing, because mail
+  scanners open links to check them. The POST spends it, in one `UPDATE …
+  RETURNING`.
+- **sign in** takes an email or a username (whatever matches the email
+  pattern is an email) and answers "wrong username, email or password" for every failure,
+  including a username whose account has no password. Failures count per
+  account, so alternating the two spellings buys no extra tries.
+- **forgot** says the same thing for every address.
+- **reset** checks the new password before spending the link, ends every
+  session of the account, and confirms the address (the link came through it).
+
+`limits.rs` counts failures per email and per address in memory (a restart
+forgets, which is fine for this). `mail.rs` sends through Resend, or to the log
+on a test instance without a key, and never past `MAIL_DAILY_LIMIT` a day,
+with ten extra for resets.
+
+`ClientIp` (in `app.rs`) is where an address comes from: the right-most
+`X-Forwarded-For` entry when `TRUST_PROXY` is set (Caddy appends what it saw;
+anything to the left is the client's own claim), else the TCP peer. Addresses
+are only ever stored as `credentials::ip_hash`: an HMAC keyed with
+`IP_HASH_KEY` and the month, cut to 16 hex characters.
+
+### `account.rs` and `moderation.rs`
+
+The account page renames (once a month; a 42 student may take their own
+login back), adds and removes logins (never the last one, never the 42 login
+the 42 round depends on), adds or changes a password (the current one first,
+under the sign-in limit), and deletes the account: identities, password,
+sessions and name go; the row stays as `deleted-<id>` so past rounds add up;
+the 42 round's own record of a student is not the account's to delete.
+
+`/mod` is for `MODERATORS`, named by 42 login because anyone can pick a
+username. A ban signs the account out, keeps it out, and voids its guess in
+the open global round; closed rounds are not rewritten. The "worth a look"
+list groups accounts that signed up or guessed from one address hash, or
+signed up within ten minutes of each other. Hints for a human, never acted on
+by themselves.
+
+### The UI/UX spec (v2.0, `docs/ui-spec/`)
+
+v2.0 replaced v1.1's look and voice; the files are kept in `docs/ui-spec/`.
+The rules that live in code:
+
+- **Colour roles** (`static/style.css` header), as changed after review:
+  blue only on the one primary button (lock it in) and the chart bars;
+  links, tabs, other buttons and focus are white on black, inverting on
+  hover. Green is status and wins, red losses, amber the test line. No grey
+  panels: the status block is outlined on the page's black.
+- **The sealed box** is back for a locked number: green frame, red "sealed"
+  stamp, slammed on when the number was locked just now (`.sealed.fresh`).
+- **Copy** (`src/copy.rs`): every message the server writes, as lowercase
+  fragments. Templates follow the same register; privacy and imprint keep
+  full sentences.
+- **The cursor** (`.guess-field::after`): the one decorative animation.
+- **Usernames are public** in the global round; new SSO accounts pick theirs
+  at `/welcome` first, without starting the monthly rename wait.
+
+### The UI/UX spec (R1-R20)
+
+The round, results, day, trends and "me" pages follow the `ui-ux-improvements`
+spec (v1.1). The parts that are not just markup:
+
+- **Countdown (D1).** The page carries the deadline and the server's clock
+  (`data-closes-at`, `data-server-now`); app.js measures the gap once and again
+  on `visibilitychange` through `/api/round`, so the visitor's clock never moves
+  the deadline. Text ticks every second; the `aria-label` and the progress bar
+  once a minute; no `aria-live`. At zero it shows "revealing…", waits for
+  `/api/round` to report the next round, then opens the closed round's day page.
+- **Held guesses (D3).** A signed-out visitor's number goes into `held.rs`, a
+  server-side map keyed by a one-hour HttpOnly cookie, never the URL.
+  `signin::signed_in_to` - which every way of signing in ends in - locks it,
+  exactly once, or says why not (round closed, already guessed, unconfirmed).
+- **Locking (D4).** Sending the same guess twice is a success; a different one
+  keeps the first; a guess for a closed round is refused as "too late". The
+  primary key stays `(round, player)`, never the number.
+- **Stats (D5)** are worked out from guesses on every read (`stats::player_stats`).
+- **Anonymous labels (D6)** are an HMAC of the player id (`templates::anon_label`),
+  keyed by `ANON_LABEL_KEY` or a hash of the 42 client secret.
+- **Preview images (D7).** `og.rs` draws a round's picks into a 1200x630 PNG
+  with its own pixel font, for closed rounds only, cached in memory.
+- **Empty-then-populated (R9.10).** The cause was the stylesheet, not the data:
+  every section started hidden and appeared on a staggered delay, charts below
+  the fold held their bars until scrolled to, and trends played a fake
+  "analysing…" bar while the real work had already taken a few milliseconds on
+  the server. All three are gone; the timing is in a test-only details block.
+- **Wrong round date (R2.8).** Seen on a test instance whose admin clock had
+  been moved: the round shown was right for the game clock, but the header
+  showed the real time. The header clock now follows the game clock, and the
+  test banner says when it has been moved.
+
+### Points (`economy.rs`)
+
+Fake points for the global round only. Every movement is a `ledger` row and a
+balance is their sum; `UNIQUE (account_id, kind, ref)` makes each credit and
+charge happen at most once, which is what lets the code that writes them run
+as often as it likes:
+
+- `economy::collect` - the sign-up bonus (ref `signup`) - runs whenever a
+  verified player shows up.
+- `db::lock_global_guess` writes the guess, its stake and the day's grant
+  (both ref = the round) in one transaction, or none of them: refused when
+  the balance and the grant together are short of the stake, or the round
+  was called off. Daily points are for playing, not for visiting.
+- `economy::catch_up` runs after a guess is locked: a player who joined after
+  N global rounds is owed N × 135 (`CATCH_UP_PER_ROUND`), paid as a 30th of
+  it with each day they play (kind `catchup`, ref = the round), so a late
+  joiner starts level with the regulars without fake accounts getting it in
+  one go.
+- `db::settle_round` pays a closed round's stakes plus whatever rolled in to
+  its winner, or rolls the lot on, and writes the `pots` row that marks it
+  settled. `economy::run` settles every 30 seconds; the round page settles on
+  load too.
+
+All of `db.rs`'s transactions start with `BEGIN IMMEDIATE` (`write_tx`): a
+plain `BEGIN` that reads before it writes fails with "database is locked" when
+another writer commits in between, instead of waiting.
+
+### Bets (`odds.rs`, `bets.rs`)
+
+A bet is on the winning number landing in a range the player picks, or on
+nobody winning. `odds.rs` is pure: ranges and their keys, whether one won,
+the exact chances from last month's picks (a Poisson formula, worked out
+exactly for rounds of up to 100 players, no simulation) that give each range
+its starting chance, the book that moves it with the points already bet,
+and odds as fair odds less an 8% tax, rounded down to 0.05, at most 10000, and
+not offered below 1.05. Points stay integers: odds are stored in hundredths,
+payouts rounded down.
+
+`bets.rs` runs the replay once per open round, off the async threads, and
+caches it in `AppState.odds_base`; the book is read fresh on every page.
+`db::place_bet` reads the book inside its write transaction and asks the
+caller for a price, so a bet is placed at the odds shown or better, or not
+at all, and two bets at once each see the other. Caps: 100 a bet, 200 a
+round. `settle_bets` runs inside `settle_round`, so a round's pot and its
+bets are paid together or not at all, each at most once.
+
+### Testing it
+
+`testkit.rs` builds an app on a throwaway database with mail kept in memory,
+and gives session cookies and response helpers. `ui_tests.rs` checks the
+UI/UX spec against rendered pages. `oauth.rs`'s tests start a
+fake server that plays 42, GitHub and Google at once (a code stands for a
+person), so every callback runs end to end, PKCE included.
 
 ---
 
@@ -1905,7 +2130,8 @@ ones.
 
 ## `migrations/` — the schema
 
-One file, `0001_init.sql`, embedded into the binary at build time.
+Numbered files, embedded into the binary at build time and applied in order
+at startup. It starts with `0001_init.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS users (
@@ -1958,6 +2184,44 @@ The `DEFAULT 1` is what makes this safe on a live database — every row already
 there was a real entry, and SQLite backfills them without a rewrite. This is
 also why it is a **new file** rather than an edit to `0001`: that migration has
 already run on any deployed database and will never run again.
+
+`0005_accounts.sql` adds sign-in accounts without touching the 42 pool:
+
+```sql
+CREATE TABLE accounts (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    username  TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+    intra_id  INTEGER UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    ...
+);
+```
+
+Plus `identities` (one row per way of signing in) and `account_sessions`,
+which replaces `sessions`. It is written to run once on a live database:
+
+- every 42 user and hand-made stand-in gets an account named after their login,
+  with the `created_at`/`last_seen_at` of their `users` row;
+- generated `bot-###` players only get one if someone was signed in as them;
+- every session is copied **with its token**, so the deploy signs nobody out;
+- only then is `sessions` dropped.
+
+`users`, `guesses` and `payouts` are not altered, which is why every 42-pool
+query is unchanged. `intra_id` cascades because the only `users` rows ever
+deleted are stand-ins, and their accounts should go with them.
+
+The test `the_accounts_migration_keeps_everyone_signed_in_and_the_42_pool_unchanged`
+builds a database at 0004, fills it, migrates it and compares. To check a real
+database the same way (a copy is made, the file itself is never written):
+
+```bash
+MIGRATE_CHECK_DB=/path/to/game.db cargo test migrating_a_copy -- --ignored --nocapture
+```
+
+`0006_global_pool.sql` adds `global_guesses` (the same shape as `guesses`,
+keyed by account), the `global_players` view, and `accounts.verified_at`.
+`0007_sign_in.sql` adds `passwords`, `email_tokens` (hashes only) and
+`mail_log`, and two account columns: the sign-up address hash and when the
+username last changed.
 
 There is deliberately **no `winners` table**. Winners are derived from
 `guesses`, so there is no scheduled job, nothing to run at 12:42, and no way

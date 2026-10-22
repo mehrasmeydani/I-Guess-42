@@ -1,0 +1,38 @@
+{# The quote for a picked range: its chance, odds and a stake box. Shared
+   by the bets page and the fragment app.js swaps in as you type. #}
+{% match quote %}{% when Some with (q) %}
+<div class="quote">
+  <p class="quote-label">{{ q.label }}</p>
+  <dl class="quote-figures">
+    <div><dt>chance</dt><dd>{{ q.chance }}</dd></div>
+    {% match q.odds %}{% when Some with (o) %}
+    <div><dt>odds</dt><dd class="odds">{{ o }}</dd></div>
+    {# What the stake typed below brings back if it wins, stake included:
+       filled in by app.js as you type it. #}
+    {% if can_bet && !q.taken %}<div><dt>if it wins</dt><dd class="pays" data-odds="{{ q.odds_x100 }}" data-cap="{{ q.max_profit }}">&ndash;</dd></div>{% endif %}
+    {% when None %}{% endmatch %}
+  </dl>
+  <span class="quote-chance" aria-hidden="true"><i style="--w: calc({{ q.bp }} * 0.01%)"></i></span>
+  {% match q.odds %}
+  {% when None %}
+    <p class="lose">too safe to bet on &middot; after the {{ tax }} cut it pays less than it costs</p>
+  {% when Some with (o) %}
+    {% if !can_bet %}
+    {% else if q.taken %}<p class="dim">placed</p>
+    {% else if q.profit_left < 1 %}<p class="lose">your bets today can already win the most a day allows</p>
+    {% else if q.max_stake < 1 %}<p class="lose">keep {{ crate::economy::GUESS_STAKE }} for today&rsquo;s guess &middot; <a href="/g/">guess first</a>, then bet</p>
+    {% else %}
+    <form method="post" action="/g/bet" class="betform">
+      <input type="hidden" name="market" value="{{ q.key }}">
+      <input type="hidden" name="odds" value="{{ q.odds_x100 }}">
+      <input type="hidden" name="round" value="{{ round_key }}">
+      <input name="stake" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="10" aria-label="stake on {{ q.label }} at {{ o }}, at most {{ q.max_stake }}" autocomplete="off" required data-max="{{ q.max_stake }}" aria-describedby="cap-why">
+      <button type="submit">bet</button>
+    </form>
+    {# The two things to know before staking: the cap on a win, and the cut;
+       and, until today's guess is in, the 10 it needs. #}
+    <p class="hint cap-why" id="cap-why">you can stake up to <b>{{ q.max_stake }}</b> here{% if q.keeping %}, keeping {{ crate::economy::GUESS_STAKE }} for today&rsquo;s guess{% endif %} &middot; your bets today win at most <b class="win">+{{ crate::templates::points_label(q.profit_left) }}</b> together{% if q.profit_left < q.max_profit %} (of {{ crate::templates::points_label(q.max_profit) }}){% endif %}, {{ q.players }} players a day &times; {{ crate::odds::PROFIT_PER_PLAYER }} &middot; the house keeps {{ tax }}</p>
+    {% endif %}
+  {% endmatch %}
+</div>
+{% when None %}{% match pick_error %}{% when Some with (e) %}<p class="lose quote-error">{{ e }}</p>{% when None %}{% endmatch %}{% endmatch %}

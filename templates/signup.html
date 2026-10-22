@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Create an account &middot; i guess low{% endblock %}
+{% block heading %}{% endblock %}
+
+{# Already where that button leads. #}
+{% block signin_link %}{% endblock %}
+
+{% block content %}
+<section class="sec auth" style="--b: 0">
+  <div class="auth-card">
+    <h1 class="auth-title">create an account</h1>
+    <p class="auth-sub">or <a href="/login">42, github or google</a> &middot; no password</p>
+    {% include "_notice.html" %}
+    {% include "_errors.html" %}
+    {% if enabled %}
+    <form class="authform" method="post" action="/signup">
+      <label for="email">email</label>
+      <input id="email" name="email" type="email" autocomplete="email" required value="{{ email }}"
+             {% match errors.email %}{% when Some with (_e) %}aria-invalid="true" aria-describedby="email-error"{% when None %}{% endmatch %}>
+      {% match errors.email %}{% when Some with (e) %}<p class="field-error" id="email-error">{{ e }}</p>{% when None %}{% endmatch %}
+      <label for="username">username</label>
+      <input id="username" name="username" type="text" autocomplete="username" required
+             minlength="3" maxlength="20" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" value="{{ username }}"
+             aria-describedby="username-hint{% match errors.username %}{% when Some with (_e) %} username-error{% when None %}{% endmatch %}" spellcheck="false" autocapitalize="none"
+             {% match errors.username %}{% when Some with (_e) %}aria-invalid="true"{% when None %}{% endmatch %}>
+      {% match errors.username %}{% when Some with (e) %}<p class="field-error" id="username-error">{{ e }}</p>{% when None %}{% endmatch %}
+      <p class="hint" id="username-hint">3&ndash;20 · a-z, 0-9, - and _ · public</p>
+      <label for="password">password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" required
+             minlength="10" maxlength="128" aria-describedby="password-hint{% match errors.password %}{% when Some with (_e) %} password-error{% when None %}{% endmatch %}"
+             {% match errors.password %}{% when Some with (_e) %}aria-invalid="true"{% when None %}{% endmatch %}>
+      {% match errors.password %}{% when Some with (e) %}<p class="field-error" id="password-error">{{ e }}</p>{% when None %}{% endmatch %}
+      <p class="hint" id="password-hint">10+ characters · a few words work well</p>
+      {# The robot check (human.rs): app.js solves the challenge when the box
+         is ticked, or on submit. The honeypot field is off-screen; people
+         never see it, form-filling scripts fill it in. #}
+      <div class="captcha" data-bits="{{ captcha_bits }}">
+        <input type="hidden" name="captcha" value="{{ captcha }}">
+        <input type="hidden" name="nonce" value="">
+        <label class="captcha-box"><input type="checkbox" class="captcha-check" required><span class="captcha-text">i&rsquo;m not a robot</span></label>
+        <noscript><p class="field-error">the robot check needs javascript</p></noscript>
+      </div>
+      <div class="hp" aria-hidden="true"><label>website <input name="website" type="text" tabindex="-1" autocomplete="off"></label></div>
+      <button type="submit" class="primary">create account</button>
+    </form>
+    <p class="auth-fine">one confirm mail · resets only on request · <a href="/privacy">privacy</a></p>
+    {% else %}
+    <p class="message">email sign-up not available here</p>
+    {% endif %}
+  </div>
+  <p class="auth-foot">already have an account? <a href="/login">sign in</a></p>
+</section>
+{% endblock %}
