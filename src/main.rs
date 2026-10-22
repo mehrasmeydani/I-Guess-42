@@ -158,6 +158,7 @@ async fn main() -> Result<()> {
         .route("/mod/warn", post(moderation::warn))
         .route("/mod/unban", post(moderation::unban))
         .route("/mod/adjust", post(moderation::adjust))
+        .route("/mod/rename", post(moderation::rename))
         .route("/mod/void", post(moderation::void))
         .route("/privacy", get(moderation::privacy))
         .route("/imprint", get(moderation::imprint))

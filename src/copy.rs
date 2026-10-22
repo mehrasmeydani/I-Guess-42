@@ -42,6 +42,7 @@ pub fn notice(code: &str) -> Option<(&'static str, &'static str)> {
         "banned" => ("ok", "banned"),
         "unbanned" => ("ok", "unbanned"),
         "adjusted" => ("ok", "points adjusted"),
+        "mod_renamed" => ("ok", "account renamed"),
         "called_off" => ("ok", "round called off · stakes refunded"),
         "warned" => ("ok", "warning sent"),
         "warned_no_mail" => ("error", "warned in the record · no email on that account to send it to"),
@@ -168,7 +169,7 @@ mod tests {
             "held_unverified", "broke", "voided", "verified", "password_set", "resent",
             "resend_wait", "mail_failed", "signed_out", "deleted", "linked", "already_linked",
             "linked_elsewhere", "unlinked", "renamed", "password_changed", "password_added", "banned",
-            "unbanned", "adjusted", "called_off", "added", "added_ghost", "cleared", "not_demo",
+            "unbanned", "adjusted", "mod_renamed", "called_off", "added", "added_ghost", "cleared", "not_demo",
             "bad_login", "bad_guess", "bet_placed", "bet_twice", "bet_cap", "bet_closed", "bet_odds",
             "bet_market", "bet_slow", "streak_claimed", "bet_over_cap", "bet_keep", "warned", "warned_no_mail", "bet_round_cap", "round_changed", "bets_not_open",
         ];

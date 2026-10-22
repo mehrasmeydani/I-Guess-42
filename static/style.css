@@ -724,6 +724,8 @@ form.inline { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
 .check input { accent-color: var(--hi); }
 .hint, .empty, .tally, .nowinner { color: var(--dim); margin-top: 8px; }
 .hint strong { color: var(--hi); }
+/* A hint that is a warning: renaming starts a 30-day wait. */
+.hint.warn { color: var(--env); }
 .login { color: var(--dim); }
 .value { color: var(--state); font-weight: 700; font-size: var(--fs-3); }
 .ghosttag { color: var(--dim); }
