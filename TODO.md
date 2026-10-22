@@ -65,7 +65,7 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 
 ## 6. Release day
 
-- [ ] Run the migration check on a copy of the live backup (migrations
+- [x] Run the migration check on a copy of the live backup (22.10.2026, backup of 16:22: 105 users, 204 sessions kept, 444 guesses and 20 payouts unchanged) (migrations
       0005-0014, including 0011 and 0014, which rebuild the points ledger):
       `MIGRATE_CHECK_DB=/path/to/backup.db cargo test migrating_a_copy -- --ignored --nocapture`
 - [x] Push `global` (pushed; push again before merging if it moved).
