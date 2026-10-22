@@ -248,6 +248,8 @@ a.tag { color: var(--fg); text-decoration: underline; }
 .top-stats .streak { color: var(--fg); text-decoration: none; }
 .top-stats a:hover { background: none; color: var(--hi); text-decoration: underline; }
 .menu-only { display: none; }
+/* A tab named one way in the row, another in the phone menu. */
+.label-menu { display: none; }
 /* The clock, and on a phone the round switch beside it. */
 .clock-row { display: flex; align-items: center; gap: 12px; }
 .pools-clock { display: none; }
@@ -1072,6 +1074,8 @@ details.expand[open] summary .when-open { display: inline; }
   }
   .js .menu .pools { order: 1; flex: none; align-self: stretch; }
   .js .menu .menu-only { display: block; order: 2; margin: 0; color: var(--dim); }
+  .js .menu .label-wide { display: none; }
+  .js .menu .label-menu { display: inline; }
   /* One row: logo, streak and points, the button. */
   .js .top { flex-wrap: nowrap; }
   .js .top-stats { order: 0; font-size: var(--fs-1); gap: 10px; }
