@@ -1077,7 +1077,7 @@ details.expand[open] summary .when-open { display: inline; }
   .js .menu .label-wide { display: none; }
   .js .menu .label-menu { display: inline; }
   /* One row: logo, streak and points, the button. */
-  .js .top { flex-wrap: nowrap; }
+  .js .top { flex-wrap: nowrap; padding-block: 6px; }
   .js .top-stats { order: 0; font-size: var(--fs-1); gap: 10px; }
   .js .top-stats:not(:empty) + .menu-btn { margin-left: 0; }
   .js .top-stats ~ .menu .status { order: -1; }
