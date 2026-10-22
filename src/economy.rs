@@ -28,20 +28,34 @@ pub const DAILY_GRANT: i64 = 100;
 /// What a guess costs. It goes into the round's pot.
 pub const GUESS_STAKE: i64 = 10;
 
-/// Every this many days in a row played in the global round...
+/// Streak prizes, claimed by the player: days in a row played in the global
+/// round, and what reaching them is worth. Something to reach most weeks of
+/// the first month, and more the longer it lasts.
+pub const STREAK_LADDER: [(i64, i64); 5] = [(3, 100), (7, 300), (14, 700), (21, 1000), (30, 2000)];
+/// Past the ladder's top, every this many days in a row...
 pub const STREAK_DAYS: i64 = 10;
-/// ...is worth this, once the player claims it.
+/// ...is worth this: a player who never misses a day earns what they did
+/// when this was the only prize (100 a day), and nobody earns less.
 pub const STREAK_BONUS: i64 = 1000;
+
+/// What the `run`-th day in a row is worth, if anything.
+pub fn streak_prize(run: i64) -> i64 {
+    let top = STREAK_LADDER[STREAK_LADDER.len() - 1].0;
+    match STREAK_LADDER.iter().find(|s| s.0 == run) {
+        Some(s) => s.1,
+        None if run > top && run % STREAK_DAYS == 0 => STREAK_BONUS,
+        None => 0,
+    }
+}
 
 /// A late joiner starts level with the regulars: for every global round
 /// played before they joined they are owed this much, about what a regular
-/// earned from it - the daily 100, and the 1000 streak bonus every tenth
-/// day that someone playing nine days in ten reaches about a third of the
-/// time. Simulated over half a year of growth (fast, slow, a boom then
+/// earned from it: someone playing nine days in ten gets 90 of daily points
+/// and, simulated, about 59 from the streak prizes. Simulated over half a year of growth (fast, slow, a boom then
 /// quiet), it gave players who joined in month five the same chance at
 /// the top ten as those of month one; scaling the daily points with the
 /// number of players did not, since the regulars get the raise too.
-pub const CATCH_UP_PER_ROUND: i64 = 135;
+pub const CATCH_UP_PER_ROUND: i64 = 150;
 /// ...paid in this many equal parts, one with each day they play: not all at
 /// once, so an account made to farm it has to play a month for it.
 pub const CATCH_UP_PARTS: i64 = 30;
@@ -82,28 +96,42 @@ pub async fn catch_up(db: &Db, account_id: i64, round: &str) -> Result<i64> {
 
 /// Streak bonuses earned and not claimed yet: the days that completed ten
 /// in a row (today's guess counts), each as its ledger ref "streak:<day>".
-pub async fn unclaimed_streaks(db: &Db, account_id: i64) -> Result<Vec<String>> {
+pub async fn unclaimed_streaks(db: &Db, account_id: i64) -> Result<Vec<Streak>> {
     let days: Vec<chrono::NaiveDate> = db::global_play_days(db, account_id)
         .await?
         .iter()
         .filter_map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
         .collect();
     let claimed = db::ledger_refs(db, account_id, "streak").await?;
-    Ok(crate::stats::streak_milestones(&days, STREAK_DAYS)
+    Ok(crate::stats::streak_runs(&days)
         .into_iter()
-        .map(|d| format!("streak:{}", d.format("%Y-%m-%d")))
-        .filter(|r| !claimed.contains(r))
+        .map(|(d, run)| Streak { day: d.format("%Y-%m-%d").to_string(), run, prize: streak_prize(run) })
+        .filter(|s| s.prize > 0 && !claimed.contains(&s.ledger_ref()))
         .collect())
 }
 
-/// Credits every streak bonus earned and not claimed yet, each at most once
+/// A streak prize earned: the day, how many in a row it made, and its worth.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Streak {
+    pub day: String,
+    pub run: i64,
+    pub prize: i64,
+}
+
+impl Streak {
+    pub fn ledger_ref(&self) -> String {
+        format!("streak:{}", self.day)
+    }
+}
+
+/// Credits every streak prize earned and not claimed yet, each at most once
 /// however often this runs. Returns the points credited.
 pub async fn claim_streaks(db: &Db, account_id: i64) -> Result<i64> {
     let mut got = 0;
-    for r in unclaimed_streaks(db, account_id).await? {
-        let day = r.trim_start_matches("streak:").to_string();
-        if db::credit_once(db, account_id, &day, "streak", STREAK_BONUS, &r, Some("10 days in a row")).await? {
-            got += STREAK_BONUS;
+    for s in unclaimed_streaks(db, account_id).await? {
+        let note = format!("{} days in a row", s.run);
+        if db::credit_once(db, account_id, &s.day, "streak", s.prize, &s.ledger_ref(), Some(&note)).await? {
+            got += s.prize;
         }
     }
     Ok(got)
@@ -189,36 +217,47 @@ mod tests {
         sqlx::query_as::<_, (i64,)>(sql).fetch_one(db).await.unwrap().0
     }
 
+    #[test]
+    fn the_streak_ladder_then_every_tenth_day() {
+        let paid: Vec<(i64, i64)> = (1..=60).map(|r| (r, streak_prize(r))).filter(|p| p.1 > 0).collect();
+        assert_eq!(paid, vec![(3, 100), (7, 300), (14, 700), (21, 1000), (30, 2000), (40, 1000), (50, 1000), (60, 1000)]);
+        // Never missing a day pays what the old 1000-every-ten did, on average.
+        let first_hundred: i64 = (1..=100).map(streak_prize).sum();
+        assert!(first_hundred >= 100 * 100, "{first_hundred}");
+    }
+
     #[tokio::test]
-    async fn ten_days_in_a_row_is_a_bonus_claimed_once() {
+    async fn a_streak_prize_is_offered_and_claimed_once() {
         let (_t, state) = app(&[]).await;
         let ann = player(&state.db, "ann").await;
         let today = Round::current(state.now()).date;
         let day = |back: i64| (today - chrono::Duration::days(back)).format("%Y-%m-%d").to_string();
-        // Nine days in a row, ending yesterday: nothing yet.
-        for back in 1..=9 {
+        // Two days in a row, ending yesterday: nothing yet.
+        for back in 1..=2 {
             plays(&state.db, ann, &day(back), 2).await;
         }
         assert!(unclaimed_streaks(&state.db, ann).await.unwrap().is_empty());
         let index = || handlers::global_index(State(state.clone()), jar("ann"), Query(IndexQuery { msg: None, n: None }));
         assert!(!body(index().await.unwrap()).await.contains("claim-card"));
 
-        // Today makes ten: the pop-up offers 1 000.
+        // Today makes three: the pop-up offers the first rung.
         plays(&state.db, ann, &day(0), 2).await;
-        assert_eq!(unclaimed_streaks(&state.db, ann).await.unwrap(), vec![format!("streak:{}", day(0))]);
+        let prize = STREAK_LADDER[0].1;
+        assert_eq!(unclaimed_streaks(&state.db, ann).await.unwrap(), vec![Streak { day: day(0), run: 3, prize }]);
         let html = body(index().await.unwrap()).await;
-        assert!(html.contains("claim-card") && html.contains(&format!("+{}", crate::templates::points_label(&STREAK_BONUS))) && html.contains(r#"action="/g/streak""#), "{html}");
+        assert!(html.contains("claim-card") && html.contains("3 days in a row") && html.contains(&format!("+{}", crate::templates::points_label(&prize))) && html.contains(r#"action="/g/streak""#), "{html}");
 
         let before = db::balance(&state.db, ann).await.unwrap();
         let resp = handlers::claim_streak(State(state.clone()), jar("ann")).await.unwrap();
         assert_eq!(location(&resp), "/g/?msg=streak_claimed");
-        assert_eq!(db::balance(&state.db, ann).await.unwrap(), before + STREAK_BONUS);
+        assert_eq!(db::balance(&state.db, ann).await.unwrap(), before + prize);
         // Again: nothing more, and the pop-up is gone.
         let resp = handlers::claim_streak(State(state.clone()), jar("ann")).await.unwrap();
         assert_eq!(location(&resp), "/g/");
-        assert_eq!(db::balance(&state.db, ann).await.unwrap(), before + STREAK_BONUS);
+        assert_eq!(db::balance(&state.db, ann).await.unwrap(), before + prize);
         assert!(!body(index().await.unwrap()).await.contains("claim-card"));
         let html = body(crate::points_pages::points(State(state.clone()), jar("ann")).await.unwrap()).await;
+        assert!(html.contains("3 days in a row") && html.contains("then every 10 days"), "the ladder is on the points page");
         assert!(html.contains("streak bonus"));
         // Signed out: to sign in.
         let resp = handlers::claim_streak(State(state.clone()), CookieJar::new()).await.unwrap();

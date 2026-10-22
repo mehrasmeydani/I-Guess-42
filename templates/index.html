@@ -47,9 +47,9 @@
     <div class="claim">
       <input type="checkbox" id="claim-later" class="claim-x sr" aria-label="claim later">
       <div class="claim-card" role="dialog" aria-labelledby="claim-h">
-        <p class="claim-when">10 days in a row</p>
+        <p class="claim-when">{{ streak_run }} days in a row</p>
         <p class="claim-num" id="claim-h"><b class="win">+{{ pts }}</b></p>
-        <p class="claim-why">a streak bonus, yours to take</p>
+        <p class="claim-why">a streak prize, yours to take</p>
         <form method="post" action="/g/streak" class="claim-form"><button type="submit" class="claim-btn">claim</button></form>
         <label class="claim-later" for="claim-later">later</label>
       </div>

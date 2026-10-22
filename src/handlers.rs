@@ -205,14 +205,16 @@ async fn index_in(
         }
         None => None,
     };
-    // Ten days in a row in the global round is worth a bonus, claimed from a
-    // pop-up here: the total waiting, if any.
-    let streak_bonus = match player.filter(|_| pool == Pool::Global) {
+    // Days in a row in the global round earn streak prizes, claimed from a
+    // pop-up here: the total waiting, and the longest run behind it.
+    let (streak_bonus, streak_run) = match player.filter(|_| pool == Pool::Global) {
         Some(p) => {
-            let waiting = crate::economy::unclaimed_streaks(&state.db, p).await?.len() as i64;
-            (waiting > 0).then(|| crate::templates::points_label(&(waiting * crate::economy::STREAK_BONUS)))
+            let waiting = crate::economy::unclaimed_streaks(&state.db, p).await?;
+            let total: i64 = waiting.iter().map(|s| s.prize).sum();
+            let run = waiting.iter().map(|s| s.run).max().unwrap_or(0);
+            ((total > 0).then(|| crate::templates::points_label(&total)), run)
         }
-        None => None,
+        None => (None, 0),
     };
     // "saved" is said by the confirmation panel itself, not by a notice.
     let just_locked = query.msg.as_deref() == Some("saved") && my_guess_label.is_some();
@@ -231,6 +233,7 @@ async fn index_in(
     Ok(templates::render(&IndexTemplate {
         pool,
         streak_bonus,
+        streak_run,
         can_play: player.is_some(),
         signed_in: viewer.is_some(),
         user: viewer.map(UserView::from),

@@ -1607,7 +1607,7 @@ as often as it likes:
   their bets do not move the odds. Migration 0015 does the same to their
   earlier guesses.
 - `economy::catch_up` runs after a guess is locked: a player who joined after
-  N global rounds is owed N × 135 (`CATCH_UP_PER_ROUND`), paid as a 30th of
+  N global rounds is owed N × 150 (`CATCH_UP_PER_ROUND`), paid as a 30th of
   it with each day they play (kind `catchup`, ref = the round), so a late
   joiner starts level with the regulars without fake accounts getting it in
   one go.

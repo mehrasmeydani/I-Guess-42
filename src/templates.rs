@@ -312,6 +312,8 @@ pub struct IndexTemplate {
     pub pool: Pool,
     /// Streak bonus points waiting to be claimed, "1 000 pts": the pop-up.
     pub streak_bonus: Option<String>,
+    /// How many days in a row the prize waiting is for.
+    pub streak_run: i64,
     pub user: Option<UserView>,
     pub test_mode: bool,
     /// Browsing as a demo account, with an admin session parked to return to.
