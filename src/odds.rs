@@ -542,6 +542,27 @@ fn averaged(picks: &[i64], sizes: &[usize]) -> Dist {
     out.unwrap_or_default()
 }
 
+/// The most of one bettor's stakes on a round that counts as evidence: a
+/// whale is one opinion, not a crowd. Above it, their bets count in
+/// proportion, together this much.
+pub const BOOK_PER_BETTOR: i64 = 100;
+
+/// The book as evidence: open bets (market, stake, account), each account's
+/// stakes scaled down together to at most `BOOK_PER_BETTOR`.
+pub fn book_from(bets: &[(Market, i64, i64)]) -> Vec<(Market, i64)> {
+    let mut per_account: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for (_, stake, account) in bets {
+        *per_account.entry(*account).or_default() += stake;
+    }
+    bets.iter()
+        .map(|(m, stake, account)| {
+            let total = per_account[account].max(1);
+            let counted = if total <= BOOK_PER_BETTOR { *stake } else { (stake * BOOK_PER_BETTOR / total).max(1) };
+            (*m, counted)
+        })
+        .collect()
+}
+
 /// The chance of `market` now: the starting chance, moved by the points
 /// already on its book (winner bets, or most-picked bets). Each bet backs its
 /// own range; where that overlaps `market`, it counts for `market` in
@@ -848,6 +869,21 @@ mod tests {
         let flood = vec![(target, 100); 500];
         assert!(chance(&b, &flood, target) > 0.9);
         assert!(chance(&b, &flood, target) <= P_MAX);
+    }
+
+    #[test]
+    fn one_bettor_is_one_opinion_however_much_they_stake() {
+        let (a, b) = (r(10, Some(19)), r(2, Some(2)));
+        // One account: 600 on 10-19 and 200 on 2 count as 75 and 25.
+        assert_eq!(book_from(&[(a, 600, 1), (b, 200, 1)]), vec![(a, 75), (b, 25)]);
+        // Two people with 100 each count fully: two opinions.
+        assert_eq!(book_from(&[(a, 100, 1), (a, 100, 2)]), vec![(a, 100), (a, 100)]);
+        let base = crowd();
+        let whale = chance(&base, &book_from(&[(a, 600, 1)]), a);
+        let crowd_of_six = chance(&base, &book_from(&(1..=6).map(|n| (a, 100, n)).collect::<Vec<_>>()), a);
+        assert!(whale < crowd_of_six, "{whale} vs {crowd_of_six}");
+        let start = chance(&base, &[], a);
+        assert!(whale - start < 0.1, "a whale nudges, not drags: {start} -> {whale}");
     }
 
     #[test]

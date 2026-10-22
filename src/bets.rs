@@ -47,8 +47,10 @@ pub async fn todays_base(state: &AppState) -> Result<Arc<Base>, AppError> {
 }
 
 /// Stored bets as the odds see them; anything unreadable is left out.
-fn parse_book(rows: &[(String, i64)]) -> Vec<(Market, i64)> {
-    rows.iter().filter_map(|(k, s)| Market::parse(k).map(|m| (m, *s))).collect()
+/// Each bettor's money counting at most `odds::BOOK_PER_BETTOR`.
+fn parse_book(rows: &[(String, i64, i64)]) -> Vec<(Market, i64)> {
+    let bets: Vec<(Market, i64, i64)> = rows.iter().filter_map(|(k, s, a)| Market::parse(k).map(|m| (m, *s, *a))).collect();
+    odds::book_from(&bets)
 }
 
 /// The open round's quotes for `markets`, as the book stands now.
@@ -135,6 +137,8 @@ fn offer_views(base: &Base, book: &[(Market, i64)], markets: Vec<Market>, picked
             odds: qt.odds_x100.map(odds::odds_label),
             on: picked == Some(qt.market),
             pct: qt.chance_bp * 100 / top,
+            // Shortened by bets on it, not by the picks: said on the row.
+            moved: odds::quote(base, &[], qt.market).odds_x100 != qt.odds_x100,
         })
         .collect()
 }
@@ -342,7 +346,7 @@ pub async fn place(
     // Priced against the book as it stands when the bet goes in: at the
     // odds shown, or better if they lengthened since.
     let shown = form.odds;
-    let price = |rows: &[(String, i64)]| odds::quote(&base, &parse_book(rows), market).odds_x100.filter(|o| *o >= shown);
+    let price = |rows: &[(String, i64, i64)]| odds::quote(&base, &parse_book(rows), market).odds_x100.filter(|o| *o >= shown);
     let code = match db::place_bet(&state.db, viewer.account.id, &open, &market.key(), stake, db::BetLimits { max_profit: base.max_profit(), keep: crate::economy::GUESS_STAKE }, price).await? {
         Placed::In => "bet_placed",
         Placed::Already => "bet_twice",
@@ -595,7 +599,7 @@ mod tests {
         })
         .await
         .unwrap();
-        assert_eq!(seen, vec![("range:1:4".to_string(), 30)]);
+        assert_eq!(seen, vec![("range:1:4".to_string(), 30, ann)]);
     }
 
     #[tokio::test]
@@ -854,6 +858,9 @@ mod tests {
         place(State(state.clone()), jar("ann"), form(&state, mid, "50", mid0)).await.unwrap();
         let mid1 = odds_for(&state, mid).await;
         assert!(mid1 < mid0, "backed: shorter, {mid0} -> {mid1}");
+        // The board says why that price moved.
+        let html = bets_page_q(&state, None, picked("range:4:5")).await;
+        assert!(html.contains("&#9650; bets"), "a range shortened by bets is marked");
         assert_eq!(odds_for(&state, high).await, high0, "not backed: never longer than it started");
         // Bob is shown the new odds; the old ones are gone.
         let resp = place(State(state.clone()), jar("bob"), form(&state, mid, "50", mid0)).await.unwrap();

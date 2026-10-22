@@ -2481,7 +2481,7 @@ pub enum Placed {
 /// up to the account's points - less `keep` while the account has not
 /// guessed in the round yet, so a bet never costs anyone their guess.
 /// `price` is given the round's open bets
-/// (market, stake) as they stand inside the transaction, and returns the
+/// (market, stake, account) as they stand inside the transaction, and returns the
 /// odds to place at, or None to refuse: so two bets at once each see the
 /// other, and nobody gets odds the book has already moved past.
 /// What an account's open bets on a round could win together, over their
@@ -2520,7 +2520,7 @@ pub async fn place_bet(
     market: &str,
     stake: i64,
     limits: BetLimits,
-    price: impl FnOnce(&[(String, i64)]) -> Option<i64>,
+    price: impl FnOnce(&[(String, i64, i64)]) -> Option<i64>,
 ) -> Result<Placed> {
     if stake < 1 {
         return Ok(Placed::BadStake);
@@ -2559,7 +2559,7 @@ pub async fn place_bet(
     if guessed.is_none() && balance - stake < limits.keep {
         return Ok(Placed::KeepForGuess);
     }
-    let book: Vec<(String, i64)> = sqlx::query_as("SELECT market, stake FROM bets WHERE round_date = ?1 AND result IS NULL")
+    let book: Vec<(String, i64, i64)> = sqlx::query_as("SELECT market, stake, account_id FROM bets WHERE round_date = ?1 AND result IS NULL")
         .bind(round_date)
         .fetch_all(&mut *tx)
         .await?;
@@ -2709,9 +2709,9 @@ pub async fn bets_of(db: &Db, account_id: i64, since: &str) -> Result<Vec<Bet>> 
     Ok(rows)
 }
 
-/// The open bets on a round, (market, stake): what moves its odds.
-pub async fn book(db: &Db, round_date: &str) -> Result<Vec<(String, i64)>> {
-    Ok(sqlx::query_as("SELECT market, stake FROM bets WHERE round_date = ?1 AND result IS NULL")
+/// The open bets on a round, (market, stake, account): what moves its odds.
+pub async fn book(db: &Db, round_date: &str) -> Result<Vec<(String, i64, i64)>> {
+    Ok(sqlx::query_as("SELECT market, stake, account_id FROM bets WHERE round_date = ?1 AND result IS NULL")
         .bind(round_date)
         .fetch_all(db)
         .await?)

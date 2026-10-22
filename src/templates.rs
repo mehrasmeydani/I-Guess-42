@@ -571,6 +571,8 @@ pub struct OfferView {
     pub on: bool,
     /// Bar length against the likeliest on the board, 0-100.
     pub pct: i64,
+    /// Its odds were shortened by bets on it.
+    pub moved: bool,
 }
 
 /// The range the visitor picked, priced.

@@ -684,6 +684,12 @@ move the book; today's guesses never go in (secret until 12:42). A heavy bet
 on one number can hint at what its bettor picked - that is the bettor's own
 choice to make.
 
+One bettor is one opinion: each account's stakes on a round count as
+evidence up to 100 points together (`odds::BOOK_PER_BETTOR`), scaled down in
+proportion above that. A 600-point bet moves its range as far as a 100-point
+one; six people betting 100 move it six times as far. Ranges whose odds bets
+have shortened are marked "▲ bets" on the board.
+
 ### 9.4 From chance to odds: the tax
 
 ```

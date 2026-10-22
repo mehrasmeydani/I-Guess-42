@@ -61,7 +61,7 @@
         <tr{% if o.on %} class="on"{% endif %}>
           <td><a href="/g/bets?m={{ o.key }}">{{ o.label }}</a></td>
           <td class="barcell chance"><span class="minibar" style="--w: {{ o.pct }}%"></span><b>{{ o.chance }}</b></td>
-          <td class="num odds">{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
+          <td class="num odds">{% if o.moved %}<span class="moved" title="shortened by bets on it">&#9650; bets</span> {% endif %}{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
         </tr>
       {% endfor %}
     </tbody>
@@ -79,7 +79,7 @@
         <tr{% if o.on %} class="on"{% endif %}>
           <td><a href="/g/bets?m={{ o.key }}">{{ o.label }}</a></td>
           <td class="barcell chance"><span class="minibar" style="--w: {{ o.pct }}%"></span><b>{{ o.chance }}</b></td>
-          <td class="num odds">{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
+          <td class="num odds">{% if o.moved %}<span class="moved" title="shortened by bets on it">&#9650; bets</span> {% endif %}{% match o.odds %}{% when Some with (x) %}{{ x }}{% when None %}<span class="dim">&ndash;</span>{% endmatch %}</td>
         </tr>
       {% endfor %}
     </tbody>

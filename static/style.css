@@ -1165,6 +1165,7 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .markets .chance .minibar { background: var(--action); }
 .markets .chance b { color: var(--fg); font-weight: 400; }
 .markets .odds, .quote-figures .odds, .quote-figures .pays { color: var(--state); font-weight: 700; }
+.markets .moved { margin-right: 8px; color: var(--fg); font-size: var(--fs-1); font-weight: 400; }
 .quote-figures .pays small { color: var(--fg); font-size: var(--fs-1); font-weight: 400; margin-left: 6px; }
 .cap-why { margin-top: 8px; }
 .cap-why.hit { color: var(--hi); }
