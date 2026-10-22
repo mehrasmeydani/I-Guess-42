@@ -124,7 +124,7 @@ pub async fn rename(
         return refuse(crate::copy::NO_SUCH_ACCOUNT).await;
     };
     let new = normalize_username(&form.new_username);
-    if let Some(why) = crate::credentials::username_problem(&new) {
+    if let Some(why) = crate::credentials::username_problem_for_moderator(&new) {
         return refuse(why).await;
     }
     if !db::rename_account(&state.db, target.id, &new, false).await? {
@@ -338,6 +338,10 @@ mod tests {
         assert_eq!(location(&ren("rude", "ann").await.unwrap()), "/mod?msg=mod_renamed");
         let (name, changed): (String, Option<String>) = sqlx::query_as("SELECT username, username_changed_at FROM accounts WHERE username = 'ann'").fetch_one(&t.db).await.unwrap();
         assert_eq!((name.as_str(), changed.as_deref()), ("ann", Some("2099-01-01T00:00:00Z")), "renamed, and no new wait started");
+        // A hidden test account is a moderator's to name; nobody picks one.
+        assert_eq!(location(&ren("ann", "test_00").await.unwrap()), "/mod?msg=mod_renamed");
+        assert_eq!(crate::credentials::username_problem("test_00"), Some(crate::copy::USERNAME_RESERVED));
+        assert_eq!(location(&ren("test_00", "ann").await.unwrap()), "/mod?msg=mod_renamed");
         // Taken, malformed or unknown: refused.
         assert_eq!(ren("ann", "megardes").await.unwrap().status(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(ren("ann", "a").await.unwrap().status(), StatusCode::UNPROCESSABLE_ENTITY);

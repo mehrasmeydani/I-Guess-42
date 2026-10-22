@@ -164,7 +164,12 @@ pub async fn rename(
     if username == viewer.account.username {
         return Ok(Redirect::to("/account").into_response());
     }
-    if let Some(why) = username_problem(&username) {
+    let problem = if waits_to_rename(&state, &viewer) {
+        username_problem(&username)
+    } else {
+        credentials::username_problem_for_moderator(&username)
+    };
+    if let Some(why) = problem {
         return refuse(&state, viewer, why).await;
     }
     if waits_to_rename(&state, &viewer) {
