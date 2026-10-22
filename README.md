@@ -336,6 +336,7 @@ watching it, and a container restart drops whatever requests are in flight.
 | `ALLOWED_CAMPUS_IDS` | no | `53` (42 Vienna); empty lets every campus in |
 | `IGLCP_API_KEY` | no | empty (no coalition points); pays everyone who played a round and more to its winner, ignored in test mode |
 | `IGLCP_API_URL` | no | `https://iglcp-api.42vienna.com` |
+| `IMPRINT_NAME` / `IMPRINT_ADDRESS` / `IMPRINT_EMAIL` | no | empty; who runs the site, shown on `/imprint` (the live site needs a name and an email) |
 | `RUST_LOG` | no | `i_guess_42=info,tower_http=warn` |
 | `ENV_FILE` | no | `.env`; point it at another file to keep two setups side by side |
 
