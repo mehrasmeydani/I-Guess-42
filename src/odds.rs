@@ -666,6 +666,59 @@ pub fn chance_label(bp: i64) -> String {
     }
 }
 
+/// A board's chances as shown, in hundredths of a percent, adding up to
+/// exactly 100%: each rounded down to the step it is shown in (whole
+/// percent from 10%, a tenth from 1%, a hundredth below), then the steps
+/// still missing handed back to the rows that lost most in rounding
+/// (largest remainder). Every row with a chance keeps at least 0.01%.
+pub fn shown_to_100(chances: &[f64]) -> Vec<i64> {
+    const ALL: i64 = 10_000;
+    let total: f64 = chances.iter().sum();
+    if total <= 0.0 {
+        return vec![0; chances.len()];
+    }
+    let exact: Vec<f64> = chances.iter().map(|p| p / total * ALL as f64).collect();
+    let step = |x: f64| if x >= 1000.0 { 100 } else if x >= 100.0 { 10 } else { 1 };
+    let mut shown: Vec<i64> = exact.iter().map(|&x| ((x / step(x) as f64).floor() as i64 * step(x)).max(i64::from(x > 0.0))).collect();
+    let mut left = ALL - shown.iter().sum::<i64>();
+    // Rows by what rounding took from them, most first.
+    let mut order: Vec<usize> = (0..exact.len()).collect();
+    order.sort_by(|&a, &b| (exact[b] - shown[b] as f64).total_cmp(&(exact[a] - shown[a] as f64)));
+    loop {
+        let before = left;
+        for &i in &order {
+            let s = step(exact[i]);
+            if s <= left {
+                shown[i] += s;
+                left -= s;
+            }
+        }
+        if left == 0 || left == before {
+            break;
+        }
+    }
+    // What no row's step fits (or a row's 0.01% that was not there to
+    // give): settled on the row with the finest step.
+    if left != 0 {
+        if let Some(i) = (0..exact.len()).filter(|&i| exact[i] > 0.0).min_by_key(|&i| (step(exact[i]), std::cmp::Reverse(shown[i]))) {
+            shown[i] += left;
+        }
+    }
+    shown
+}
+
+/// A chance in hundredths of a percent, written with as few decimals as it
+/// has: "25%", "3.3%", "0.85%".
+pub fn exact_label(bp: i64) -> String {
+    if bp % 100 == 0 {
+        format!("{}%", bp / 100)
+    } else if bp % 10 == 0 {
+        format!("{}.{}%", bp / 100, bp % 100 / 10)
+    } else {
+        format!("{}.{:02}%", bp / 100, bp % 100)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -904,6 +957,30 @@ mod tests {
         assert!(whale < crowd_of_six, "{whale} vs {crowd_of_six}");
         let start = chance(&base, &[], a);
         assert!(whale - start < 0.1, "a whale nudges, not drags: {start} -> {whale}");
+    }
+
+    #[test]
+    fn a_board_shows_exactly_100_percent() {
+        // The live site's board: rounded on its own it showed 100.7%.
+        let live = [0.2036, 0.1795, 0.1123, 0.2421, 0.1597, 0.0333, 0.0080, 0.0252, 0.0510];
+        let shown = shown_to_100(&live);
+        assert_eq!(shown.iter().sum::<i64>(), 10_000, "{shown:?}");
+        let labels: Vec<String> = shown.iter().map(|&b| exact_label(b)).collect();
+        assert_eq!(labels[0].trim_end_matches('%').parse::<f64>().unwrap().round(), 20.0, "{labels:?}");
+        // Any board at all: always exactly 100%, every row in its own step.
+        use rand::{Rng, SeedableRng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(3);
+        for _ in 0..2000 {
+            let n = rng.gen_range(2..12);
+            let raw: Vec<f64> = (0..n).map(|_| rng.gen_range(0.0001..1.0f64).powi(3)).collect();
+            let shown = shown_to_100(&raw);
+            assert_eq!(shown.iter().sum::<i64>(), 10_000, "{raw:?} -> {shown:?}");
+            assert!(shown.iter().all(|&b| b >= 1), "every chance shows: {shown:?}");
+        }
+        assert_eq!(exact_label(2500), "25%");
+        assert_eq!(exact_label(330), "3.3%");
+        assert_eq!(exact_label(85), "0.85%");
+        assert_eq!(exact_label(1234), "12.34%");
     }
 
     #[test]

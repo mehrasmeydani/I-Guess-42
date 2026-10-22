@@ -127,16 +127,19 @@ impl Pick {
 
 fn offer_views(base: &Base, book: &[(Market, i64)], markets: Vec<Market>, picked: Option<Market>) -> Vec<OfferView> {
     let quotes: Vec<Quote> = markets.iter().map(|m| odds::quote(base, book, *m)).collect();
-    let top = quotes.iter().map(|q| q.chance_bp).max().unwrap_or(1).max(1);
+    // A board covers every outcome once: what it shows adds up to exactly 100%.
+    let shown = odds::shown_to_100(&markets.iter().map(|m| odds::chance(base, book, *m)).collect::<Vec<_>>());
+    let top = shown.iter().copied().max().unwrap_or(1).max(1);
     quotes
         .into_iter()
-        .map(|qt| OfferView {
+        .zip(shown)
+        .map(|(qt, bp)| OfferView {
             key: qt.market.key(),
             label: qt.market.label(),
-            chance: odds::chance_label(qt.chance_bp),
+            chance: odds::exact_label(bp),
             odds: qt.odds_x100.map(odds::odds_label),
             on: picked == Some(qt.market),
-            pct: qt.chance_bp * 100 / top,
+            pct: bp * 100 / top,
             // Shortened by bets on it, not by the picks: said on the row.
             moved: odds::quote(base, &[], qt.market).odds_x100 != qt.odds_x100,
         })
