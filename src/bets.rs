@@ -861,7 +861,7 @@ mod tests {
         // The board says why that price moved.
         let html = bets_page_q(&state, None, picked("range:4:5")).await;
         assert!(html.contains("&#9650; bets"), "a range shortened by bets is marked");
-        assert_eq!(odds_for(&state, high).await, high0, "not backed: never longer than it started");
+        assert!(odds_for(&state, high).await >= high0, "not backed: a little longer, as the board stays at 100%");
         // Bob is shown the new odds; the old ones are gone.
         let resp = place(State(state.clone()), jar("bob"), form(&state, mid, "50", mid0)).await.unwrap();
         assert_eq!(location(&resp), "/g/bets?msg=bet_odds&m=range:5:12");

@@ -303,6 +303,10 @@ pub struct Base {
     record: Vec<Outcome>,
     /// Real guesses behind `data` (the recent week counted once).
     plays: usize,
+    /// What brings each board back to 100% after the record's lift: one
+    /// over the sum of its lifted chances.
+    scale_win: f64,
+    scale_most: f64,
     /// Picks the chances were worked out from, and players a round.
     pub picks: usize,
     pub players: usize,
@@ -339,8 +343,15 @@ impl Base {
 
     /// The starting chance of `market`: mostly the month's picks, a little
     /// the typical crowd (and of that a little a smooth curve, so nothing is
-    /// impossible); the typical crowd alone if there were no picks.
+    /// impossible); the typical crowd alone if there were no picks. Scaled
+    /// so each board adds up to exactly 100%.
     fn chance(&self, market: Market) -> f64 {
+        let scale = if market.is_most() { self.scale_most } else { self.scale_win };
+        (self.lifted(market) * scale).min(1.0)
+    }
+
+    /// `chance` before the scaling: the record may have lifted it.
+    fn lifted(&self, market: Market) -> f64 {
         let curve = match market {
             Market::Nobody => NOBODY_PRIOR,
             Market::Range { lo, hi } => (1.0 - NOBODY_PRIOR) * curve(lo, hi),
@@ -352,11 +363,11 @@ impl Base {
         }
         let weight = self.plays as f64 / (self.plays as f64 + PRIOR_PICKS);
         let model = weight * self.data.share(market) + (1.0 - weight) * fallback;
-        // Never below the record: if a range won on 2 of the last 28 days,
-        // it is priced at no less than about that, whatever the model says -
-        // the way a bookmaker will not offer odds reality has already
-        // beaten. Only once there are enough rounds to mean something, and
-        // shrunk, so a handful of tiny rounds is not taken at its word.
+        // Lifted to the record: if a range won on 2 of the last 28 days, it
+        // gets at least about that share before the board is scaled back to
+        // 100%, whatever the model says. Only once there are enough rounds to
+        // mean something, and shrunk, so a handful of tiny rounds is not taken
+        // at its word.
         if self.record.len() < RECORD_MIN {
             return model;
         }
@@ -502,11 +513,16 @@ pub fn base(global: &History, vienna: &History) -> Base {
     }
     let typical = analyse(&typical_picks(), players);
     if picks.is_empty() {
-        return Base { has_data: false, data: Dist::default(), typical, record: Vec::new(), plays: 0, picks: 0, players };
+        return Base { has_data: false, data: Dist::default(), typical, record: Vec::new(), plays: 0, scale_win: 1.0, scale_most: 1.0, picks: 0, players };
     }
     let record = if global.picks.len() >= MIN_PICKS { global.outcomes.clone() } else { [global.outcomes.clone(), vienna.outcomes.clone()].concat() };
     let plays = if global.picks.len() >= MIN_PICKS { global.plays } else { global.plays + vienna.plays };
-    Base { has_data: true, data: averaged(&picks, &sizes), typical, record, plays: plays.max(1), picks: picks.len(), players }
+    let mut b = Base { has_data: true, data: averaged(&picks, &sizes), typical, record, plays: plays.max(1), scale_win: 1.0, scale_most: 1.0, picks: picks.len(), players };
+    // Each board covers every outcome once, so what its lifted chances add
+    // up to beyond 100% is taken back from all of them in proportion.
+    b.scale_win = 1.0 / board().iter().map(|m| b.lifted(*m)).sum::<f64>();
+    b.scale_most = 1.0 / board_most().iter().map(|m| b.lifted(*m)).sum::<f64>();
+    b
 }
 
 /// `analyse` over several round sizes, averaged, each size worked out once.
@@ -566,9 +582,10 @@ pub fn book_from(bets: &[(Market, i64, i64)]) -> Vec<(Market, i64)> {
 /// The chance of `market` now: the starting chance, moved by the points
 /// already on its book (winner bets, or most-picked bets). Each bet backs its
 /// own range; where that overlaps `market`, it counts for `market` in
-/// proportion to the overlap's share of the bet's own starting chance. Never
-/// below the starting chance: bets shorten what they back and lengthen
-/// nothing.
+/// proportion to the overlap's share of the bet's own starting chance. What
+/// bets add to some ranges comes off the others in proportion, so a board
+/// still adds up to 100%; one bettor counts as at most `BOOK_PER_BETTOR`, so
+/// no one can lengthen the other side by enough to beat the house's cut.
 pub fn chance(base: &Base, book: &[(Market, i64)], market: Market) -> f64 {
     let total: f64 = book.iter().filter(|(m, _)| m.is_most() == market.is_most()).map(|(_, s)| *s as f64).sum();
     let backed: f64 = book
@@ -580,7 +597,7 @@ pub fn chance(base: &Base, book: &[(Market, i64)], market: Market) -> f64 {
         })
         .sum();
     let start = base.chance(market);
-    ((LIQUIDITY * start + backed) / (LIQUIDITY + total)).max(start).clamp(P_MIN, P_MAX)
+    ((LIQUIDITY * start + backed) / (LIQUIDITY + total)).clamp(P_MIN, P_MAX)
 }
 
 /// Decimal odds offered for chance `p`, in hundredths: fair odds less the
@@ -850,21 +867,24 @@ mod tests {
     }
 
     #[test]
-    fn bets_shorten_what_they_back_and_lengthen_nothing() {
+    fn bets_move_the_board_and_it_still_adds_up_to_100() {
         let b = crowd();
         let target = r(5, Some(12));
         let before = chance(&b, &[], target);
         let backed = chance(&b, &[(r(5, Some(12)), 100)], target);
         let partly = chance(&b, &[(r(1, Some(8)), 100)], target);
         let against = chance(&b, &[(r(50, None), 100)], target);
-        assert!(backed > partly && partly > before, "{backed} {partly} {before}");
-        assert_eq!(against, before, "a bet elsewhere never makes this pay more");
-        // A whale on one side cannot open up a false price on the other.
-        let whale = chance(&b, &[(r(1, Some(4)), 1_000_000)], target);
-        assert_eq!(whale, before);
-        // And the odds follow.
+        assert!(backed > partly && partly > before && before > against, "{backed} {partly} {before} {against}");
+        // What one range gains the others give up: the board stays at 100%.
+        let book = [(r(4, Some(5)), 100), (Market::Nobody, 60), (r(1, Some(1)), 30)];
+        let sum: f64 = board().iter().map(|m| chance(&b, &book, *m)).sum();
+        assert!((sum - 1.0).abs() < 1e-9, "{sum}");
+        // A whale on one side counts as one bettor, so the other side
+        // lengthens by under a tenth: less than the house's cut, no profit.
+        let whale = chance(&b, &book_from(&[(r(1, Some(4)), 1_000_000, 1)]), target);
+        assert!(whale < before && whale > before / 1.1, "{before} -> {whale}");
         let o = |p: f64| offered_odds_x100(p).unwrap();
-        assert!(o(backed) < o(before) && o(before) == o(against));
+        assert!(o(backed) < o(before) && o(before) < o(against));
         // A lot of money moves it a lot, never past certain.
         let flood = vec![(target, 100); 500];
         assert!(chance(&b, &flood, target) > 0.9);
@@ -952,9 +972,14 @@ mod tests {
         assert_eq!(h.outcomes[5], Outcome { winner: Some(4), most: Some(1) });
         assert_eq!(h.sizes[..4], [4, 4, 4, 5]);
         let b = base(&h, &History::default());
-        // Whatever the formula makes of it, nobody won 3 of 12 days: at
-        // least 3 in 22 (shrunk by ten rounds), so the odds cannot beat that.
-        assert!(b.chance(Market::Nobody) >= 3.0 / 22.0 - 1e-12, "{}", b.chance(Market::Nobody));
+        // Whatever the formula makes of it, nobody won 3 of 12 days: lifted to
+        // at least 3 in 22 (shrunk by ten rounds) before the board is scaled
+        // back to 100%, so it ends up near its record, not near zero.
+        assert!(b.lifted(Market::Nobody) >= 3.0 / 22.0 - 1e-12);
+        let nobody = b.chance(Market::Nobody);
+        assert!(nobody > 0.1, "{nobody}");
+        let sum: f64 = board().iter().map(|m| b.chance(*m)).sum();
+        assert!((sum - 1.0).abs() < 1e-9, "the board adds up to 100%: {sum}");
     }
 
     #[test]

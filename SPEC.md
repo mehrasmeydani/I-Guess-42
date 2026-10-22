@@ -649,13 +649,13 @@ Once per open round:
    picks at all, the typical crowd alone. It replaced a made-up curve that
    said 1 wins 63% of rounds; on the live site 1 won 14% and 4-5 won 29%,
    which the typical crowd gets (21% and 28%).
-6. Never below the record: once there are 10 rounds or more, a range that
-   won on h of the last d rounds is priced at no less than h / (d + 10) -
-   shrunk, so a handful of tiny rounds is not taken at its word. The model underrates two things the
+6. Lifted to the record: once there are 10 rounds or more, a range that won
+   on h of the last d rounds gets at least h / (d + 10) - shrunk, so a
+   handful of tiny rounds is not taken at its word - and then the whole
+   board is scaled back so it adds up to exactly 100%. The model underrates two things the
    live site shows - nobody winning (1% modelled, 7% seen) and hail marys
    over 50 (0.5% against 3.4%) - and a bookmaker does not offer odds
-   reality has already beaten. On the live data this lifts the board a
-   little over 100%.
+   reality has already beaten.
 
 Back-tested on the live site's rounds, each day predicted from only the
 days before it (average chance given to what then happened): the formula
@@ -663,26 +663,27 @@ days before it (average chance given to what then happened): the formula
 
 The ready-made board - exactly 1, 2, 3, 4–5, 6–9, 10–19, 20–49, 50 or more,
 nobody wins - covers every outcome once, so its chances add up to 100%,
-or a little more where the record (step 6) lifts a range.
+before bets and after.
 
 ### 9.3 The book: odds move as people bet
 
 Points already bet on the open round count as evidence, as money moves a
-betting exchange. With L = 1000 points of liquidity behind the simulation:
+betting exchange. With L = 1000 points of evidence behind the starting
+chances:
 
 ```
 backed(R) = Σ over open bets b: stake_b × p0(R ∩ b) / p0(b)
 p(R)      = (L × p0(R) + backed(R)) / (L + Σ stake_b),  clamped to [0.0001, 0.99]
 ```
 
-and then **p(R) = max(p(R), p0(R))**: a bet on 5–12 makes 5–12 (and ranges
-overlapping it) likelier, so their odds shorten; nothing ever pays more than
-its starting odds. With stakes uncapped this matters: if bets could lengthen
-the other side, a big bet on one range would open a false price on the rest
-for the same player to take. Only bets
-move the book; today's guesses never go in (secret until 12:42). A heavy bet
-on one number can hint at what its bettor picked - that is the bettor's own
-choice to make.
+A bet on 5–12 makes 5–12 (and ranges overlapping it) likelier, so their
+odds shorten, and what they gain the rest give up in proportion: the board
+still adds up to 100%. Because each bettor counts as at most 100 points (next
+paragraph), one person can lengthen the other side by under a tenth - less
+than the house's cut, so betting one side to take a better price on the
+other loses. Only bets move the book; today's guesses never go in (secret
+until 12:42). A heavy bet on one number can hint at what its bettor picked -
+that is the bettor's own choice to make.
 
 One bettor is one opinion: each account's stakes on a round count as
 evidence up to 100 points together (`odds::BOOK_PER_BETTOR`), scaled down in
