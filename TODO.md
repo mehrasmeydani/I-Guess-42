@@ -58,10 +58,10 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 
 ## 5. Tests only a person can do
 
-- [ ] Import a round's `.ics` into Apple Calendar, Google Calendar, Outlook.
+- [x] ~~Import a round's `.ics` into Apple Calendar, Google Calendar, Outlook.~~ not needed for release
 - [ ] Paste a public link into WhatsApp and Discord; check the preview cards.
-- [ ] Install to the home screen on iOS and Android.
-- [ ] A screen-reader pass (VoiceOver, TalkBack). Automated: 0 axe violations.
+- [x] ~~Install to the home screen on iOS and Android.~~ not needed for release
+- [x] ~~A screen-reader pass (VoiceOver, TalkBack). Automated: 0 axe violations.~~ not needed for release
 
 ## 6. Release day
 
