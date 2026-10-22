@@ -642,21 +642,19 @@ pub fn player_stats(history: &[(chrono::NaiveDate, i64, bool)], guessed_open: bo
     }
 }
 
-/// The days a streak bonus was earned: every `every`-th day of a run of
-/// consecutive days played (the 10th, 20th, ... day in a row). `days` may be
-/// in any order and hold repeats.
-pub fn streak_milestones(days: &[chrono::NaiveDate], every: i64) -> Vec<chrono::NaiveDate> {
+/// Every day played, with how many days in a row it makes: the first day of
+/// a run is 1, a missed day starts over. `days` may be in any order and
+/// hold repeats; the answer is oldest first.
+pub fn streak_runs(days: &[chrono::NaiveDate]) -> Vec<(chrono::NaiveDate, i64)> {
     let mut days = days.to_vec();
     days.sort_unstable();
     days.dedup();
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(days.len());
     let mut run = 0;
     let mut prev: Option<chrono::NaiveDate> = None;
     for d in days {
         run = if prev.and_then(|p| p.succ_opt()) == Some(d) { run + 1 } else { 1 };
-        if run % every == 0 {
-            out.push(d);
-        }
+        out.push((d, run));
         prev = Some(d);
     }
     out
@@ -683,18 +681,18 @@ mod tests {
     }
 
     #[test]
-    fn a_streak_bonus_comes_every_tenth_day_in_a_row() {
+    fn each_day_knows_how_many_in_a_row_it_makes() {
         let d = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
         let run = |from: &str, n: i64| (0..n).map(|i| d(from) + chrono::Duration::days(i)).collect::<Vec<_>>();
-        assert!(streak_milestones(&run("2026-10-01", 9), 10).is_empty());
-        assert_eq!(streak_milestones(&run("2026-10-01", 10), 10), vec![d("2026-10-10")]);
-        assert_eq!(streak_milestones(&run("2026-10-01", 25), 10), vec![d("2026-10-10"), d("2026-10-20")]);
+        let lengths = |days: &[chrono::NaiveDate]| streak_runs(days).into_iter().map(|r| r.1).collect::<Vec<_>>();
+        assert_eq!(lengths(&run("2026-10-01", 4)), vec![1, 2, 3, 4]);
         // A missed day starts over; order and repeats do not matter.
-        let mut broken = run("2026-10-01", 9);
-        broken.extend(run("2026-10-11", 10));
+        let mut broken = run("2026-10-01", 3);
+        broken.extend(run("2026-10-05", 2));
         broken.reverse();
-        broken.push(d("2026-10-12"));
-        assert_eq!(streak_milestones(&broken, 10), vec![d("2026-10-20")]);
+        broken.push(d("2026-10-02"));
+        assert_eq!(lengths(&broken), vec![1, 2, 3, 1, 2]);
+        assert_eq!(streak_runs(&broken)[3], (d("2026-10-05"), 1));
     }
 
     #[test]

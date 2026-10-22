@@ -31,7 +31,9 @@
     <dt>to start</dt><dd class="win">+{{ bonus }}</dd>
     <dt>each day you play</dt><dd class="win">+{{ grant }}</dd>
     <dt>each guess</dt><dd class="lose">&minus;{{ stake }}</dd>
-    <dt>{{ crate::economy::STREAK_DAYS }} days in a row</dt><dd class="win">+{{ crate::economy::STREAK_BONUS }}</dd>
+    {% for (days, prize) in crate::economy::STREAK_LADDER %}<dt>{{ days }} days in a row</dt><dd class="win">+{{ prize }}</dd>
+    {% endfor %}<dt>then every {{ crate::economy::STREAK_DAYS }} days</dt><dd class="win">+{{ crate::economy::STREAK_BONUS }}</dd>
+    <dt>joining late</dt><dd>+{{ crate::economy::CATCH_UP_PER_ROUND }} for each round you missed, over your first {{ crate::economy::CATCH_UP_PARTS }} days</dd>
     <dt>winning a round</dt><dd>the whole pot</dd>
     <dt>a round nobody wins</dt><dd>its pot rolls over</dd>
   </dl>

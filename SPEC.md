@@ -556,17 +556,21 @@ documented like `PARTICIPANT_POINTS` in `points.rs`.
   next round's `carried_in`.
 - **No negative balances.** Stakes and bets are checked against the balance in
   the same transaction that writes them.
-- **Streak bonus.** Every 10th day in a row with a global guess (today's
-  counts) earns 1000, claimed from a pop-up on the round page:
-  `ledger(kind='streak', ref='streak:<day>', +1000)`, once per milestone
-  however often the claim is sent. A missed day starts the count over.
+- **Streak prizes.** Days in a row with a global guess (today's counts)
+  earn a ladder (`STREAK_LADDER`): 3 days +100, 7 +300, 14 +700, 21 +1000,
+  30 +2000, then +1000 every 10th day (40, 50, ...). Claimed from a pop-up
+  on the round page: `ledger(kind='streak', ref='streak:<day>', +prize)`,
+  once per milestone however often the claim is sent. A missed day starts
+  the count over. Someone who never misses a day earns what the old single
+  prize (1000 every 10th day) paid, and nobody earns less; a nine-days-in-ten
+  player earns about 59 a day from it instead of 53.
   Migration 0011 adds the kind (it rebuilds `ledger`, keeping every row).
 - **Catch-up.** A player who joins after N global rounds have been played
-  is owed N × 135 (`CATCH_UP_PER_ROUND`: the daily 100, plus the 1000 streak
-  bonus a nine-days-in-ten player reaches about a third of the time), paid
+  is owed N × 150 (`CATCH_UP_PER_ROUND`: what a nine-days-in-ten player
+  earns a round, 90 of daily points and about 59 of streak prizes), paid
   as a 30th of it (`CATCH_UP_PARTS`) with each day they lock a guess:
   `ledger(kind='catchup', ref=round_date)`, once a round. Joining on day
-  120 is owed 16 200, 540 a day on top of the grant for 30 played days.
+  120 is owed 18 000, 600 a day on top of the grant for 30 played days.
   Migration 0014 adds the kind (rebuilding `ledger` as 0011 did). Left out of
   the "this week" board, like grants. Why not raise the daily points as the
   game grows: a 180-day simulation (bets included, three growth curves)
