@@ -21,8 +21,11 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 - [ ] `IP_HASH_KEY`: a long random string (`openssl rand -hex 32`).
 - [ ] `MODERATORS`: 42 logins, comma-separated.
 - [ ] `IMPRINT_NAME`, `IMPRINT_EMAIL` (and `IMPRINT_ADDRESS` if needed).
-- [ ] Check `FT_CLIENT_SECRET` is current: the live server answered 42's token
-      endpoint with 401 `invalid_client` before.
+- [ ] **`FT_CLIENT_SECRET` is expired: 42 sign-in is broken on the live site
+      now (401 `invalid_client`).** Generate a new secret on the 42 app page,
+      put it in the server's `.env`, `docker compose up -d --force-recreate app`.
+      42 secrets expire: note the new expiry date and set a reminder. Give
+      local development its own 42 app so the two never share a secret.
 
 ## 3. Open from testing
 
@@ -32,8 +35,8 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 ## 4. Legal
 
 - [ ] Have the privacy page reviewed: legal bases, the wording on Resend's
-      US transfer, and whether Turnstile sets cookies (not testable without
-      keys).
+      US transfer, the fair-play section (warning, then ban). The robot check
+      is self-hosted and sets no cookies.
 - [ ] Decide whether a minimum-age statement is needed (UI/UX spec Q4).
 - [ ] Confirm the retention periods stated on /privacy fit (sessions 30 days,
       logs capped at 30 MB, emailed links 24 h / 1 h, mail log 2 days).
@@ -62,7 +65,9 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 
 ## 6. Release day
 
-- [ ] Run the migration check on a copy of the live backup:
+- [ ] Run the migration check on a copy of the live backup (migrations
+      0005-0013, including 0011, which rebuilds the points ledger):
       `MIGRATE_CHECK_DB=/path/to/backup.db cargo test migrating_a_copy -- --ignored --nocapture`
+- [ ] Push `global` (it is ahead of origin).
 - [ ] Merge `global` → `dev` → `main`, bump `version.txt` to 2.0.0, tag the
       merge commit, deploy.
