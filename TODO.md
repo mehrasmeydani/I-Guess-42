@@ -59,7 +59,7 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 ## 5. Tests only a person can do
 
 - [ ] Import a round's `.ics` into Apple Calendar, Google Calendar, Outlook.
-- [ ] Paste a public link into WhatsApp and Discord; check the preview cards.
+- [x] Paste a public link into WhatsApp and Discord; check the preview cards.
 - [ ] Install to the home screen on iOS and Android.
 - [ ] A screen-reader pass (VoiceOver, TalkBack). Automated: 0 axe violations.
 
