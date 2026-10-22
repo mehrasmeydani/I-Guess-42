@@ -500,7 +500,7 @@ pub struct WelcomeQuery {
 
 fn after_welcome(then: Option<&str>) -> String {
     then.filter(|t| t.starts_with("/g?") || *t == "/g" || t.starts_with("/g/") && !t.starts_with("//"))
-        .unwrap_or("/g?msg=welcome")
+        .unwrap_or("/g")
         .to_string()
 }
 

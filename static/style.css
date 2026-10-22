@@ -237,8 +237,20 @@ a.tag { color: var(--fg); text-decoration: underline; }
 .meter-bar { display: inline-block; overflow: hidden; vertical-align: bottom; color: var(--state); clip-path: inset(0); animation: fill 420ms steps(30) 80ms both; }
 .meter-pct { color: var(--hi); font-weight: 700; }
 .figures .pot span { white-space: normal; }
-.status .pts { color: var(--state); text-decoration: none; font-weight: 700; }
-.status .pts:hover { background: none; color: var(--hi); text-decoration: underline; }
+/* Streak and points: beside the account on a desktop, beside the menu
+   button on a phone. */
+/* After the tabs and the round switch, then the account: the menu is only
+   a wrapper here, so its pieces line up in the row with these. */
+.top-stats { order: 1; display: flex; align-items: center; gap: 12px; margin-left: auto; white-space: nowrap; }
+.top-stats:empty { display: none; }
+.top-stats:not(:empty) ~ .menu .status { order: 2; margin-left: 0; }
+.top-stats .pts { color: var(--state); text-decoration: none; font-weight: 700; }
+.top-stats .streak { color: var(--fg); text-decoration: none; }
+.top-stats a:hover { background: none; color: var(--hi); text-decoration: underline; }
+.menu-only { display: none; }
+/* The phone's own sign-in, beside the menu button; a desktop has the one in the row. */
+.top-signin { display: none; }
+.figures-sec { margin-top: 32px; }
 
 .section-title { margin: 0 0 16px; color: var(--hi); font-size: var(--fs-3); font-weight: 700; }
 .section-title .scope-inline { margin-left: 0; color: var(--dim); }
@@ -1054,10 +1066,28 @@ details.expand[open] summary .when-open { display: inline; }
     font-size: var(--fs-3);
   }
   .js .menu .pools { order: 1; flex: none; align-self: stretch; }
+  .js .menu .menu-only { display: block; order: 2; margin: 0; color: var(--dim); }
+  /* One row: logo, streak and points, the button. */
+  .js .top { flex-wrap: nowrap; }
+  .js .top-stats { order: 0; font-size: var(--fs-1); gap: 10px; }
+  .js .top-stats:not(:empty) + .menu-btn { margin-left: 0; }
+  .js .top-stats ~ .menu .status { order: -1; }
+  .js .top-stats .top-signin {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--edge-strong);
+    color: var(--hi);
+    font-size: var(--fs-2);
+    text-decoration: none;
+  }
+  .js .top-stats .top-signin:hover { background: var(--hi); color: var(--bg); text-decoration: none; }
   .js .menu .pools a, .js .menu .pools a.on { flex: 1; text-align: center; padding: 10px 0; }
   .menu-shade { position: fixed; inset: 0; z-index: 39; background: rgb(0 0 0 / 0.6); }
 }
 @media (max-width: 800px) and (prefers-reduced-motion: reduce) { .js .menu { transition: none; } }
+@media (max-width: 360px) { .js .top { gap: 8px; } .js .top-stats { gap: 6px; } }
 
 @media (max-width: 640px) {
   /* A phone keeps a 16px gutter: text running into the bezel reads as a page

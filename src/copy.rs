@@ -23,7 +23,6 @@ pub fn notice(code: &str) -> Option<(&'static str, &'static str)> {
         "broke" => ("error", "not enough points · more each day you play"),
         "voided" => ("error", "round called off · no more guesses"),
         // signing in
-        "welcome" => ("ok", "welcome · pick a number"),
         "verified" => ("ok", "email confirmed · pick a number"),
         "password_set" => ("ok", "new password saved · other sessions signed out"),
         "resent" => ("ok", "new link sent · valid 24h"),
@@ -166,7 +165,7 @@ mod tests {
     fn every_message_is_a_lowercase_fragment() {
         let codes = [
             "saved", "already", "empty", "invalid", "too_small", "too_big", "signin", "unverified",
-            "held_unverified", "broke", "voided", "welcome", "verified", "password_set", "resent",
+            "held_unverified", "broke", "voided", "verified", "password_set", "resent",
             "resend_wait", "mail_failed", "signed_out", "deleted", "linked", "already_linked",
             "linked_elsewhere", "unlinked", "renamed", "password_changed", "password_added", "banned",
             "unbanned", "adjusted", "called_off", "added", "added_ghost", "cleared", "not_demo",
