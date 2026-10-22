@@ -33,8 +33,9 @@ pub const RECENT_DAYS: i64 = 7;
 /// most, however long the odds, big the stakes or many the bets. Room for
 /// a hail mary; not for one lucky account to outweigh everyone's play.
 pub const PROFIT_PER_PLAYER: i64 = 1000;
-/// Below this many global picks last week, the 42 round's picks fill in.
-const MIN_PICKS: usize = 30;
+/// What the 42 round's picks are worth, in global picks, while they fade
+/// out: all of the evidence at first, half at 300 global picks.
+const VIENNA_PICKS: f64 = 300.0;
 /// Players a round, at most.
 const MAX_PLAYERS: usize = 1000;
 /// Without a month to go on, rounds are imagined this size: about the live
@@ -53,12 +54,16 @@ const RECORD_SHRINK: f64 = 10.0;
 const CURVE: f64 = 0.1;
 /// That curve's chance of nobody winning.
 const NOBODY_PRIOR: f64 = 0.05;
-/// A typical crowd: every pick of the 28 rounds on iguesslow.com up to
-/// 21.10.2026 (412 picks, 5-43 players a day), as (number, times picked).
-/// The five picks above 100 are folded into one stand-in. Used where there
-/// are no picks of our own, and a little everywhere: the made-up curve it
-/// replaces said 1 would win 63% of the time, when in fact 1 won 14% and
-/// 4-5 won 29%.
+/// The typical crowd is every closed pick in this database, both rounds,
+/// all time: it grows as rounds close. Below this many picks, it is topped
+/// up with `TYPICAL_PICKS`, scaled to make up the difference, so a fresh
+/// install still prices like the real game.
+pub const TYPICAL_MIN: usize = 400;
+/// A starter crowd for a fresh install: every pick of the 28 rounds on
+/// iguesslow.com up to 21.10.2026 (412 picks, 5-43 players a day), as
+/// (number, times picked), the five picks above 100 folded into one stand-in.
+/// The made-up curve it replaced said 1 would win 63% of the time, when in
+/// fact 1 won 14% and 4-5 won 29%.
 const TYPICAL_PICKS: [(i64, usize); 35] = [
     (1, 80), (2, 66), (3, 72), (4, 41), (5, 22), (6, 23), (7, 18), (8, 14), (9, 9), (10, 5),
     (11, 8), (12, 9), (13, 3), (14, 4), (15, 1), (16, 1), (17, 2), (20, 1), (21, 2), (23, 2),
@@ -299,8 +304,9 @@ pub struct Base {
     /// would.
     data: Dist,
     typical: Dist,
-    /// What the rounds behind `data` actually came to.
-    record: Vec<Outcome>,
+    /// What the rounds behind `data` actually came to, each with how much it
+    /// counts (a fading pool's rounds count for less).
+    record: Vec<(Outcome, f64)>,
     /// Real guesses behind `data` (the recent week counted once).
     plays: usize,
     /// What brings each board back to 100% after the record's lift: one
@@ -368,11 +374,12 @@ impl Base {
         // 100%, whatever the model says. Only once there are enough rounds to
         // mean something, and shrunk, so a handful of tiny rounds is not taken
         // at its word.
-        if self.record.len() < RECORD_MIN {
+        let rounds: f64 = self.record.iter().map(|r| r.1).sum();
+        if rounds < RECORD_MIN as f64 {
             return model;
         }
-        let hits = self.record.iter().filter(|o| outcome(market, **o)).count();
-        model.max(hits as f64 / (self.record.len() as f64 + RECORD_SHRINK))
+        let hits: f64 = self.record.iter().filter(|r| outcome(market, r.0)).map(|r| r.1).sum();
+        model.max(hits / (rounds + RECORD_SHRINK))
     }
 }
 
@@ -402,14 +409,24 @@ fn once(l: f64) -> f64 {
 ///   has, every lower number has fewer than k and every higher one at most
 ///   k: summed over k. Then scaled to add up to 1, leaving out the day
 ///   nobody plays.
+#[cfg(test)]
 fn analyse(picks: &[i64], players: usize) -> Dist {
-    let mut counts: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+    let mut weights = Weights::new();
     for p in picks {
-        *counts.entry(*p).or_default() += 1;
+        *weights.entry(*p).or_default() += 1.0;
     }
+    analyse_weighted(&weights, players)
+}
+
+/// Each number's share of the picks, as weights (they need not add up to 1).
+pub type Weights = std::collections::BTreeMap<i64, f64>;
+
+/// `analyse` for picks that do not all count the same: a pool that is
+/// fading out counts for less.
+fn analyse_weighted(weights: &Weights, players: usize) -> Dist {
     let n = players as f64;
-    let total = picks.len() as f64;
-    let means: Vec<(i64, f64)> = counts.into_iter().map(|(v, c)| (v, n * c as f64 / total)).collect();
+    let total: f64 = weights.values().sum();
+    let means: Vec<(i64, f64)> = weights.iter().map(|(&v, &w)| (v, n * w / total)).collect();
 
     let mut nobody_yet = 1.0;
     let mut winners = Vec::with_capacity(means.len());
@@ -421,47 +438,76 @@ fn analyse(picks: &[i64], players: usize) -> Dist {
     Dist { winners, nobody: nobody_yet, modes: modes(&means) }
 }
 
-/// The typical crowd's picks, one entry per pick.
-fn typical_picks() -> Vec<i64> {
-    TYPICAL_PICKS.iter().flat_map(|&(v, n)| std::iter::repeat_n(v, n)).collect()
+/// The typical crowd: `all_time` picks (number, times picked) from this
+/// database, topped up with the starter crowd while there are fewer than
+/// `TYPICAL_MIN` of them, as weights for `analyse_weighted`.
+pub fn typical_crowd(all_time: &[(i64, i64)]) -> Weights {
+    let mut weights = Weights::new();
+    let mut ours = 0usize;
+    for &(v, n) in all_time {
+        *weights.entry(v).or_default() += n.max(0) as f64;
+        ours += n.max(0) as usize;
+    }
+    if ours < TYPICAL_MIN {
+        let starter: usize = TYPICAL_PICKS.iter().map(|t| t.1).sum();
+        let scale = (TYPICAL_MIN - ours) as f64 / starter as f64;
+        for &(v, n) in &TYPICAL_PICKS {
+            *weights.entry(v).or_default() += n as f64 * scale;
+        }
+    }
+    weights
 }
 
 /// Each number's chance of being the most picked, ties to the lowest, for
 /// independent Poisson counts with these means (see `analyse`).
 fn modes(means: &[(i64, f64)]) -> Vec<(i64, f64)> {
-    let top = means.iter().map(|m| m.1).fold(0.0, f64::max);
-    // Far enough out that every count's chance beyond is negligible.
-    let kmax = (top + 12.0 * top.sqrt() + 20.0).ceil() as usize;
-    // pmf[u][k] and cdf[u][k] = P(count of u <= k), from logs so a large
-    // mean does not underflow e^(-λ).
-    let mut pmf = vec![vec![0.0; kmax + 1]; means.len()];
-    let mut cdf = vec![vec![0.0; kmax + 1]; means.len()];
+    // How far each number's count can reach before its chance is negligible;
+    // past it, P(count <= k) is 1 and P(count = k) is 0, so it drops out of
+    // the work. Most numbers are picked rarely and drop out after a few k.
+    let reach: Vec<usize> = means.iter().map(|&(_, l)| (l + 12.0 * l.sqrt() + 20.0).ceil() as usize).collect();
+    let kmax = reach.iter().copied().max().unwrap_or(0);
+    // pmf and cdf up to each number's reach, from logs so a large mean does
+    // not underflow e^(-λ).
+    let mut pmf: Vec<Vec<f64>> = Vec::with_capacity(means.len());
+    let mut cdf: Vec<Vec<f64>> = Vec::with_capacity(means.len());
     for (u, &(_, l)) in means.iter().enumerate() {
-        let mut log_p = -l;
-        let mut acc = 0.0;
-        for k in 0..=kmax {
+        let (mut p, mut c) = (Vec::with_capacity(reach[u] + 1), Vec::with_capacity(reach[u] + 1));
+        let (mut log_p, mut acc) = (-l, 0.0);
+        for k in 0..=reach[u] {
             if k > 0 {
                 log_p += l.ln() - (k as f64).ln();
             }
-            pmf[u][k] = log_p.exp();
-            acc += pmf[u][k];
-            cdf[u][k] = acc.min(1.0);
+            let pk = log_p.exp();
+            acc += pk;
+            p.push(pk);
+            c.push(acc.min(1.0));
         }
+        pmf.push(p);
+        cdf.push(c);
     }
-    let m = means.len();
-    let mut out = vec![0.0; m];
-    let mut right = vec![1.0; m + 1];
+    let pmf_at = |u: usize, k: usize| pmf[u].get(k).copied().unwrap_or(0.0);
+    let cdf_at = |u: usize, k: usize| cdf[u].get(k).copied().unwrap_or(1.0);
+
+    let mut out = vec![0.0; means.len()];
+    // The numbers still in play at this k, lowest first.
+    let mut active: Vec<usize> = (0..means.len()).collect();
+    let mut right: Vec<f64> = Vec::with_capacity(means.len() + 1);
     for k in 1..=kmax {
-        // right[v] = product over u > v of P(count of u <= k).
-        right[m] = 1.0;
-        for u in (0..m).rev() {
-            right[u] = right[u + 1] * cdf[u][k];
+        active.retain(|&u| reach[u] + 1 >= k);
+        if active.is_empty() {
+            break;
+        }
+        // right[i] = product over active numbers after the i-th of P(count <= k).
+        right.clear();
+        right.resize(active.len() + 1, 1.0);
+        for i in (0..active.len()).rev() {
+            right[i] = right[i + 1] * cdf_at(active[i], k);
         }
         // Lower numbers must have fewer than k: walked up from the left.
         let mut left = 1.0;
-        for v in 0..m {
-            out[v] += pmf[v][k] * left * right[v + 1];
-            left *= cdf[v][k - 1];
+        for (i, &v) in active.iter().enumerate() {
+            out[v] += pmf_at(v, k) * left * right[i + 1];
+            left *= cdf_at(v, k - 1);
         }
     }
     let sum: f64 = out.iter().sum();
@@ -497,27 +543,67 @@ fn played_out(picks: &[i64], players: usize, rounds: u32) -> (std::collections::
 /// The day's starting chances, from last month's global picks; if there were
 /// few, the 42 round's picks fill in. With no picks at all, the smooth
 /// curve alone.
-pub fn base(global: &History, vienna: &History) -> Base {
-    let mut picks = global.picks.clone();
-    if picks.len() < MIN_PICKS {
-        picks.extend(&vienna.picks);
+pub fn base(global: &History, vienna: &History, typical: &Weights) -> Base {
+    // The 42 round's picks fade out as the global round's own come in,
+    // rather than being dropped at some count: worth `VIENNA_PICKS` global
+    // picks, so all of the evidence at first, half at 300 global picks, a
+    // tenth at 2700. Each pool's picks are its own month, the last week
+    // twice, so both age as well.
+    let alpha = if vienna.picks.is_empty() { 0.0 } else { fade(global.plays) };
+    let mut weights = Weights::new();
+    for (pool, share) in [(global, 1.0 - alpha), (vienna, alpha)] {
+        if share <= 0.0 || pool.picks.is_empty() {
+            continue;
+        }
+        let each = share / pool.picks.len() as f64;
+        for p in &pool.picks {
+            *weights.entry(*p).or_default() += each;
+        }
     }
-    let players = global.players().or(vienna.players()).unwrap_or(DEFAULT_PLAYERS).clamp(2, MAX_PLAYERS);
     // The day's size is not known ahead: the chances are averaged over the
     // sizes the rounds behind them had (back-tested on the live site's 28
-    // rounds, a little better than one average size).
-    let source = if global.picks.len() >= MIN_PICKS || vienna.rounds == 0 { global } else { vienna };
-    let mut sizes: Vec<usize> = source.sizes.iter().map(|s| (*s).clamp(2, MAX_PLAYERS)).collect();
-    if sizes.is_empty() {
-        sizes.push(players);
+    // rounds, a little better than one average size), the pools blended the
+    // same way.
+    let mut sizes: Vec<(usize, f64)> = Vec::new();
+    for (pool, share) in [(global, 1.0 - alpha), (vienna, alpha)] {
+        if share > 0.0 && !pool.sizes.is_empty() {
+            let each = share / pool.sizes.len() as f64;
+            sizes.extend(pool.sizes.iter().map(|s| ((*s).clamp(2, MAX_PLAYERS), each)));
+        }
     }
-    let typical = analyse(&typical_picks(), players);
-    if picks.is_empty() {
+    let players = match (global.players(), vienna.players()) {
+        (Some(g), Some(v)) => ((1.0 - alpha) * g as f64 + alpha * v as f64).round() as usize,
+        (g, v) => g.or(v).unwrap_or(DEFAULT_PLAYERS),
+    }
+    .clamp(2, MAX_PLAYERS);
+    if sizes.is_empty() {
+        sizes.push((players, 1.0));
+    }
+    let typical = analyse_weighted(typical, players);
+    if weights.is_empty() {
         return Base { has_data: false, data: Dist::default(), typical, record: Vec::new(), plays: 0, scale_win: 1.0, scale_most: 1.0, picks: 0, players };
     }
-    let record = if global.picks.len() >= MIN_PICKS { global.outcomes.clone() } else { [global.outcomes.clone(), vienna.outcomes.clone()].concat() };
-    let plays = if global.picks.len() >= MIN_PICKS { global.plays } else { global.plays + vienna.plays };
-    let mut b = Base { has_data: true, data: averaged(&picks, &sizes), typical, record, plays: plays.max(1), scale_win: 1.0, scale_most: 1.0, picks: picks.len(), players };
+    // The record fades the same way: a 42 round counts for `alpha` of one.
+    let record: Vec<(Outcome, f64)> = global
+        .outcomes
+        .iter()
+        .map(|o| (*o, 1.0))
+        .chain(vienna.outcomes.iter().map(|o| (*o, alpha)))
+        .filter(|r| r.1 > 0.0)
+        .collect();
+    let plays = global.plays as f64 + alpha * vienna.plays as f64;
+    let picks = global.picks.len() + if alpha > 0.0 { vienna.picks.len() } else { 0 };
+    let mut b = Base {
+        has_data: true,
+        data: averaged(&weights, &sizes),
+        typical,
+        record,
+        plays: (plays.round() as usize).max(1),
+        scale_win: 1.0,
+        scale_most: 1.0,
+        picks,
+        players,
+    };
     // Each board covers every outcome once, so what its lifted chances add
     // up to beyond 100% is taken back from all of them in proportion.
     b.scale_win = 1.0 / board().iter().map(|m| b.lifted(*m)).sum::<f64>();
@@ -525,17 +611,49 @@ pub fn base(global: &History, vienna: &History) -> Base {
     b
 }
 
-/// `analyse` over several round sizes, averaged, each size worked out once.
-fn averaged(picks: &[i64], sizes: &[usize]) -> Dist {
-    let mut by_size: std::collections::BTreeMap<usize, usize> = std::collections::BTreeMap::new();
-    for s in sizes {
-        *by_size.entry(*s).or_default() += 1;
+/// Round sizes worked out at most: more are grouped (see `size_groups`).
+const SIZE_GROUPS: usize = 6;
+
+/// Sizes and their weights, at most `groups` of them: sorted, cut into
+/// groups of equal weight, each standing for its weighted average size. A
+/// month of 30 different day sizes is worked out 6 times, not 30, for
+/// chances that differ in the third decimal.
+fn size_groups(sizes: &[(usize, f64)], groups: usize) -> std::collections::BTreeMap<usize, f64> {
+    let mut sorted: Vec<(usize, f64)> = sizes.iter().copied().filter(|s| s.1 > 0.0).collect();
+    sorted.sort_by_key(|s| s.0);
+    let total: f64 = sorted.iter().map(|s| s.1).sum();
+    let mut out = std::collections::BTreeMap::new();
+    let (mut weight, mut weighted, mut filled, mut so_far) = (0.0, 0.0, 0usize, 0.0);
+    for (i, (size, w)) in sorted.iter().enumerate() {
+        weight += w;
+        weighted += *size as f64 * w;
+        so_far += w;
+        let cut = total * (filled + 1) as f64 / groups as f64;
+        if so_far >= cut - 1e-12 || i + 1 == sorted.len() {
+            *out.entry((weighted / weight).round() as usize).or_insert(0.0) += weight;
+            filled += 1;
+            weight = 0.0;
+            weighted = 0.0;
+        }
     }
-    let total = sizes.len() as f64;
+    out
+}
+
+/// How much the 42 round's picks still count beside `global_plays` of the
+/// global round's own: 1 with none, 1/2 at 300, 1/10 at 2700, never 0.
+fn fade(global_plays: usize) -> f64 {
+    VIENNA_PICKS / (global_plays as f64 + VIENNA_PICKS)
+}
+
+/// `analyse` over several round sizes, each with a weight, averaged; each
+/// size worked out once.
+fn averaged(picks: &Weights, sizes: &[(usize, f64)]) -> Dist {
+    let by_size = size_groups(sizes, SIZE_GROUPS);
+    let total: f64 = by_size.values().sum();
     let mut out: Option<Dist> = None;
-    for (size, times) in by_size {
-        let d = analyse(picks, size);
-        let w = times as f64 / total;
+    for (size, weight) in by_size {
+        let d = analyse_weighted(picks, size);
+        let w = weight / total;
         out = Some(match out {
             None => Dist {
                 winners: d.winners.iter().map(|&(v, p)| (v, p * w)).collect(),
@@ -737,7 +855,7 @@ mod tests {
         for (v, n) in [(1, 30), (2, 25), (3, 22), (4, 18), (5, 15), (7, 14), (8, 9), (11, 8), (13, 9), (17, 7), (23, 5), (42, 10), (69, 4), (100, 3)] {
             picks.extend(std::iter::repeat_n(v, n));
         }
-        base(&week(&picks, 7), &History::default())
+        base(&week(&picks, 7), &History::default(), &typical_crowd(&[]))
     }
 
     #[test]
@@ -816,7 +934,7 @@ mod tests {
         for most in [1, 2, 5, 9, 10, 49, 50, 9999] {
             assert_eq!(m.iter().filter(|x| outcome(**x, Outcome { winner: None, most: Some(most) })).count(), 1, "{most}");
         }
-        for base in [crowd(), base(&History::default(), &History::default())] {
+        for base in [crowd(), base(&History::default(), &History::default(), &typical_crowd(&[]))] {
             let sum: f64 = b.iter().map(|m| base.chance(*m)).sum();
             assert!((sum - 1.0).abs() < 1e-9, "{sum}");
             let sum: f64 = m.iter().map(|m| base.chance(*m)).sum();
@@ -892,7 +1010,7 @@ mod tests {
     fn with_no_picks_the_odds_look_like_the_real_game() {
         // The typical crowd, not a made-up curve: on the live site 1 won 14%
         // of rounds and 4-5 won 29%; the curve had said 63% and 5%.
-        let b = base(&History::default(), &History::default());
+        let b = base(&History::default(), &History::default(), &typical_crowd(&[]));
         assert!(!b.has_data);
         let one = b.chance(r(1, Some(1)));
         let four_five = b.chance(r(4, Some(5)));
@@ -902,6 +1020,84 @@ mod tests {
         let sum: f64 = board().iter().map(|m| b.chance(*m)).sum();
         assert!((sum - 1.0).abs() < 1e-9, "{sum}");
         assert!(b.chance(r(5000, Some(6000))) > 0.0);
+    }
+
+    #[test]
+    fn a_big_day_is_worked_out_fast() {
+        // 2000 different numbers over a month, rounds of 200-1000 players on
+        // 30 different days: worked out once a round, so it must stay quick.
+        let mut picks = Vec::new();
+        for v in 1..=2000i64 {
+            picks.extend(std::iter::repeat_n(v, (4000 / v).max(1) as usize));
+        }
+        let mut global = week(&picks, 30);
+        global.sizes = (0..30).map(|i| 200 + i * 27).collect();
+        let started = std::time::Instant::now();
+        let b = base(&global, &History::default(), &typical_crowd(&[]));
+        let took = started.elapsed();
+        eprintln!("big day: {took:?}");
+        assert!(b.has_data);
+        assert!(took < std::time::Duration::from_millis(500), "{took:?}");
+    }
+
+    #[test]
+    fn the_42_rounds_picks_fade_out_as_the_global_rounds_come_in() {
+        // The weight: all at first, a half at 300, a tenth at 2700, and a
+        // smooth slide with no step anywhere (the old switch was at 30).
+        assert_eq!(fade(0), 1.0);
+        assert!((fade(300) - 0.5).abs() < 1e-12);
+        assert!((fade(2700) - 0.1).abs() < 1e-12);
+        for n in 1..5000 {
+            assert!(fade(n) < fade(n - 1) && fade(n - 1) - fade(n) < 0.004, "{n}");
+        }
+        // In the odds: the 42 round always picks 2, the global round 9; the
+        // most picked number follows the blend from one to the other.
+        let vienna = week(&vec![2; 400], 20);
+        let most_two = |n: usize| base(&week(&vec![9; n], 10), &vienna, &typical_crowd(&[])).data.share(r(2, Some(2)).most());
+        let (none, few, many) = (most_two(0), most_two(50), most_two(3000));
+        assert!(none > 0.95 && few > 0.5 && many < 0.05, "{none} {few} {many}");
+    }
+
+    #[test]
+    fn the_typical_crowd_is_this_databases_and_grows_with_it() {
+        // Nothing yet: the starter crowd, as 400 picks.
+        let empty = typical_crowd(&[]);
+        assert!((empty.values().sum::<f64>() - TYPICAL_MIN as f64).abs() < 1e-9);
+        // A little of our own: topped up to 400 in all.
+        let some = typical_crowd(&[(7, 100)]);
+        assert!((some.values().sum::<f64>() - TYPICAL_MIN as f64).abs() < 1e-9);
+        assert!(some[&7] >= 100.0);
+        // Plenty of our own: ours alone.
+        let ours = typical_crowd(&[(7, 300), (3, 200)]);
+        assert_eq!(ours.len(), 2);
+        assert_eq!(ours[&7], 300.0);
+    }
+
+    #[test]
+    fn grouping_day_sizes_barely_changes_the_chances() {
+        let mut picks = Weights::new();
+        for (v, n) in [(1, 30.0), (2, 25.0), (3, 22.0), (4, 18.0), (5, 15.0), (7, 14.0), (9, 9.0), (12, 8.0), (40, 3.0)] {
+            picks.insert(v, n);
+        }
+        let sizes: Vec<(usize, f64)> = (0..30).map(|i| (5 + i * 3, 1.0)).collect();
+        let grouped = averaged(&picks, &sizes);
+        let mut full = Dist::default();
+        for &(n, _) in &sizes {
+            let d = analyse_weighted(&picks, n);
+            full.nobody += d.nobody / 30.0;
+            if full.winners.is_empty() {
+                full.winners = d.winners.iter().map(|w| (w.0, w.1 / 30.0)).collect();
+            } else {
+                for (a, b) in full.winners.iter_mut().zip(&d.winners) {
+                    a.1 += b.1 / 30.0;
+                }
+            }
+        }
+        for m in board() {
+            let (g, f) = (grouped.share(m), full.share(m));
+            assert!((g - f).abs() < 0.01, "{m:?}: grouped {g:.4} vs all 30 sizes {f:.4}");
+        }
+        assert_eq!(size_groups(&sizes, SIZE_GROUPS).len(), SIZE_GROUPS);
     }
 
     #[test]
@@ -1048,7 +1244,7 @@ mod tests {
         assert_eq!(h.outcomes.iter().filter(|o| o.winner.is_none()).count(), 3);
         assert_eq!(h.outcomes[5], Outcome { winner: Some(4), most: Some(1) });
         assert_eq!(h.sizes[..4], [4, 4, 4, 5]);
-        let b = base(&h, &History::default());
+        let b = base(&h, &History::default(), &typical_crowd(&[]));
         // Whatever the formula makes of it, nobody won 3 of 12 days: lifted to
         // at least 3 in 22 (shrunk by ten rounds) before the board is scaled
         // back to 100%, so it ends up near its record, not near zero.
@@ -1072,8 +1268,8 @@ mod tests {
             t("2026-09-29", 5, 2),
         ];
         let h = History::from_tallies(&rows, "2026-10-15");
-        let b = base(&h, &History::default());
-        let typical = base(&History::default(), &History::default());
+        let b = base(&h, &History::default(), &typical_crowd(&[]));
+        let typical = base(&History::default(), &History::default(), &typical_crowd(&[]));
         let two = b.chance(r(2, Some(2)));
         assert!(two < 0.3, "not 60%: {two}");
         assert!((two - typical.chance(r(2, Some(2)))).abs() < 0.05, "close to the typical crowd: {two}");
@@ -1089,7 +1285,11 @@ mod tests {
         }
         // A 5 and a 45 average 25, but the chances of a 25-player day are not
         // the average of a 5- and a 45-player day.
-        let mixed = averaged(&picks, &[5, 45]);
+        let mut weights = Weights::new();
+        for p in &picks {
+            *weights.entry(*p).or_default() += 1.0;
+        }
+        let mixed = averaged(&weights, &[(5, 1.0), (45, 1.0)]);
         let flat = analyse(&picks, 25);
         let (m, f) = (mixed.share(Market::Nobody), flat.share(Market::Nobody));
         let (small, big) = (analyse(&picks, 5).nobody, analyse(&picks, 45).nobody);
@@ -1109,10 +1309,10 @@ mod tests {
 
     #[test]
     fn the_biggest_win_grows_with_the_game() {
-        let small = base(&week(&[1, 2, 3, 4, 5, 6], 1), &History::default());
-        let big = base(&week(&vec![2; 300], 3), &History::default());
+        let small = base(&week(&[1, 2, 3, 4, 5, 6], 1), &History::default(), &typical_crowd(&[]));
+        let big = base(&week(&vec![2; 300], 3), &History::default(), &typical_crowd(&[]));
         assert_eq!(small.max_profit(), 6 * PROFIT_PER_PLAYER);
         assert_eq!(big.max_profit(), 100 * PROFIT_PER_PLAYER);
-        assert_eq!(base(&History::default(), &History::default()).max_profit(), 15 * PROFIT_PER_PLAYER, "no history: a round of fifteen");
+        assert_eq!(base(&History::default(), &History::default(), &typical_crowd(&[])).max_profit(), 15 * PROFIT_PER_PLAYER, "no history: a round of fifteen");
     }
 }

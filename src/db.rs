@@ -1955,6 +1955,17 @@ pub async fn round_tallies(db: &Db, pool: Pool, round_date: &str) -> Result<Vec<
     Ok(rows)
 }
 
+/// Every closed pick in a pool, all time, as (number, times picked): the
+/// typical crowd the odds lean on. Stops before `open_round`, which is
+/// secret.
+pub async fn all_time_tallies(db: &Db, pool: Pool, open_round: &str) -> Result<Vec<(i64, i64)>> {
+    let sql = format!(
+        "SELECT value, COUNT(*) FROM {} WHERE round_date < ?1 AND participates = 1 GROUP BY value",
+        pool.guesses()
+    );
+    Ok(sqlx::query_as(&sql).bind(open_round).fetch_all(db).await?)
+}
+
 /// Per-day tallies for every closed round from `from` (inclusive) up to the
 /// open round (exclusive), oldest day first. Ghosts are left out. Stopping
 /// before `open_round` is what keeps the open round's numbers secret.

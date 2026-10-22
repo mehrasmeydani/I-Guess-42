@@ -620,12 +620,16 @@ Rules:
 
 Once per open round:
 
-1. Take every real pick from the last 30 days of global rounds, the last 7
-   days twice: the month for breadth, the week so the odds follow how people
-   pick now. If there are fewer than 30, add the 42 round's picks from the
-   same days (never named on the page).
-2. Players per round n = the month's global average of real guesses (else
-   the 42 round's, else 10), between 2 and 1000.
+1. Take every real pick from the last 30 days of the global round and of
+   the 42 round, the last 7 days twice. Both come from this server's own
+   database, every round, so the odds update as rounds close. The 42
+   round's picks fade out as the global round's come in, never dropped at
+   some count: they weigh α = 300 / (global picks + 300) of the blend - all
+   of it with no global picks, half at 300, a tenth at 2700 - and the 42
+   round's past rounds count for α of one in the record (step 6). The 42
+   round is never named on the page.
+2. Players per round n: the month's average per day, blended the same way
+   (else 15), between 2 and 1000.
 3. n players each pick one of those picks at random. Each number's count is
    then near enough an independent Poisson count with mean
    λᵥ = n × (its share of the picks), which makes the chances a formula
@@ -638,17 +642,22 @@ Once per open round:
    tests against 20 000 rounds actually played out; on the local data it
    matched the old 40 000-round simulation to within a point everywhere.
 4. Averaged over the day sizes behind it: the formula is worked out for
-   each round's own player count and averaged, not for one average size
-   (quiet and busy days play differently).
+   the rounds' own player counts and averaged, not for one average size
+   (quiet and busy days play differently), the sizes grouped into at most 6
+   of equal weight, which moves no chance by more than a point. Worked out
+   once a round, in the background: 47 ms on a debug build for a month of
+   2000 different numbers and 30 day sizes up to 1000 players.
 5. A range's starting chance p0 = w × (its chance from steps 3-4)
    + (1 − w) × a typical crowd, w = picks ÷ (picks + 200): the typical crowd
    counts as 200 picks of evidence, so 8 picks of our own weigh 4%, 400 weigh
-   67%, 6 000 weigh 97%. The typical crowd is the same formula over the 412 real picks of
-   the 28 rounds on iguesslow.com up to 21.10.2026 (`TYPICAL_PICKS`), with
-   a tenth of that from a 1/n² curve so no range is impossible. With no
-   picks at all, the typical crowd alone. It replaced a made-up curve that
-   said 1 wins 63% of rounds; on the live site 1 won 14% and 4-5 won 29%,
-   which the typical crowd gets (21% and 28%).
+   67%, 6 000 weigh 97%. The typical crowd is every closed pick in the
+   database, both rounds, all time - it grows as they do - worked out with
+   the same formula, plus a tenth from a 1/n² curve so no range is
+   impossible. While the database holds fewer than 400 picks it is topped
+   up with a starter crowd: the 412 real picks of the 28 rounds on
+   iguesslow.com up to 21.10.2026 (`TYPICAL_PICKS`). That replaced a
+   made-up curve that said 1 wins 63% of rounds; on the live site 1 won 14%
+   and 4-5 won 29%, which the starter crowd gets (21% and 28%).
 6. Lifted to the record: once there are 10 rounds or more, a range that won
    on h of the last d rounds gets at least h / (d + 10) - shrunk, so a
    handful of tiny rounds is not taken at its word - and then the whole

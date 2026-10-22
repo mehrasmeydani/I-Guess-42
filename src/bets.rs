@@ -41,7 +41,10 @@ pub async fn todays_base(state: &AppState) -> Result<Arc<Base>, AppError> {
     let (from, recent) = (day(odds::HISTORY_DAYS), day(odds::RECENT_DAYS));
     let global = History::from_tallies(&db::range_tallies(&state.db, Pool::Global, &from, &open).await?, &recent);
     let vienna = History::from_tallies(&db::range_tallies(&state.db, Pool::Vienna, &from, &open).await?, &recent);
-    let base = Arc::new(odds::base(&global, &vienna));
+    // The typical crowd: every closed pick of both rounds, growing as they do.
+    let mut all_time = db::all_time_tallies(&state.db, Pool::Global, &open).await?;
+    all_time.extend(db::all_time_tallies(&state.db, Pool::Vienna, &open).await?);
+    let base = Arc::new(odds::base(&global, &vienna, &odds::typical_crowd(&all_time)));
     *state.odds_base.lock().unwrap_or_else(|e| e.into_inner()) = Some((open, base.clone()));
     Ok(base)
 }
