@@ -1215,6 +1215,15 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
   .diff .change { min-width: 0; }
 }
 
+/* On a phone a hundred columns are three pixels each. A fraction of a pixel
+   of gap draws some gaps and blurs the rest, so it is whole pixels, and
+   under that the bars simply touch. The labels are as close together: a
+   round one next to the winner's or your pick's steps aside. */
+@media (max-width: 640px) {
+  .col-bar { margin-inline: round(down, 12%, 1px); }
+  .col:not(:hover) .col-n .crowded { visibility: hidden; }
+}
+
 /* Bets: pick a range (two boxes, a button), then its quote with a stake
    box. The board below links each ready-made range to its quote. */
 .pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }

@@ -7,7 +7,7 @@
     {% for c in chart.columns %}
       <div class="col {{ c.kind }}{% if c.mine %} mine{% endif %}" title="{{ c.title }}{% if c.mine %}, your pick{% endif %}" style="--h: {{ c.pct }}%; --i: {{ loop.index0 }}">
         <span class="col-track"><span class="col-bar">{% if c.kind == "win" %}<span class="col-mark" aria-hidden="true">&#9660;</span>{% endif %}{% if c.count > 0 %}<span class="col-c">{{ c.count }}</span>{% endif %}</span></span>
-        <span class="col-n"><span{% if c.show_label || c.mine || c.kind == "win" %} class="shown"{% endif %}>{{ c.label }}</span>{% if c.mine %}<span class="col-you" aria-hidden="true">&#9650;</span>{% endif %}</span>
+        <span class="col-n"><span class="{% if c.show_label %}shown{% endif %}{% if c.crowded %} crowded{% endif %}">{{ c.label }}</span>{% if c.mine %}<span class="col-you" aria-hidden="true">&#9650;</span>{% endif %}</span>
       </div>
     {% endfor %}
   </div>

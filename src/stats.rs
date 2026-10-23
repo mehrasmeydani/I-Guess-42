@@ -80,9 +80,14 @@ const GAP: i64 = 10;
 pub struct Column {
     pub value: i64,
     pub label: String,
-    /// Whether the label is printed under the axis. Every column still has
-    /// its number in the hover text.
+    /// Whether the label is printed under the axis: 1, every `step`, the
+    /// winner and the visitor's own pick. Every column still has its number
+    /// in the hover text.
     pub show_label: bool,
+    /// A round label within half a step of the winner or the visitor's
+    /// pick. A phone hides it: there a hundred columns are three pixels
+    /// each, and "23" printed over "20" reads as neither.
+    pub crowded: bool,
     /// "win", "once", "many" or "none" on a day page; "win", "picked" or
     /// "none" on the trends page.
     pub kind: &'static str,
@@ -114,6 +119,27 @@ impl Chart {
         for t in &mut self.tail {
             t.mine = t.value == value;
         }
+        self.place_labels();
+    }
+
+    /// Labels 1 and every `step`, plus the winner and the visitor's pick,
+    /// and marks the round labels crowded by those two.
+    fn place_labels(&mut self) {
+        let step = self.step;
+        let marked: Vec<i64> = self
+            .columns
+            .iter()
+            .filter(|c| c.mine || c.kind == "win")
+            .map(|c| c.value)
+            .collect();
+        for c in &mut self.columns {
+            let marked_here = marked.contains(&c.value);
+            let round = c.value == 1 || c.value % step == 0;
+            c.show_label = marked_here || round;
+            c.crowded = !marked_here
+                && round
+                && marked.iter().any(|&m| (m - c.value).abs() * 2 <= step);
+        }
     }
 }
 
@@ -123,6 +149,8 @@ pub struct Chart {
     pub max: i64,
     /// The last number with a column.
     pub span: i64,
+    /// The gap between round labels along the axis.
+    pub step: i64,
     /// Every number picked above `span`, lowest first.
     pub tail: Vec<TailPick>,
     /// How many picks the tail holds.
@@ -207,7 +235,8 @@ fn build(
                 value,
                 mine: false,
                 label: value.to_string(),
-                show_label: value == 1 || value % step == 0,
+                show_label: false,
+                crowded: false,
                 kind,
                 pct: 0,
                 count,
@@ -238,13 +267,16 @@ fn build(
         })
         .collect();
 
-    Chart {
+    let mut chart = Chart {
         columns,
         max,
         span,
+        step,
         tail_picks: tail.iter().map(|t| t.count).sum(),
         tail,
-    }
+    };
+    chart.place_labels();
+    chart
 }
 
 /// One day's spread: which numbers were shared, which were alone, and which
@@ -917,6 +949,26 @@ mod tests {
         let c = day_chart(&tallies, &analyse(&tallies));
         assert_eq!(c.span, 77);
         assert_eq!(c.columns[76].kind, "win");
+    }
+
+    #[test]
+    fn on_a_phone_round_labels_make_way_for_the_winner_and_your_pick() {
+        // Some eighty-five columns, labelled every tenth. The winner on 23
+        // would be printed over 20; the visitor's 68 over 70.
+        let pairs: Vec<(i64, i64)> = (1..=90).map(|v| (v, if v == 23 { 1 } else { 2 })).collect();
+        let tallies = t(&pairs);
+        let mut c = day_chart(&tallies, &analyse(&tallies));
+        c.mark_mine(68);
+        let on_phone: Vec<i64> = c
+            .columns
+            .iter()
+            .filter(|c| c.show_label && !c.crowded)
+            .map(|c| c.value)
+            .collect();
+        assert_eq!(on_phone, [1, 10, 23, 30, 40, 50, 60, 68, 80]);
+        let crowded: Vec<i64> =
+            c.columns.iter().filter(|c| c.crowded).map(|c| c.value).collect();
+        assert_eq!(crowded, [20, 70]);
     }
 
     #[test]
