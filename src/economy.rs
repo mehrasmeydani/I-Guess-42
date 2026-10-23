@@ -48,17 +48,29 @@ pub fn streak_prize(run: i64) -> i64 {
     }
 }
 
-/// A late joiner starts level with the regulars: for every global round
-/// played before they joined they are owed this much, about what a regular
-/// earned from it: someone playing nine days in ten gets 90 of daily points
-/// and, simulated, about 59 from the streak prizes. Simulated over half a year of growth (fast, slow, a boom then
-/// quiet), it gave players who joined in month five the same chance at
-/// the top ten as those of month one; scaling the daily points with the
-/// number of players did not, since the regulars get the raise too.
+/// A late joiner starts level with the players who play like them: for
+/// every global round played before they joined they are owed this much,
+/// about what a regular earned from it: someone playing nine days in ten
+/// gets 90 of daily points and, simulated, about 56 from the streak prizes;
+/// their stakes come back on average as pots. Simulated over half a year of
+/// growth (fast, slow, a boom then quiet), it gave players who joined in
+/// month five the same chance at the top ten as those of month one; scaling
+/// the daily points with the number of players did not, since the regulars
+/// get the raise too.
 pub const CATCH_UP_PER_ROUND: i64 = 150;
-/// ...paid in this many equal parts, one with each day they play: not all at
-/// once, so an account made to farm it has to play a month for it.
+/// ...paid in parts, one with each of the first this many days they play:
+/// not all at once, so an account made to farm it has to play a month for it.
 pub const CATCH_UP_PARTS: i64 = 30;
+/// The play rate, in percent, that `CATCH_UP_PER_ROUND` is worth: each part
+/// is scaled by the square of the late joiner's own rate since joining over
+/// this. 150 a round is what nine days in ten earns, so a player who shows
+/// up four days in ten was given far more than the early players who play
+/// like that ever had. Squared because streak prizes grow faster than the
+/// days played: in 100-day simulations with players joining, quitting,
+/// missing days and betting, it left late joiners within a few percent of
+/// early ones who play every day or most days, where a flat 150 left those
+/// 10% behind and casual players 60% ahead.
+pub const CATCH_UP_RATE_PCT: i64 = 90;
 
 /// How often the settler looks for closed rounds to pay out.
 const SETTLE_EVERY: Duration = Duration::from_secs(30);
@@ -80,14 +92,45 @@ pub async fn catch_up_owed(db: &Db, account_id: i64) -> Result<i64> {
     Ok(db::global_rounds_before(db, &joined).await? * CATCH_UP_PER_ROUND)
 }
 
-/// Today's part of the catch-up, once the day's guess is in: a
-/// `CATCH_UP_PARTS`th of what was owed, or what is left of it. Paid once a
+/// One day's part of the catch-up: a `CATCH_UP_PARTS`th of what was owed,
+/// scaled by the square of how often they have played since joining
+/// (`played` of the `days` since, today included) over `CATCH_UP_RATE_PCT`.
+/// Nine days in ten gets the part as it is, every day about a quarter more.
+pub fn catch_up_part(owed: i64, played: i64, days: i64) -> i64 {
+    if owed <= 0 || days <= 0 {
+        return 0;
+    }
+    let part = (owed + CATCH_UP_PARTS - 1) / CATCH_UP_PARTS;
+    let played = played.clamp(0, days);
+    part * played * played * 10_000 / (days * days * CATCH_UP_RATE_PCT * CATCH_UP_RATE_PCT)
+}
+
+/// Today's part of the catch-up, once the day's guess is in, on each of the
+/// first `CATCH_UP_PARTS` days played (see `catch_up_part`). Paid once a
 /// round, however often this runs. Returns the points credited.
 pub async fn catch_up(db: &Db, account_id: i64, round: &str) -> Result<i64> {
     let owed = catch_up_owed(db, account_id).await?;
-    let left = owed - db::ledger_total(db, account_id, "catchup").await?;
-    let part = (owed + CATCH_UP_PARTS - 1) / CATCH_UP_PARTS;
-    let pay = part.min(left);
+    if owed == 0 {
+        return Ok(0);
+    }
+    let paid = db::ledger_refs(db, account_id, "catchup").await?;
+    if paid.len() as i64 >= CATCH_UP_PARTS {
+        return Ok(0);
+    }
+    let Some(joined) = db::joined_global(db, account_id).await? else {
+        return Ok(0);
+    };
+    let date = |d: &str| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok();
+    let (Some(from), Some(to)) = (date(&joined), date(round)) else {
+        return Ok(0);
+    };
+    let days = (to - from).num_days() + 1;
+    let played = db::global_play_days(db, account_id)
+        .await?
+        .iter()
+        .filter(|d| joined.as_str() <= d.as_str() && d.as_str() <= round)
+        .count() as i64;
+    let pay = catch_up_part(owed, played, days);
     if pay > 0 && db::credit_once(db, account_id, round, "catchup", pay, round, None).await? {
         return Ok(pay);
     }
@@ -493,6 +536,19 @@ mod tests {
         assert!(html.contains(&format!("{} pts</a>", SIGNUP_BONUS + DAILY_GRANT - GUESS_STAKE)));
     }
 
+    #[test]
+    fn a_catch_up_part_follows_how_often_they_play() {
+        // 30 rounds missed: 4500 owed, 150 a part at nine days in ten.
+        let owed = 30 * CATCH_UP_PER_ROUND;
+        assert_eq!(catch_up_part(owed, 9, 10), 150);
+        assert_eq!(catch_up_part(owed, 10, 10), 185, "every day: squared, a quarter more");
+        assert_eq!(catch_up_part(owed, 7, 10), 90);
+        assert_eq!(catch_up_part(owed, 4, 10), 29);
+        assert_eq!(catch_up_part(owed, 0, 10), 0);
+        assert_eq!(catch_up_part(owed, 12, 10), 185, "never more than every day");
+        assert_eq!(catch_up_part(0, 9, 10), 0);
+    }
+
     #[tokio::test]
     async fn a_late_joiner_catches_up_a_part_with_each_day_played() {
         let (_t, state) = app(&[]).await;
@@ -514,16 +570,21 @@ mod tests {
         let form = Form(GuessForm { guess: "7".into(), round: day(0) });
         let resp = handlers::global_confirm_guess(State(state.clone()), ClientIp(None), jar("bob"), form).await.unwrap();
         assert_eq!(location(&resp), "/g?msg=saved");
-        let part = (owed + CATCH_UP_PARTS - 1) / CATCH_UP_PARTS;
-        assert_eq!(db::balance(&state.db, bob).await.unwrap(), before + DAILY_GRANT - GUESS_STAKE + part);
+        // One day of one played: every day so far, so a quarter over the part.
+        let every_day = catch_up_part(owed, 1, 1);
+        assert_eq!(every_day, (owed + CATCH_UP_PARTS - 1) / CATCH_UP_PARTS * 10_000 / 8_100);
+        assert_eq!(db::balance(&state.db, bob).await.unwrap(), before + DAILY_GRANT - GUESS_STAKE + every_day);
         assert_eq!(catch_up(&state.db, bob, &day(0)).await.unwrap(), 0, "once a round");
 
-        // Thirty days of play later: all of it, and no more.
+        // Playing every day after: a part on each of the first thirty days
+        // played, and nothing after.
         for ahead in 1..=40 {
             let d = (today + chrono::Duration::days(ahead)).format("%Y-%m-%d").to_string();
+            plays(&state.db, bob, &d, 5).await;
             catch_up(&state.db, bob, &d).await.unwrap();
         }
-        assert_eq!(db::ledger_total(&state.db, bob, "catchup").await.unwrap(), owed);
+        assert_eq!(db::ledger_refs(&state.db, bob, "catchup").await.unwrap().len() as i64, CATCH_UP_PARTS);
+        assert_eq!(db::ledger_total(&state.db, bob, "catchup").await.unwrap(), CATCH_UP_PARTS * every_day);
         // Not a gain from play: left out of the weekly board.
         let week = db::points_board(&state.db, Some("2000-01-01"), 10).await.unwrap();
         assert!(week.iter().all(|r| r.id != bob || r.points < owed), "{week:?}");

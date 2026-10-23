@@ -567,10 +567,20 @@ documented like `PARTICIPANT_POINTS` in `points.rs`.
   Migration 0011 adds the kind (it rebuilds `ledger`, keeping every row).
 - **Catch-up.** A player who joins after N global rounds have been played
   is owed N × 150 (`CATCH_UP_PER_ROUND`: what a nine-days-in-ten player
-  earns a round, 90 of daily points and about 59 of streak prizes), paid
-  as a 30th of it (`CATCH_UP_PARTS`) with each day they lock a guess:
-  `ledger(kind='catchup', ref=round_date)`, once a round. Joining on day
-  120 is owed 18 000, 600 a day on top of the grant for 30 played days.
+  earns a round, 90 of daily points and about 59 of streak prizes; stakes
+  come back on average as pots), paid on each of the first 30 days they
+  lock a guess (`CATCH_UP_PARTS`): `ledger(kind='catchup', ref=round_date)`,
+  once a round. Each part is a 30th of what is owed, scaled by
+  (rate / 90%)² (`CATCH_UP_RATE_PCT`), the rate being the days played of
+  the days since joining, today included. Joining on day 120 is owed 18 000:
+  600 a day at nine days in ten, about 740 playing every day, about 120 at
+  four in ten. A flat 30th gave casual late joiners up to 60% more than the
+  early players who play as rarely, and left every-day ones 10% behind; a
+  100-day simulation (strategic picks, quitters, careful bettors, chasers
+  and all-in bettors, three growth curves) put the squared rate within a
+  few percent for every-day and most-days players. Basing it on the
+  average balance of active players instead left late regulars 20-30%
+  behind: the average includes the casual and the new.
   Migration 0014 adds the kind (rebuilding `ledger` as 0011 did). Left out of
   the "this week" board, like grants. Why not raise the daily points as the
   game grows: a 180-day simulation (bets included, three growth curves)

@@ -2167,6 +2167,7 @@ pub async fn global_rounds_before(db: &Db, round_date: &str) -> Result<i64> {
 }
 
 /// What an account has had of one kind of ledger row, all told.
+#[cfg(test)]
 pub async fn ledger_total(db: &Db, account_id: i64, kind: &str) -> Result<i64> {
     Ok(sqlx::query_scalar("SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE account_id = ?1 AND kind = ?2")
         .bind(account_id)
