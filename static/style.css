@@ -968,6 +968,12 @@ details.expand[open] summary .when-open { display: inline; }
 .leaders-table .score b { color: var(--state); font-variant-numeric: tabular-nums; }
 .leaders-table .minibar { background: var(--state); }
 .leaders-table .r1 .who { color: var(--hi); font-weight: 700; }
+/* A leaderboard shows its top 15; the checkbox before it shows the rest. */
+.board-more:not(:checked) ~ .table-wrap tr.more { display: none; }
+.board-more-label { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; color: var(--fg); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.board-more-label:hover { color: var(--hi); }
+.board-more:focus-visible ~ .board-more-label { outline: 2px solid var(--hi); outline-offset: 2px; }
+.board-more:checked ~ .board-more-label .show, .board-more:not(:checked) ~ .board-more-label .hide { display: none; }
 /* The first three: violet, blue, red - place, bar and score alike; everyone
    after them green. */
 .leaders-table .r1 .place, .leaders-table .r1 .score b { color: var(--first); }
@@ -1207,6 +1213,15 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
   .diff thead th:first-child { display: none; }
   .diff tbody td:first-child { grid-column: 1 / -1; margin-bottom: 4px; }
   .diff .change { min-width: 0; }
+}
+
+/* On a phone a hundred columns are three pixels each. A fraction of a pixel
+   of gap draws some gaps and blurs the rest, so it is whole pixels, and
+   under that the bars simply touch. The labels are as close together: a
+   round one next to the winner's or your pick's steps aside. */
+@media (max-width: 640px) {
+  .col-bar { margin-inline: round(down, 12%, 1px); }
+  .col:not(:hover) .col-n .crowded { visibility: hidden; }
 }
 
 /* Bets: pick a range (two boxes, a button), then its quote with a stake

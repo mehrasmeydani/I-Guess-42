@@ -2042,6 +2042,22 @@ pub async fn leaderboard(
     Ok(rows)
 }
 
+/// Every day each player of `pool` played, the open round included, as
+/// (player id, login, display name, round date), by player and then date:
+/// what the streak leaderboard is worked out from. Guesses that do not
+/// count (ghosts, test accounts, banned) are not days played.
+pub async fn play_days(db: &Db, pool: Pool) -> Result<Vec<(i64, String, String, String)>> {
+    let sql = format!(
+        "SELECT p.id, p.login, p.display_name, g.round_date
+         FROM {} g JOIN {} p ON p.id = g.user_id
+         WHERE g.participates = 1
+         ORDER BY p.id, g.round_date",
+        pool.guesses(),
+        pool.players()
+    );
+    Ok(sqlx::query_as(&sql).fetch_all(db).await?)
+}
+
 /// One closed round a player took part in: what they picked, and what won.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct PlayedRound {
@@ -2151,6 +2167,7 @@ pub async fn global_rounds_before(db: &Db, round_date: &str) -> Result<i64> {
 }
 
 /// What an account has had of one kind of ledger row, all told.
+#[cfg(test)]
 pub async fn ledger_total(db: &Db, account_id: i64, kind: &str) -> Result<i64> {
     Ok(sqlx::query_scalar("SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE account_id = ?1 AND kind = ?2")
         .bind(account_id)
@@ -2822,12 +2839,18 @@ pub struct LedgerRow {
     pub amount: i64,
     pub note: Option<String>,
     pub created_at: String,
+    /// For a bet's lines (placed, won, refunded): what it was on, and the
+    /// odds it was locked at.
+    pub market: Option<String>,
+    pub odds_x100: Option<i64>,
 }
 
 pub async fn ledger_rows(db: &Db, account_id: i64, limit: i64) -> Result<Vec<LedgerRow>> {
     let rows = sqlx::query_as::<_, LedgerRow>(
-        "SELECT round_date, kind, amount, note, created_at FROM ledger
-         WHERE account_id = ?1 ORDER BY id DESC LIMIT ?2",
+        "SELECT l.round_date, l.kind, l.amount, l.note, l.created_at, b.market, b.odds_x100
+         FROM ledger l
+         LEFT JOIN bets b ON l.ref LIKE 'bet:%' AND b.id = CAST(substr(l.ref, 5) AS INTEGER)
+         WHERE l.account_id = ?1 ORDER BY l.id DESC LIMIT ?2",
     )
     .bind(account_id)
     .bind(limit)

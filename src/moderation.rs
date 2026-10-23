@@ -1,7 +1,8 @@
 //! `/mod`: keeping the global pool honest. Moderators are named by 42 login
 //! in MODERATORS and work on the live site, unlike `/admin`, which only
-//! exists on a test instance. They can ban and unban accounts, and see
-//! groups of accounts that may be one person playing several.
+//! exists on a test instance. They can ban and unban accounts, see groups
+//! of accounts that may be one person playing several, and see how any
+//! player came by their points.
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -15,7 +16,7 @@ use crate::credentials::normalize_username;
 use crate::db::{self, Pool, Viewer};
 use crate::handlers::current_viewer;
 use crate::round::Round;
-use crate::templates::{self, ImprintTemplate, ModTemplate, Notice, PrivacyTemplate, UserView};
+use crate::templates::{self, ImprintTemplate, ModTemplate, Notice, PointsTemplate, PrivacyTemplate, UserView};
 
 /// Accounts in a group before it is worth a moderator's look.
 const CLUSTER_MIN: i64 = 3;
@@ -24,7 +25,12 @@ const CLUSTER_MIN: i64 = 3;
 /// the page gives no sign that it exists.
 async fn moderator(state: &AppState, jar: &CookieJar) -> Result<Option<Viewer>, AppError> {
     let viewer = current_viewer(state, jar).await?;
-    Ok(viewer.filter(|v| v.intra.as_ref().is_some_and(|u| state.cfg.is_moderator(&u.login))))
+    Ok(viewer.filter(|v| is_moderator(state, v)))
+}
+
+/// Signed in with a 42 login named in MODERATORS.
+pub fn is_moderator(state: &AppState, viewer: &Viewer) -> bool {
+    viewer.intra.as_ref().is_some_and(|u| state.cfg.is_moderator(&u.login))
 }
 
 fn gone() -> Response {
@@ -227,6 +233,40 @@ pub async fn adjust(
 }
 
 #[derive(Deserialize)]
+pub struct PointsQuery {
+    #[serde(default)]
+    pub username: String,
+}
+
+/// `/mod/points`: a player's points history, line by line, as they see it
+/// on their own points page: where a balance that looks too good came from.
+/// Read only, so nothing is collected for them on the way.
+pub async fn points(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(q): Query<PointsQuery>,
+) -> Result<Response, AppError> {
+    let Some(viewer) = moderator(&state, &jar).await? else {
+        return Ok(gone());
+    };
+    let Some(target) = db::mod_account(&state.db, &normalize_username(&q.username)).await? else {
+        return page(&state, viewer, Some(Notice::error(crate::copy::NO_SUCH_ACCOUNT)), StatusCode::NOT_FOUND).await;
+    };
+    Ok(templates::render(&PointsTemplate {
+        pool: Pool::Global,
+        test_mode: state.cfg.test_env(),
+        impersonating: false,
+        whose: Some(target.username),
+        balance_label: templates::points_label(&db::balance(&state.db, target.id).await?),
+        rows: crate::points_pages::history(&state.db, target.id, false).await?,
+        stake: crate::economy::GUESS_STAKE,
+        grant: crate::economy::DAILY_GRANT,
+        bonus: crate::economy::SIGNUP_BONUS,
+        user: Some(UserView::from(viewer)),
+    }))
+}
+
+#[derive(Deserialize)]
 pub struct VoidForm {
     pub round: String,
 }
@@ -356,6 +396,44 @@ mod tests {
             let resp = crate::account::rename(State(state.clone()), jar("mod"), form).await.unwrap();
             assert_eq!(location(&resp), "/account?msg=renamed", "{to}");
         }
+    }
+
+    #[tokio::test]
+    async fn moderators_see_how_any_player_got_their_points() {
+        let (t, state) = setup(&["megardes"]).await;
+        student(&t.db, 1001, "megardes", "mod").await;
+        stranger(&t.db, "ann", "ann").await;
+        let ann = db::mod_account(&t.db, "ann").await.unwrap().unwrap().id;
+        db::credit_once(&t.db, ann, "2026-10-21", "adjust", 250, "adjust:t", Some("found a bug")).await.unwrap();
+        db::credit_once(&t.db, ann, "2026-10-21", "stake", -10, "stake:t", None).await.unwrap();
+        let limits = db::BetLimits { max_profit: 1_000_000, keep: 0 };
+        db::place_bet(&t.db, ann, "2026-10-21", "range:2:3", 40, limits, |_| Some(350)).await.unwrap();
+        let look = |token: &'static str, name: &str| {
+            points(State(state.clone()), jar(token), Query(PointsQuery { username: name.into() }))
+        };
+        let resp = look("mod", "Ann").await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body(resp).await;
+        assert!(html.contains("ann&rsquo;s points") || html.contains("ann’s points"));
+        assert!(html.contains("adjusted by a moderator: found a bug") && html.contains("+250"));
+        assert!(html.contains(">guess<") && !html.contains("your guess"), "said of them, not you");
+        assert!(html.contains(r#"href="/mod""#));
+        assert!(html.contains("bet: winner 2 to 3 at ×3.50") && html.contains("-40"), "what the points went on");
+        // The points on the leaderboard open it, for a moderator only.
+        let board = |token: &'static str| {
+            let (state, q) = (state.clone(), Query(crate::points_pages::BoardQuery::default()));
+            async move { body(crate::points_pages::leaderboard(State(state), jar(token), q).await.unwrap()).await }
+        };
+        assert!(board("mod").await.contains(r#"href="/mod/points?username=ann""#));
+        assert!(!board("ann").await.contains("/mod/points"));
+        // Unknown: back on /mod, saying so.
+        assert_eq!(look("mod", "nobody").await.unwrap().status(), StatusCode::NOT_FOUND);
+        // Not a moderator: the page is not there, not even for their own.
+        assert_eq!(look("ann", "ann").await.unwrap().status(), StatusCode::NOT_FOUND);
+        // /mod links each listed name to it.
+        db::ban_account(&t.db, ann, "test", "2026-10-22").await.unwrap();
+        let html = body(moderation(State(state.clone()), jar("mod"), Query(ModQuery::default())).await.unwrap()).await;
+        assert!(html.contains(r#"href="/mod/points?username=ann""#) && html.contains(r#"action="/mod/points""#));
     }
 
     #[tokio::test]

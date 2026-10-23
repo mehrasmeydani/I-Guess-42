@@ -17,21 +17,51 @@ use crate::templates::{self, points_label, LedgerView, PointsBoardRow, PointsTem
 const HISTORY: i64 = 200;
 const BOARD: i64 = 100;
 
-/// What a ledger line was, in words.
-fn what(kind: &str, note: Option<&str>) -> String {
-    match kind {
+/// What a ledger line was, in words: to its owner, or to a moderator
+/// looking at someone else's. A bet's lines say what it was on.
+fn what(r: &db::LedgerRow, own: bool) -> String {
+    let note = r.note.as_deref();
+    let on = r
+        .market
+        .as_deref()
+        .and_then(crate::odds::Market::parse)
+        .map(|m| match r.odds_x100 {
+            Some(o) => format!(": {} at {}", m.label(), crate::odds::odds_label(o)),
+            None => format!(": {}", m.label()),
+        })
+        .unwrap_or_default();
+    match r.kind.as_str() {
         "signup" => "welcome points".to_string(),
         "grant" => "daily points".to_string(),
-        "stake" => "your guess".to_string(),
+        "stake" if own => "your guess".to_string(),
+        "stake" => "guess".to_string(),
         "pot" => "won the pot".to_string(),
-        "refund" => format!("refund{}", note.map(|n| format!(" ({n})")).unwrap_or_default()),
+        "refund" => format!("refund{}{on}", note.map(|n| format!(" ({n})")).unwrap_or_default()),
         "adjust" => format!("adjusted by a moderator{}", note.map(|n| format!(": {n}")).unwrap_or_default()),
-        "bet" => "bet".to_string(),
-        "bet_win" => "bet won".to_string(),
+        "bet" => format!("bet{on}"),
+        "bet_win" => format!("bet won{on}"),
         "streak" => "streak bonus".to_string(),
         "catchup" => "catch-up points".to_string(),
         other => other.to_string(),
     }
+}
+
+/// An account's points history, newest first, as the points page lists it.
+pub async fn history(db: &db::Db, account_id: i64, own: bool) -> Result<Vec<LedgerView>, AppError> {
+    let rows = db::ledger_rows(db, account_id, HISTORY).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| LedgerView {
+            what: what(&r, own),
+            date: r.round_date,
+            amount: if r.amount > 0 {
+                format!("+{}", templates::group_digits(r.amount))
+            } else {
+                templates::group_digits(r.amount)
+            },
+            gain: r.amount > 0,
+        })
+        .collect())
 }
 
 pub async fn points(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
@@ -42,27 +72,16 @@ pub async fn points(State(state): State<AppState>, jar: CookieJar) -> Result<Res
     if viewer.account.verified {
         crate::economy::collect(&state.db, viewer.account.id, &open).await?;
     }
-    let rows = db::ledger_rows(&state.db, viewer.account.id, HISTORY).await?;
+    let rows = history(&state.db, viewer.account.id, true).await?;
     let balance = db::balance(&state.db, viewer.account.id).await?;
     let viewer = current_viewer(&state, &jar).await?.unwrap_or(viewer);
     Ok(templates::render(&PointsTemplate {
         pool: Pool::Global,
         test_mode: state.cfg.test_env(),
         impersonating: false,
+        whose: None,
         balance_label: points_label(&balance),
-        rows: rows
-            .into_iter()
-            .map(|r| LedgerView {
-                date: r.round_date,
-                what: what(&r.kind, r.note.as_deref()),
-                amount: if r.amount > 0 {
-                    format!("+{}", templates::group_digits(r.amount))
-                } else {
-                    templates::group_digits(r.amount)
-                },
-                gain: r.amount > 0,
-            })
-            .collect(),
+        rows,
         stake: crate::economy::GUESS_STAKE,
         grant: crate::economy::DAILY_GRANT,
         bonus: crate::economy::SIGNUP_BONUS,
@@ -125,6 +144,40 @@ async fn leaderboard_in(
             PointsBoardRow { name: l.login, title: l.display_name, points: l.wins.to_string(), pct, me, rank }
         })
         .collect();
+    // Longest streaks: each player's runs worked out from the days they
+    // played, longest first, then the one still going.
+    let open_day = chrono::NaiveDate::parse_from_str(&open, "%Y-%m-%d").unwrap_or_else(|_| chrono::Utc::now().date_naive());
+    let mut players: Vec<(i64, String, String, Vec<chrono::NaiveDate>)> = Vec::new();
+    for (id, login, display_name, day) in db::play_days(&state.db, pool).await? {
+        let Ok(day) = chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d") else { continue };
+        match players.last_mut() {
+            Some(p) if p.0 == id => p.3.push(day),
+            _ => players.push((id, login, display_name, vec![day])),
+        }
+    }
+    let mut runs: Vec<(String, String, i64, i64, i64)> = players
+        .into_iter()
+        .map(|(id, login, display_name, days)| {
+            let (longest, current) = crate::stats::longest_and_current_streak(&days, open_day);
+            (login, display_name, longest, current, id)
+        })
+        .collect();
+    runs.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)).then(a.0.cmp(&b.0)));
+    runs.truncate(BOARD as usize);
+    let top_run = runs.first().map_or(1, |r| r.2.max(1));
+    let run_ranks = templates::ranks(&runs.iter().map(|r| r.2).collect::<Vec<_>>());
+    let streaks: Vec<templates::StreakBoardRow> = runs
+        .into_iter()
+        .zip(run_ranks)
+        .map(|((login, display_name, longest, current, id), rank)| {
+            let me = match pool {
+                Pool::Global => me_global.as_deref() == Some(login.as_str()),
+                Pool::Vienna => me_42.as_deref() == Some(login.as_str()),
+            };
+            let shown = templates::LeaderView::new(db::LeaderboardRow { id, login, display_name, wins: 0 }, named);
+            templates::StreakBoardRow { name: shown.login, title: shown.display_name, longest, current, pct: longest * 100 / top_run, me, rank }
+        })
+        .collect();
     let top_points = rows.first().map_or(1, |r| r.points.max(1));
     let point_ranks = templates::ranks(&rows.iter().map(|r| r.points).collect::<Vec<_>>());
     Ok(templates::render(&BoardTemplate {
@@ -132,7 +185,9 @@ async fn leaderboard_in(
         test_mode: state.cfg.test_env(),
         impersonating: false,
         week,
+        moderator: viewer.as_ref().is_some_and(|v| crate::moderation::is_moderator(&state, v)),
         wins,
+        streaks,
         rows: rows
             .into_iter()
             .zip(point_ranks)

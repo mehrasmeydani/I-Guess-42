@@ -596,6 +596,9 @@ pub struct QuoteView {
     pub max_stake: i64,
     /// The stake is held to `max_stake` by the 10 kept for today's guess.
     pub keeping: bool,
+    /// Today's guess is in: with nothing to stake, the points are spent, not
+    /// kept back for it.
+    pub guessed: bool,
     /// Players a day, the reason for the cap.
     pub players: usize,
     /// Bet on already today.
@@ -677,6 +680,9 @@ pub struct PointsTemplate {
     pub user: Option<UserView>,
     pub test_mode: bool,
     pub impersonating: bool,
+    /// Someone else's points, opened by a moderator from /mod; `None` for
+    /// your own.
+    pub whose: Option<String>,
     pub balance_label: String,
     pub rows: Vec<LedgerView>,
     pub stake: i64,
@@ -707,10 +713,26 @@ pub struct BoardTemplate {
     pub impersonating: bool,
     /// Gains over the last week, rather than balances.
     pub week: bool,
+    /// The visitor moderates: each player's points open their history.
+    pub moderator: bool,
     /// Points, highest first: the global round only.
     pub rows: Vec<PointsBoardRow>,
     /// The most days won, all-time.
     pub wins: Vec<PointsBoardRow>,
+    /// The longest runs of days in a row, all-time.
+    pub streaks: Vec<StreakBoardRow>,
+}
+
+pub struct StreakBoardRow {
+    pub name: String,
+    pub title: String,
+    /// The longest run of days in a row.
+    pub longest: i64,
+    /// The run still going, 0 if none.
+    pub current: i64,
+    pub pct: i64,
+    pub me: bool,
+    pub rank: i64,
 }
 
 /// One day on the trends timeline.

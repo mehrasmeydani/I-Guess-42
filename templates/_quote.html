@@ -20,6 +20,7 @@
     {% if !can_bet %}
     {% else if q.taken %}<p class="dim">placed</p>
     {% else if q.profit_left < 1 %}<p class="lose">your bets today can already win the most a day allows</p>
+    {% else if q.max_stake < 1 && q.guessed %}<p class="lose">no points left to bet &middot; more each day you play</p>
     {% else if q.max_stake < 1 %}<p class="lose">keep {{ crate::economy::GUESS_STAKE }} for today&rsquo;s guess &middot; <a href="/g/">guess first</a>, then bet</p>
     {% else %}
     <form method="post" action="/g/bet" class="betform">

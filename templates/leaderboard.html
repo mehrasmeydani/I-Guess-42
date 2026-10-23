@@ -20,16 +20,20 @@
   {% if rows.is_empty() %}
     <p class="dim">nobody yet</p>
   {% else %}
+    {# The top 15, the rest behind "show all": a checkbox, so no script is
+       needed. Your own row shows wherever it is. #}
+    {% if rows.len() > 15 %}<input type="checkbox" id="more-points" class="board-more sr">{% endif %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="most points">
     <table class="grid leaders-table">
       <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="score">points</th></tr></thead>
       <tbody>
         {% for r in rows %}
-          <tr class="r{{ r.rank }}{% if r.me %} me{% endif %}" title="{{ r.title }}"><td class="num place">{{ "{:02}"|format(r.rank) }}</td><td class="who">{{ r.name }}{% if r.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score pts"><span class="minibar" style="--w: {{ r.pct }}%"></span><b>{{ r.points }}</b></td></tr>
+          <tr class="r{{ r.rank }}{% if r.me %} me{% else if loop.index > 15 %} more{% endif %}" title="{{ r.title }}"><td class="num place">{{ "{:02}"|format(r.rank) }}</td><td class="who">{{ r.name }}{% if r.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score pts"><span class="minibar" style="--w: {{ r.pct }}%"></span>{% if moderator %}<a href="/mod/points?username={{ r.name|urlencode }}" title="how {{ r.name }} got their points"><b>{{ r.points }}</b></a>{% else %}<b>{{ r.points }}</b>{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>
     </div>
+    {% if rows.len() > 15 %}<label class="board-more-label" for="more-points"><span class="show">show all {{ rows.len() }} &darr;</span><span class="hide">show top 15 &uarr;</span></label>{% endif %}
   {% endif %}
 </section>
 {% endif %}
@@ -39,16 +43,38 @@
   {% if wins.is_empty() %}
     <p class="dim">no winners yet</p>
   {% else %}
+    {% if wins.len() > 15 %}<input type="checkbox" id="more-wins" class="board-more sr">{% endif %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="most wins">
     <table class="grid leaders-table">
       <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="score">days won</th></tr></thead>
       <tbody>
         {% for l in wins %}
-          <tr class="r{{ l.rank }}{% if l.me %} me{% endif %}" title="{{ l.title }}"><td class="num place">{{ "{:02}"|format(l.rank) }}</td><td class="who">{{ l.name }}{% if l.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score wins"><span class="minibar" style="--w: {{ l.pct }}%"></span><b>{{ l.points }}</b></td></tr>
+          <tr class="r{{ l.rank }}{% if l.me %} me{% else if loop.index > 15 %} more{% endif %}" title="{{ l.title }}"><td class="num place">{{ "{:02}"|format(l.rank) }}</td><td class="who">{{ l.name }}{% if l.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score wins"><span class="minibar" style="--w: {{ l.pct }}%"></span><b>{{ l.points }}</b></td></tr>
         {% endfor %}
       </tbody>
     </table>
     </div>
+    {% if wins.len() > 15 %}<label class="board-more-label" for="more-wins"><span class="show">show all {{ wins.len() }} &darr;</span><span class="hide">show top 15 &uarr;</span></label>{% endif %}
+  {% endif %}
+</section>
+
+<section class="sec" style="--b: 2" aria-labelledby="streaks-h">
+  <h2 class="section-title" id="streaks-h">longest streaks</h2>
+  {% if streaks.is_empty() %}
+    <p class="dim">nobody yet</p>
+  {% else %}
+    {% if streaks.len() > 15 %}<input type="checkbox" id="more-streaks" class="board-more sr">{% endif %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="longest streaks">
+    <table class="grid leaders-table">
+      <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="num">now</th><th scope="col" class="score">days in a row</th></tr></thead>
+      <tbody>
+        {% for s in streaks %}
+          <tr class="r{{ s.rank }}{% if s.me %} me{% else if loop.index > 15 %} more{% endif %}" title="{{ s.title }}"><td class="num place">{{ "{:02}"|format(s.rank) }}</td><td class="who">{{ s.name }}{% if s.me %} <span class="you-tag">you</span>{% endif %}</td><td class="num dim">{% if s.current > 0 %}&#128293; {{ s.current }}{% else %}&ndash;{% endif %}</td><td class="barcell score wins"><span class="minibar" style="--w: {{ s.pct }}%"></span><b>{{ s.longest }}</b></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if streaks.len() > 15 %}<label class="board-more-label" for="more-streaks"><span class="show">show all {{ streaks.len() }} &darr;</span><span class="hide">show top 15 &uarr;</span></label>{% endif %}
   {% endif %}
 </section>
 {% endblock %}
