@@ -159,6 +159,8 @@ struct Room {
     points: i64,
     /// What their bets on the round may still win together, under the cap.
     profit: i64,
+    /// Today's guess is in, so nothing is kept back for it.
+    guessed: bool,
 }
 
 /// None for a visitor who cannot bet.
@@ -171,12 +173,13 @@ async fn stake_room(state: &AppState, base: &Base, viewer: Option<&db::Viewer>, 
     Ok(Some(Room {
         points: balance - if guessed { 0 } else { crate::economy::GUESS_STAKE },
         profit: db::profit_room(&state.db, v.account.id, open, base.max_profit()).await?,
+        guessed,
     }))
 }
 
 fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market], room: Option<Room>) -> QuoteView {
     let qt = odds::quote(base, book, m);
-    let room = room.unwrap_or(Room { points: i64::MAX, profit: base.max_profit() });
+    let room = room.unwrap_or(Room { points: i64::MAX, profit: base.max_profit(), guessed: true });
     let by_cap = qt.odds_x100.map_or(0, |o| odds::max_stake(o, room.profit.max(0)));
     let points = room.points.max(0);
     QuoteView {
@@ -190,7 +193,8 @@ fn quote_view(base: &Base, book: &[(Market, i64)], m: Market, taken: &[Market], 
         profit_left: room.profit.max(0),
         max_stake: if room.profit <= 0 { 0 } else { by_cap.min(points) },
         // Held back by the guess still to make, not by the cap.
-        keeping: points < by_cap,
+        keeping: !room.guessed && points < by_cap,
+        guessed: room.guessed,
         players: base.cap_players(),
         taken: taken.contains(&m),
     }
@@ -733,6 +737,29 @@ mod tests {
         assert!(html.contains(r#"action="/g/bet""#) && !html.contains("bets open once"));
     }
 
+    #[tokio::test]
+    async fn with_the_guess_in_and_every_point_bet_it_says_so_not_guess_first() {
+        let (_t, state) = app(&[]).await;
+        yesterday(&state).await;
+        let ann = player(&state.db, "ann").await;
+        // Before guessing, a stake held back by the guess says why.
+        let html = bets_page_q(&state, Some("ann"), picked("range:2:3")).await;
+        assert!(html.contains("keeping 10 for today"));
+        let today = Round::current(state.now()).key();
+        db::insert_guess(&state.db, Pool::Global, &today, ann, 7, true).await.unwrap();
+        let html = bets_page_q(&state, Some("ann"), picked("range:2:3")).await;
+        assert!(!html.contains("keeping 10 for today"), "the guess is in: nothing kept back");
+
+        let all = db::balance(&state.db, ann).await.unwrap();
+        // A likely range, so all of it stays under the cap on a win.
+        let o = odds_for(&state, "range:1:3").await;
+        let resp = place(State(state.clone()), jar("ann"), form(&state, "range:1:3", &all.to_string(), o)).await.unwrap();
+        assert_eq!(location(&resp), "/g/bets?msg=bet_placed&m=range:1:3");
+        let html = bets_page_q(&state, Some("ann"), picked("range:2:3")).await;
+        assert!(html.contains("no points left to bet"));
+        assert!(!html.contains("guess first"));
+    }
+
     /// Last week, as a crowd of 20 a day picking mostly low numbers.
     async fn last_week(state: &AppState) {
         let today = Round::current(state.now()).date;
@@ -965,7 +992,7 @@ mod tests {
         bet(&state.db, ann, &day, "range:1:4", 10, 180).await;
         settle_all(&state.db, &Round::current(state.now()).key()).await.unwrap();
         let html = body(crate::points_pages::points(State(state.clone()), jar("ann")).await.unwrap()).await;
-        assert!(html.contains(">bet<") && html.contains(">bet won<") && html.contains("+18"), "{html}");
+        assert!(html.contains(">bet: winner 4 or less at ×1.80<") && html.contains(">bet won: winner 4 or less at ×1.80<") && html.contains("+18"), "{html}");
         let page = bets_page(&state, Some("ann"), None).await;
         assert!(page.contains("past bets") && page.contains("net +8"));
     }

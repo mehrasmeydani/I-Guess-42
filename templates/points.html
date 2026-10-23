@@ -1,19 +1,26 @@
 {% extends "base.html" %}
 {% block title %}points &middot; i guess low{% endblock %}
-{% block h1 %}your points{% endblock %}
+{% block h1 %}{% match whose %}{% when Some with (name) %}{{ name }}&rsquo;s points{% when None %}your points{% endmatch %}{% endblock %}
 {% block path %}/g/points{% endblock %}
 
 {% block content %}
 <section class="sec" style="--b: 0">
+  {% match whose %}
+  {% when Some with (name) %}
+  <h2 class="section-title">{{ name }}&rsquo;s points</h2>
+  <p class="takeaway"><b class="win">{{ balance_label }}</b></p>
+  <p><a href="/mod">&larr; moderation</a></p>
+  {% when None %}
   <h2 class="section-title">your points</h2>
   <p class="takeaway"><b class="win">{{ balance_label }}</b></p>
   <p><a href="/g/leaderboard">the points leaderboard &rarr;</a></p>
+  {% endmatch %}
 </section>
 
 <section class="sec" style="--b: 1">
   <h2 class="section-title">history</h2>
   {% if rows.is_empty() %}
-    <p class="dim">nothing yet &middot; <a href="/g/">visit the round &rarr;</a></p>
+    <p class="dim">nothing yet{% if whose.is_none() %} &middot; <a href="/g/">visit the round &rarr;</a>{% endif %}</p>
   {% else %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="points history">
     <table class="grid">

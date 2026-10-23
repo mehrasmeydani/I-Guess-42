@@ -160,6 +160,7 @@ async fn main() -> Result<()> {
         .route("/mod/adjust", post(moderation::adjust))
         .route("/mod/rename", post(moderation::rename))
         .route("/mod/void", post(moderation::void))
+        .route("/mod/points", get(moderation::points))
         .route("/privacy", get(moderation::privacy))
         .route("/imprint", get(moderation::imprint))
         .route("/healthz", get(handlers::healthz))

@@ -28,7 +28,7 @@
       <thead><tr><th scope="col" class="num">#</th><th scope="col">player</th><th scope="col" class="score">points</th></tr></thead>
       <tbody>
         {% for r in rows %}
-          <tr class="r{{ r.rank }}{% if r.me %} me{% else if loop.index > 15 %} more{% endif %}" title="{{ r.title }}"><td class="num place">{{ "{:02}"|format(r.rank) }}</td><td class="who">{{ r.name }}{% if r.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score pts"><span class="minibar" style="--w: {{ r.pct }}%"></span><b>{{ r.points }}</b></td></tr>
+          <tr class="r{{ r.rank }}{% if r.me %} me{% else if loop.index > 15 %} more{% endif %}" title="{{ r.title }}"><td class="num place">{{ "{:02}"|format(r.rank) }}</td><td class="who">{{ r.name }}{% if r.me %} <span class="you-tag">you</span>{% endif %}</td><td class="barcell score pts"><span class="minibar" style="--w: {{ r.pct }}%"></span>{% if moderator %}<a href="/mod/points?username={{ r.name|urlencode }}" title="how {{ r.name }} got their points"><b>{{ r.points }}</b></a>{% else %}<b>{{ r.points }}</b>{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -2838,12 +2838,18 @@ pub struct LedgerRow {
     pub amount: i64,
     pub note: Option<String>,
     pub created_at: String,
+    /// For a bet's lines (placed, won, refunded): what it was on, and the
+    /// odds it was locked at.
+    pub market: Option<String>,
+    pub odds_x100: Option<i64>,
 }
 
 pub async fn ledger_rows(db: &Db, account_id: i64, limit: i64) -> Result<Vec<LedgerRow>> {
     let rows = sqlx::query_as::<_, LedgerRow>(
-        "SELECT round_date, kind, amount, note, created_at FROM ledger
-         WHERE account_id = ?1 ORDER BY id DESC LIMIT ?2",
+        "SELECT l.round_date, l.kind, l.amount, l.note, l.created_at, b.market, b.odds_x100
+         FROM ledger l
+         LEFT JOIN bets b ON l.ref LIKE 'bet:%' AND b.id = CAST(substr(l.ref, 5) AS INTEGER)
+         WHERE l.account_id = ?1 ORDER BY l.id DESC LIMIT ?2",
     )
     .bind(account_id)
     .bind(limit)

@@ -17,21 +17,51 @@ use crate::templates::{self, points_label, LedgerView, PointsBoardRow, PointsTem
 const HISTORY: i64 = 200;
 const BOARD: i64 = 100;
 
-/// What a ledger line was, in words.
-fn what(kind: &str, note: Option<&str>) -> String {
-    match kind {
+/// What a ledger line was, in words: to its owner, or to a moderator
+/// looking at someone else's. A bet's lines say what it was on.
+fn what(r: &db::LedgerRow, own: bool) -> String {
+    let note = r.note.as_deref();
+    let on = r
+        .market
+        .as_deref()
+        .and_then(crate::odds::Market::parse)
+        .map(|m| match r.odds_x100 {
+            Some(o) => format!(": {} at {}", m.label(), crate::odds::odds_label(o)),
+            None => format!(": {}", m.label()),
+        })
+        .unwrap_or_default();
+    match r.kind.as_str() {
         "signup" => "welcome points".to_string(),
         "grant" => "daily points".to_string(),
-        "stake" => "your guess".to_string(),
+        "stake" if own => "your guess".to_string(),
+        "stake" => "guess".to_string(),
         "pot" => "won the pot".to_string(),
-        "refund" => format!("refund{}", note.map(|n| format!(" ({n})")).unwrap_or_default()),
+        "refund" => format!("refund{}{on}", note.map(|n| format!(" ({n})")).unwrap_or_default()),
         "adjust" => format!("adjusted by a moderator{}", note.map(|n| format!(": {n}")).unwrap_or_default()),
-        "bet" => "bet".to_string(),
-        "bet_win" => "bet won".to_string(),
+        "bet" => format!("bet{on}"),
+        "bet_win" => format!("bet won{on}"),
         "streak" => "streak bonus".to_string(),
         "catchup" => "catch-up points".to_string(),
         other => other.to_string(),
     }
+}
+
+/// An account's points history, newest first, as the points page lists it.
+pub async fn history(db: &db::Db, account_id: i64, own: bool) -> Result<Vec<LedgerView>, AppError> {
+    let rows = db::ledger_rows(db, account_id, HISTORY).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| LedgerView {
+            what: what(&r, own),
+            date: r.round_date,
+            amount: if r.amount > 0 {
+                format!("+{}", templates::group_digits(r.amount))
+            } else {
+                templates::group_digits(r.amount)
+            },
+            gain: r.amount > 0,
+        })
+        .collect())
 }
 
 pub async fn points(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
@@ -42,27 +72,16 @@ pub async fn points(State(state): State<AppState>, jar: CookieJar) -> Result<Res
     if viewer.account.verified {
         crate::economy::collect(&state.db, viewer.account.id, &open).await?;
     }
-    let rows = db::ledger_rows(&state.db, viewer.account.id, HISTORY).await?;
+    let rows = history(&state.db, viewer.account.id, true).await?;
     let balance = db::balance(&state.db, viewer.account.id).await?;
     let viewer = current_viewer(&state, &jar).await?.unwrap_or(viewer);
     Ok(templates::render(&PointsTemplate {
         pool: Pool::Global,
         test_mode: state.cfg.test_env(),
         impersonating: false,
+        whose: None,
         balance_label: points_label(&balance),
-        rows: rows
-            .into_iter()
-            .map(|r| LedgerView {
-                date: r.round_date,
-                what: what(&r.kind, r.note.as_deref()),
-                amount: if r.amount > 0 {
-                    format!("+{}", templates::group_digits(r.amount))
-                } else {
-                    templates::group_digits(r.amount)
-                },
-                gain: r.amount > 0,
-            })
-            .collect(),
+        rows,
         stake: crate::economy::GUESS_STAKE,
         grant: crate::economy::DAILY_GRANT,
         bonus: crate::economy::SIGNUP_BONUS,
@@ -166,6 +185,7 @@ async fn leaderboard_in(
         test_mode: state.cfg.test_env(),
         impersonating: false,
         week,
+        moderator: viewer.as_ref().is_some_and(|v| crate::moderation::is_moderator(&state, v)),
         wins,
         streaks,
         rows: rows
