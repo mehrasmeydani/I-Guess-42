@@ -267,6 +267,14 @@ a.tag { color: var(--fg); text-decoration: underline; }
 /* Sized to the number, centred, with room above for the stamp. */
 .sealed { position: relative; display: inline-block; min-width: 9rem; margin-top: 16px; padding: 24px 32px; border: 2px solid var(--state); text-align: center; }
 .sealed-value { margin: 0; color: var(--hi); font-size: clamp(2.6rem, 10vw, 5rem); font-weight: 700; line-height: 1; word-break: break-all; }
+/* The number is covered until tapped (app.js), so it is not on show when
+   the page is. No script: shown, and no hint. */
+.peek, .peek:hover { display: block; width: 100%; padding: 0; border: 0; background: none; color: var(--hi); white-space: normal; }
+.peek-mask, .peek-hint { display: none; }
+.js .peek-hint { display: block; margin-top: 12px; color: var(--dim); font-size: var(--fs-1); font-weight: 400; }
+.js .peek[aria-pressed="false"] .peek-num, .js .peek[aria-pressed="false"] .when-shown { display: none; }
+.js .peek[aria-pressed="false"] .peek-mask { display: inline; color: var(--dim); }
+.js .peek[aria-pressed="true"] .when-hidden { display: none; }
 .stamp {
   position: absolute;
   /* Straddles the corner: half over the frame, half off it. */
@@ -968,7 +976,8 @@ details.expand[open] summary .when-open { display: inline; }
 .leaders-table .score b { color: var(--state); font-variant-numeric: tabular-nums; }
 .leaders-table .minibar { background: var(--state); }
 .leaders-table .r1 .who { color: var(--hi); font-weight: 700; }
-/* A leaderboard shows its top 15; the checkbox before it shows the rest. */
+/* A leaderboard shows its top few (templates::BOARD_SHOWN); the checkbox
+   before it shows the rest. */
 .board-more:not(:checked) ~ .table-wrap tr.more { display: none; }
 .board-more-label { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; color: var(--fg); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .board-more-label:hover { color: var(--hi); }
@@ -1244,6 +1253,8 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .pick.live button { display: none; }
 .quote-error { margin-top: 16px; }
 .pick-none.on { background: var(--hi); color: var(--bg); padding: 0 8px; }
+.pick:has(input[name="on"][value="win"]:checked) .pick-none.for-most,
+.pick:has(input[name="on"][value="most"]:checked) .pick-none.for-win { display: none; }
 .betbox { padding: 16px; border: var(--rule); background: var(--panel); }
 .betbox .hint { margin-top: 8px; }
 .sec .hint { font-size: var(--fs-1); }

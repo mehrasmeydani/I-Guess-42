@@ -638,12 +638,23 @@ pub fn round_progress(seconds_left: i64) -> i64 {
     (DAY - seconds_left).clamp(0, DAY) * 100 / DAY
 }
 
+/// Days a player can miss and keep their streak: a gap of up to this many
+/// days is bridged, though the missed days do not count towards it. One
+/// more and it is over.
+pub const FREEZE_DAYS: i64 = 2;
+
+/// Whether a streak whose last day was `last` can still go on when `day`
+/// is played: the days between are no more than `FREEZE_DAYS`.
+fn bridges(last: chrono::NaiveDate, day: chrono::NaiveDate) -> bool {
+    (day - last).num_days() <= FREEZE_DAYS + 1
+}
+
 /// A player's record in one pool, worked out from their guesses (D5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PlayerStats {
-    /// Consecutive days with a guess, ending at the open round if they have
-    /// guessed in it, else at the last closed one. A day without a guess
-    /// ends it.
+    /// Days with a guess in the streak still going: one that reaches the
+    /// open round if they have guessed in it, or could still reach it
+    /// today. Up to `FREEZE_DAYS` missed in a row are bridged, not counted.
     pub streak: i64,
     pub played: i64,
     pub won: i64,
@@ -655,16 +666,12 @@ pub struct PlayerStats {
 /// picked, whether it won), in any order. `guessed_open` is whether they
 /// have a guess in the open round, whose day is `last_closed` + 1.
 pub fn player_stats(history: &[(chrono::NaiveDate, i64, bool)], guessed_open: bool, last_closed: chrono::NaiveDate) -> PlayerStats {
-    let days: std::collections::HashSet<chrono::NaiveDate> = history.iter().map(|h| h.0).collect();
-    let mut streak = i64::from(guessed_open);
-    let mut day = last_closed;
-    while days.contains(&day) {
-        streak += 1;
-        match day.pred_opt() {
-            Some(d) => day = d,
-            None => break,
-        }
+    let open = last_closed.succ_opt().unwrap_or(last_closed);
+    let mut days: Vec<chrono::NaiveDate> = history.iter().map(|h| h.0).collect();
+    if guessed_open {
+        days.push(open);
     }
+    let (_, streak) = longest_and_current_streak(&days, open);
     let wins: Vec<i64> = history.iter().filter(|h| h.2).map(|h| h.1).collect();
     PlayerStats {
         streak,
@@ -675,22 +682,29 @@ pub fn player_stats(history: &[(chrono::NaiveDate, i64, bool)], guessed_open: bo
 }
 
 /// A player's longest run of days in a row, and the one still going: a run
-/// is still going if its last day is the open round or the one before it
-/// (today's guess may not be in yet). `days` as for `streak_runs`.
+/// is still going if today's guess, in the open round, would carry it on
+/// (see `bridges`). `days` as for `streak_runs`.
 pub fn longest_and_current_streak(days: &[chrono::NaiveDate], open_round: chrono::NaiveDate) -> (i64, i64) {
     let runs = streak_runs(days);
     let longest = runs.iter().map(|r| r.1).max().unwrap_or(0);
     let current = match runs.last() {
-        Some(&(d, run)) if open_round.pred_opt().is_some_and(|y| d >= y) => run,
+        Some(&(d, run)) if d >= open_round || bridges(d, open_round) => run,
         _ => 0,
     };
     (longest, current)
 }
 
 /// Every day played, with how many days in a row it makes: the first day of
-/// a run is 1, a missed day starts over. `days` may be in any order and
-/// hold repeats; the answer is oldest first.
+/// a run is 1; up to `FREEZE_DAYS` missed in a row carry the run on without
+/// adding to it, and more start over. `days` may be in any order and hold
+/// repeats; the answer is oldest first.
 pub fn streak_runs(days: &[chrono::NaiveDate]) -> Vec<(chrono::NaiveDate, i64)> {
+    streak_runs_bridging(days, FREEZE_DAYS)
+}
+
+/// `streak_runs` with gaps of up to `freeze` missed days bridged: 0 is the
+/// rule before the freeze, which streak prizes for days before it keep.
+pub fn streak_runs_bridging(days: &[chrono::NaiveDate], freeze: i64) -> Vec<(chrono::NaiveDate, i64)> {
     let mut days = days.to_vec();
     days.sort_unstable();
     days.dedup();
@@ -698,7 +712,7 @@ pub fn streak_runs(days: &[chrono::NaiveDate]) -> Vec<(chrono::NaiveDate, i64)> 
     let mut run = 0;
     let mut prev: Option<chrono::NaiveDate> = None;
     for d in days {
-        run = if prev.and_then(|p| p.succ_opt()) == Some(d) { run + 1 } else { 1 };
+        run = if prev.is_some_and(|p| (d - p).num_days() <= freeze + 1) { run + 1 } else { 1 };
         out.push((d, run));
         prev = Some(d);
     }
@@ -733,7 +747,8 @@ mod tests {
         let mut days = run("2026-10-01", 5);
         days.extend(run("2026-10-20", 3));
         assert_eq!(longest_and_current_streak(&days, d("2026-10-23")), (5, 3), "yesterday still counts: today's guess may come");
-        assert_eq!(longest_and_current_streak(&days, d("2026-10-24")), (5, 0), "a day missed: over");
+        assert_eq!(longest_and_current_streak(&days, d("2026-10-25")), (5, 3), "two days missed: frozen, not over");
+        assert_eq!(longest_and_current_streak(&days, d("2026-10-26")), (5, 0), "three days missed: over");
         assert_eq!(longest_and_current_streak(&[], d("2026-10-24")), (0, 0));
     }
 
@@ -743,33 +758,41 @@ mod tests {
         let run = |from: &str, n: i64| (0..n).map(|i| d(from) + chrono::Duration::days(i)).collect::<Vec<_>>();
         let lengths = |days: &[chrono::NaiveDate]| streak_runs(days).into_iter().map(|r| r.1).collect::<Vec<_>>();
         assert_eq!(lengths(&run("2026-10-01", 4)), vec![1, 2, 3, 4]);
-        // A missed day starts over; order and repeats do not matter.
-        let mut broken = run("2026-10-01", 3);
-        broken.extend(run("2026-10-05", 2));
-        broken.reverse();
-        broken.push(d("2026-10-02"));
-        assert_eq!(lengths(&broken), vec![1, 2, 3, 1, 2]);
-        assert_eq!(streak_runs(&broken)[3], (d("2026-10-05"), 1));
+        // One or two missed days are bridged without counting; three start
+        // over. Order and repeats do not matter.
+        let mut days = run("2026-10-01", 3);
+        days.extend(run("2026-10-05", 2)); // missed the 4th
+        days.extend(run("2026-10-09", 1)); // missed the 7th and 8th
+        days.extend(run("2026-10-13", 2)); // missed the 10th to the 12th
+        days.reverse();
+        days.push(d("2026-10-02"));
+        assert_eq!(lengths(&days), vec![1, 2, 3, 4, 5, 6, 1, 2]);
+        assert_eq!(streak_runs(&days)[6], (d("2026-10-13"), 1));
     }
 
     #[test]
-    fn a_streak_counts_back_from_the_last_round_until_a_day_is_missed() {
-        // Played the 16th to the 18th and the 20th.
+    fn a_streak_counts_back_from_the_last_round_through_up_to_two_missed_days() {
+        // Played the 12th, then the 16th to the 18th and the 20th.
         let h = [
             (d("2026-10-20"), 5, false),
             (d("2026-10-18"), 3, true),
             (d("2026-10-17"), 9, false),
             (d("2026-10-16"), 2, true),
+            (d("2026-10-12"), 4, false),
         ];
-        // The 19th was missed, so only the 20th counts.
+        // The 19th was missed but is bridged: four days, the 19th not one of
+        // them. The 13th to 15th were three missed: the 12th is not in it.
         let s = player_stats(&h, false, d("2026-10-20"));
-        assert_eq!(s, PlayerStats { streak: 1, played: 4, won: 2, best: Some(2) });
+        assert_eq!(s, PlayerStats { streak: 4, played: 5, won: 2, best: Some(2) });
         // Guessing today adds today.
-        assert_eq!(player_stats(&h, true, d("2026-10-20")).streak, 2);
-        assert_eq!(player_stats(&h, true, d("2026-10-20")).played, 5);
-        // Missing yesterday: no streak until they guess today.
-        assert_eq!(player_stats(&h, false, d("2026-10-21")).streak, 0);
-        assert_eq!(player_stats(&h, true, d("2026-10-21")).streak, 1);
+        assert_eq!(player_stats(&h, true, d("2026-10-20")).streak, 5);
+        assert_eq!(player_stats(&h, true, d("2026-10-20")).played, 6);
+        // Two days missed since: held, and today's guess carries it on.
+        assert_eq!(player_stats(&h, false, d("2026-10-22")).streak, 4);
+        assert_eq!(player_stats(&h, true, d("2026-10-22")).streak, 5);
+        // Three missed: over, and today's guess starts again.
+        assert_eq!(player_stats(&h, false, d("2026-10-23")).streak, 0);
+        assert_eq!(player_stats(&h, true, d("2026-10-23")).streak, 1);
     }
 
     #[test]

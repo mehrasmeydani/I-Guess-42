@@ -254,6 +254,25 @@ async fn the_leaderboard_ranks_points_first_then_wins() {
     assert!(html.contains(">most wins") && !html.contains("most points"));
     let away = board(Pool::Vienna, None).await;
     assert_eq!(location(&away), "/g/leaderboard");
+
+    // Its image is only for whatever holds the key: anyone else, a 42
+    // student too, and everyone while no key is set, goes to the front page.
+    let image = |state: AppState, key: Option<&str>| {
+        let q = Query(crate::points_pages::ImageKey { key: key.map(str::to_string) });
+        async move { crate::points_pages::vienna_board_image(State(state), q).await.unwrap() }
+    };
+    assert_eq!(location(&image(state.clone(), None).await), "/");
+    assert_eq!(location(&image(state.clone(), Some("")).await), "/", "no key set");
+    let mut keyed = state.clone();
+    let mut cfg = (*keyed.cfg).clone();
+    cfg.board_image_key = Some("s3cret".into());
+    keyed.cfg = std::sync::Arc::new(cfg);
+    let shown = image(keyed.clone(), Some("s3cret")).await;
+    assert_eq!(shown.headers()["content-type"], "image/png");
+    let png = axum::body::to_bytes(shown.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    assert_eq!(location(&image(keyed.clone(), Some("s3cre")).await), "/");
+    assert_eq!(location(&image(keyed, None).await), "/");
 }
 
 #[tokio::test]

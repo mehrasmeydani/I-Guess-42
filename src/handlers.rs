@@ -336,6 +336,7 @@ async fn results_in(
     }
 
     let round_key = Round::current(state.now()).key();
+    crate::economy::settle_first(&state.db, pool, &round_key).await?;
 
     let named = names_visible(pool, viewer.as_ref());
 
@@ -458,6 +459,7 @@ async fn day_in(
     // round_summary only answers for closed rounds, which is what keeps the
     // open round's numbers secret: no summary, no tallies.
     let open_round = Round::current(state.now()).key();
+    crate::economy::settle_first(&state.db, pool, &open_round).await?;
     let Some(summary) = db::round_summary(&state.db, pool, &open_round, &date).await? else {
         return Ok(no_such_day());
     };
@@ -683,6 +685,7 @@ async fn player_record(
     player: i64,
     open_round: &str,
 ) -> Result<(stats::PlayerStats, Vec<db::PlayedRound>), AppError> {
+    crate::economy::settle_first(&state.db, pool, open_round).await?;
     let history = db::played_rounds(&state.db, pool, open_round, player).await?;
     let guessed_open = db::my_guess(&state.db, pool, open_round, player).await?.is_some();
     let dated: Vec<(chrono::NaiveDate, i64, bool)> = history
@@ -1125,6 +1128,7 @@ pub async fn admin(State(state): State<AppState>, jar: CookieJar) -> Result<Resp
     let round = Round::current(now);
     let round_key = round.key();
     let offset = state.clock_offset();
+    crate::economy::settle_first(&state.db, Pool::Global, &round_key).await?;
 
     let last_round = db::round_summary(
         &state.db,
@@ -1465,6 +1469,7 @@ pub async fn day_image(
 
 async fn day_image_in(pool: Pool, state: &AppState, date: &str) -> Result<Response, AppError> {
     let open_round = Round::current(state.now()).key();
+    crate::economy::settle_first(&state.db, pool, &open_round).await?;
     let Some(summary) = db::round_summary(&state.db, pool, &open_round, date).await? else {
         return Ok(not_found_page());
     };
@@ -1889,8 +1894,8 @@ mod tests {
                     .unwrap(),
             )
             .await;
-            assert!(vienna.contains(r#"<p class="sealed-value">4</p>"#));
-            assert!(global_page(&state, Some("s")).await.contains(r#"<p class="sealed-value">9</p>"#));
+            assert!(vienna.contains(r#"<span class="peek-num">4</span>"#));
+            assert!(global_page(&state, Some("s")).await.contains(r#"<span class="peek-num">9</span>"#));
         }
 
         #[tokio::test]
@@ -2319,6 +2324,7 @@ mod round_page_tests {
         let html = page(&state, jar(&session), Some("saved")).await;
         assert!(html.contains("you're in"));
         assert!(html.contains(r#"<div class="sealed fresh">"#), "stamped on just now");
+        assert!(html.contains(r#"class="sealed-value peek" aria-pressed="true""#), "shown just after locking");
         assert!(html.contains(r#"<span class="stamp">sealed</span>"#));
         assert!(html.contains("reveal 12:42 &middot; <a href="), "{html}");
         assert!(!html.contains("countdown-mirror"), "one clock: the one at the top");
@@ -2328,7 +2334,8 @@ mod round_page_tests {
         // Back later: the same box, from what the server holds, no slam.
         let html = page(&state, jar(&session), None).await;
         assert!(html.contains(r#"<div class="sealed">"#));
-        assert!(html.contains(r#"<p class="sealed-value">7</p>"#));
+        assert!(html.contains(r#"<span class="peek-num">7</span>"#));
+        assert!(html.contains(r#"class="sealed-value peek" aria-pressed="false""#), "covered until tapped");
     }
 
     #[tokio::test]

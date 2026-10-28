@@ -516,3 +516,14 @@
     if (menu.classList.contains('open') && !window.matchMedia('(max-width: 800px)').matches) set(false);
   });
 })();
+
+// The locked number on the front page, covered until tapped (see .peek in
+// style.css): each tap shows or covers it again. Nothing is remembered, so
+// it starts covered on every visit.
+(function () {
+  var peek = document.querySelector('button.peek');
+  if (!peek) return;
+  peek.addEventListener('click', function () {
+    peek.setAttribute('aria-pressed', peek.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+  });
+})();

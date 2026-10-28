@@ -488,6 +488,7 @@ mod tests {
         assert!(db::password_login(&t.db, "meg@example.com").await.unwrap().is_none());
         assert!(db::account_logins(&t.db, id).await.unwrap().is_empty());
 
+        crate::economy::settle_all(&t.db, "2026-09-06").await.unwrap();
         let r = db::round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
         assert_eq!(r.winner_login, Some(format!("deleted-{id}")));
         // The 42 round's results no longer name them either.

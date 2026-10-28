@@ -4,7 +4,8 @@
 //!
 //! A bet is on the round's winning number W - the lowest number exactly one
 //! player picked - landing in a range the player chooses, or on there being
-//! no winner at all; or on the most picked number M landing in a range.
+//! no winner at all; or on the most picked number M landing in a range, or
+//! on there being no single most picked number (a tie at the top).
 //! Odds come from two things:
 //!
 //! - Last month's picks, worked out exactly: with the usual number of
@@ -54,6 +55,8 @@ const RECORD_SHRINK: f64 = 10.0;
 const CURVE: f64 = 0.1;
 /// That curve's chance of nobody winning.
 const NOBODY_PRIOR: f64 = 0.05;
+/// And of a tie for the most picked: about the starter crowd's own.
+const TIED_PRIOR: f64 = 0.3;
 /// The typical crowd is every closed pick in this database, both rounds,
 /// all time: it grows as rounds close. Below this many picks, it is topped
 /// up with `TYPICAL_PICKS`, scaled to make up the difference, so a fresh
@@ -92,17 +95,34 @@ pub enum Market {
     Range { lo: i64, hi: Option<i64> },
     /// Nobody wins: every number was picked more than once.
     Nobody,
-    /// M, the most picked number (ties: the lowest of them), is in the
-    /// range: lo <= M, and M <= hi if there is a hi.
+    /// M, the most picked number, is in the range: lo <= M, and M <= hi if
+    /// there is a hi. Only when one number was picked more than any other.
     Most { lo: i64, hi: Option<i64> },
+    /// No single most picked number: two or more share the top count.
+    MostTied,
 }
 
 /// What a round came to, as bets are judged: its winning number, if any,
-/// and its most picked number.
+/// and its most picked number, if one was picked more than any other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Outcome {
     pub winner: Option<i64>,
+    /// None when several numbers share the top count.
     pub most: Option<i64>,
+}
+
+impl Outcome {
+    /// From a played round's counts (number, times picked), in any order.
+    pub fn from_counts(counts: &[(i64, i64)]) -> Outcome {
+        let top = counts.iter().map(|c| c.1).max().unwrap_or(0);
+        let mut at_top = counts.iter().filter(|c| c.1 == top);
+        let most = match (at_top.next(), at_top.next()) {
+            (Some(m), None) => Some(m.0),
+            _ => None,
+        };
+        let winner = counts.iter().filter(|c| c.1 == 1).map(|c| c.0).min();
+        Outcome { winner, most }
+    }
 }
 
 impl Market {
@@ -121,7 +141,7 @@ impl Market {
     }
 
     pub fn is_most(self) -> bool {
-        matches!(self, Market::Most { .. })
+        matches!(self, Market::Most { .. } | Market::MostTied)
     }
 
     /// From the bets page's two boxes: an empty bottom means from 1 ("or
@@ -138,13 +158,15 @@ impl Market {
         Market::range(lo, hi)
     }
 
-    /// As stored: "range:5:12", "range:10:" (no top), "none", "most:1:3".
+    /// As stored: "range:5:12", "range:10:" (no top), "none", "most:1:3",
+    /// "tied".
     pub fn key(self) -> String {
         let top = |hi: Option<i64>| hi.map(|h| h.to_string()).unwrap_or_default();
         match self {
             Market::Range { lo, hi } => format!("range:{lo}:{}", top(hi)),
             Market::Most { lo, hi } => format!("most:{lo}:{}", top(hi)),
             Market::Nobody => "none".to_string(),
+            Market::MostTied => "tied".to_string(),
         }
     }
 
@@ -153,6 +175,9 @@ impl Market {
     pub fn parse(key: &str) -> Option<Market> {
         if key == "none" {
             return Some(Market::Nobody);
+        }
+        if key == "tied" {
+            return Some(Market::MostTied);
         }
         let num = |s: &str| s.parse::<i64>().ok().filter(|_| s.bytes().all(|b| b.is_ascii_digit()));
         if let Some((kind, rest)) = key.split_once(':').filter(|(k, _)| *k == "range" || *k == "most") {
@@ -184,6 +209,7 @@ impl Market {
             Market::Most { lo, hi: Some(h) } if lo == h => format!("most picked exactly {lo}"),
             Market::Most { lo: 1, hi: Some(h) } => format!("most picked {h} or less"),
             Market::Most { lo, hi: Some(h) } => format!("most picked {lo} to {h}"),
+            Market::MostTied => "no single most picked".to_string(),
         }
     }
 
@@ -195,7 +221,7 @@ impl Market {
                 if lo == 1 && hi.is_some() { String::new() } else { lo.to_string() },
                 hi.map(|h| h.to_string()).unwrap_or_default(),
             ),
-            Market::Nobody => (String::new(), String::new()),
+            Market::Nobody | Market::MostTied => (String::new(), String::new()),
         }
     }
 
@@ -212,6 +238,7 @@ impl Market {
         };
         match (self, other) {
             (Market::Nobody, Market::Nobody) => Some(Market::Nobody),
+            (Market::MostTied, Market::MostTied) => Some(Market::MostTied),
             (Market::Range { lo: a, hi: x }, Market::Range { lo: b, hi: y }) => meet(a, x, b, y).map(|(lo, hi)| Market::Range { lo, hi }),
             (Market::Most { lo: a, hi: x }, Market::Most { lo: b, hi: y }) => meet(a, x, b, y).map(|(lo, hi)| Market::Most { lo, hi }),
             _ => None,
@@ -229,9 +256,12 @@ pub fn board() -> Vec<Market> {
     v
 }
 
-/// The same ranges for the most picked number, which every played round has.
+/// The same ranges for the most picked number. With "no single most
+/// picked" they too cover every played round once.
 pub fn board_most() -> Vec<Market> {
-    BOARD.into_iter().map(|(lo, hi)| Market::Most { lo, hi }).collect()
+    let mut v: Vec<Market> = BOARD.into_iter().map(|(lo, hi)| Market::Most { lo, hi }).collect();
+    v.push(Market::MostTied);
+    v
 }
 
 fn within(lo: i64, hi: Option<i64>, n: i64) -> bool {
@@ -239,12 +269,14 @@ fn within(lo: i64, hi: Option<i64>, n: i64) -> bool {
 }
 
 /// Whether `market` won. Winner ranges lose when nobody wins, as at any
-/// bookmaker; that is what gives "nobody wins" its meaning.
+/// bookmaker; that is what gives "nobody wins" its meaning. Ranges on the
+/// most picked number lose on a tie at the top, the same way.
 pub fn outcome(market: Market, o: Outcome) -> bool {
     match market {
         Market::Range { lo, hi } => o.winner.is_some_and(|w| within(lo, hi, w)),
         Market::Nobody => o.winner.is_none(),
         Market::Most { lo, hi } => o.most.is_some_and(|m| within(lo, hi, m)),
+        Market::MostTied => o.most.is_none(),
     }
 }
 
@@ -258,7 +290,7 @@ pub struct History {
     /// Each round's player count: quiet and busy days play differently.
     pub sizes: Vec<usize>,
     /// What each round came to: its winning number, if any, and its most
-    /// picked number - the record no range is priced below.
+    /// picked number, if any - the record no range is priced below.
     pub outcomes: Vec<Outcome>,
 }
 
@@ -273,11 +305,8 @@ impl History {
             if day.is_empty() {
                 return;
             }
-            let top = day.iter().map(|d| d.1).max().unwrap_or(0);
-            h.outcomes.push(Outcome {
-                winner: day.iter().find(|d| d.1 == 1).map(|d| d.0),
-                most: day.iter().find(|d| d.1 == top).map(|d| d.0),
-            });
+            let counts: Vec<(i64, i64)> = day.iter().map(|d| (d.0, d.1 as i64)).collect();
+            h.outcomes.push(Outcome::from_counts(&counts));
             h.sizes.push(day.iter().map(|d| d.1).sum());
             h.rounds += 1;
             day.clear();
@@ -333,14 +362,15 @@ pub struct Base {
 }
 
 /// Each number's chance to win and to be the most picked, and of nobody
-/// winning.
+/// winning and of a tie for the most picked.
 #[derive(Debug, Clone, PartialEq, Default)]
 struct Dist {
     /// (number, chance it wins), lowest first.
     winners: Vec<(i64, f64)>,
     nobody: f64,
-    /// (number, chance it is the most picked), lowest first.
+    /// (number, chance it alone is the most picked), lowest first.
     modes: Vec<(i64, f64)>,
+    tied: f64,
 }
 
 impl Dist {
@@ -350,6 +380,7 @@ impl Dist {
             Market::Nobody => self.nobody,
             Market::Range { lo, hi } => sum(&self.winners, lo, hi),
             Market::Most { lo, hi } => sum(&self.modes, lo, hi),
+            Market::MostTied => self.tied,
         }
     }
 }
@@ -381,6 +412,7 @@ impl Base {
     fn chance(&self, market: Market) -> f64 {
         let rows = match market {
             Market::Nobody => return (self.lifted(market) * self.scale_win).min(1.0),
+            Market::MostTied => return (self.lifted(market) * self.scale_most).min(1.0),
             Market::Range { .. } => board(),
             Market::Most { .. } => board_most(),
         };
@@ -417,7 +449,8 @@ impl Base {
         let curve = match market {
             Market::Nobody => NOBODY_PRIOR,
             Market::Range { lo, hi } => (1.0 - NOBODY_PRIOR) * curve(lo, hi),
-            Market::Most { lo, hi } => curve(lo, hi),
+            Market::Most { lo, hi } => (1.0 - TIED_PRIOR) * curve(lo, hi),
+            Market::MostTied => TIED_PRIOR,
         };
         let fallback = (1.0 - CURVE) * self.typical.share(market) + CURVE * curve;
         if !self.has_data {
@@ -450,10 +483,9 @@ fn once(l: f64) -> f64 {
 /// - v wins when exactly one picks it and no lower number has exactly one:
 ///   P(v) = λᵥ·e^(−λᵥ) × Π over u < v of (1 − λᵤ·e^(−λᵤ)).
 /// - Nobody wins: the same product over every number.
-/// - v is the most picked (ties to the lowest) when, for the count k it
-///   has, every lower number has fewer than k and every higher one at most
-///   k: summed over k. Then scaled to add up to 1, leaving out the day
-///   nobody plays.
+/// - v alone is the most picked when, for the count k it has, every other
+///   number has fewer than k: summed over k. The rest is a tie at the top.
+///   Both scaled to add up to 1, leaving out the day nobody plays.
 #[cfg(test)]
 fn analyse(picks: &[i64], players: usize) -> Dist {
     let mut weights = Weights::new();
@@ -475,7 +507,8 @@ fn analyse_weighted(weights: &Weights, players: usize) -> Dist {
     if players <= EXACT_MAX {
         let shares: Vec<(i64, f64)> = weights.iter().map(|(&v, &w)| (v, w / total)).collect();
         let (winners, nobody) = exact_winners(&shares, players);
-        return Dist { winners, nobody, modes: modes(&means) };
+        let (modes, tied) = modes(&means);
+        return Dist { winners, nobody, modes, tied };
     }
 
     let mut nobody_yet = 1.0;
@@ -485,7 +518,8 @@ fn analyse_weighted(weights: &Weights, players: usize) -> Dist {
         winners.push((v, nobody_yet * p));
         nobody_yet *= 1.0 - p;
     }
-    Dist { winners, nobody: nobody_yet, modes: modes(&means) }
+    let (modes, tied) = modes(&means);
+    Dist { winners, nobody: nobody_yet, modes, tied }
 }
 
 /// Rounds up to this many players have their winners worked out exactly.
@@ -554,9 +588,10 @@ pub fn typical_crowd(all_time: &[(i64, i64)]) -> Weights {
     weights
 }
 
-/// Each number's chance of being the most picked, ties to the lowest, for
-/// independent Poisson counts with these means (see `analyse`).
-fn modes(means: &[(i64, f64)]) -> Vec<(i64, f64)> {
+/// Each number's chance of being picked more than any other, and of a tie
+/// at the top, for independent Poisson counts with these means (see
+/// `analyse`), on a day somebody plays.
+fn modes(means: &[(i64, f64)]) -> (Vec<(i64, f64)>, f64) {
     // How far each number's count can reach before its chance is negligible;
     // past it, P(count <= k) is 1 and P(count = k) is 0, so it drops out of
     // the work. Most numbers are picked rarely and drop out after a few k.
@@ -593,28 +628,34 @@ fn modes(means: &[(i64, f64)]) -> Vec<(i64, f64)> {
         if active.is_empty() {
             break;
         }
-        // right[i] = product over active numbers after the i-th of P(count <= k).
+        // right[i] = product over active numbers after the i-th of P(count < k).
         right.clear();
         right.resize(active.len() + 1, 1.0);
         for i in (0..active.len()).rev() {
-            right[i] = right[i + 1] * cdf_at(active[i], k);
+            right[i] = right[i + 1] * cdf_at(active[i], k - 1);
         }
-        // Lower numbers must have fewer than k: walked up from the left.
+        // Every other number must have fewer than k: walked up from the left.
         let mut left = 1.0;
         for (i, &v) in active.iter().enumerate() {
             out[v] += pmf_at(v, k) * left * right[i + 1];
             left *= cdf_at(v, k - 1);
         }
     }
-    let sum: f64 = out.iter().sum();
-    means.iter().zip(out).map(|(&(v, _), p)| (v, if sum > 0.0 { p / sum } else { 0.0 })).collect()
+    // Somebody plays unless every count is 0; what is left of that is ties.
+    let played = 1.0 - means.iter().map(|m| (-m.1).exp()).product::<f64>();
+    if played <= 0.0 {
+        return (means.iter().map(|m| (m.0, 0.0)).collect(), 0.0);
+    }
+    let alone: Vec<(i64, f64)> = means.iter().zip(out).map(|(&(v, _), p)| (v, (p / played).min(1.0))).collect();
+    let tied = (1.0 - alone.iter().map(|a| a.1).sum::<f64>()).max(0.0);
+    (alone, tied)
 }
 
 /// What the old way did, for checking the formula in tests: play `rounds`
 /// rounds of `players` drawing from `picks`, count who won and what was
-/// most picked.
+/// most picked (None: a tie at the top).
 #[cfg(test)]
-fn played_out(picks: &[i64], players: usize, rounds: u32) -> (std::collections::HashMap<Option<i64>, f64>, std::collections::HashMap<i64, f64>) {
+fn played_out(picks: &[i64], players: usize, rounds: u32) -> (std::collections::HashMap<Option<i64>, f64>, std::collections::HashMap<Option<i64>, f64>) {
     use rand::{Rng, SeedableRng};
     let mut rng = rand::rngs::StdRng::seed_from_u64(7);
     let mut values: Vec<i64> = picks.to_vec();
@@ -630,8 +671,9 @@ fn played_out(picks: &[i64], players: usize, rounds: u32) -> (std::collections::
         let w = counts.iter().position(|&c| c == 1).map(|i| values[i]);
         *wins.entry(w).or_insert(0.0) += 1.0 / f64::from(rounds);
         let top = *counts.iter().max().unwrap();
-        let i = counts.iter().position(|&c| c == top).unwrap();
-        *most.entry(values[i]).or_insert(0.0) += 1.0 / f64::from(rounds);
+        let at_top: Vec<usize> = (0..counts.len()).filter(|&i| counts[i] == top).collect();
+        let m = (at_top.len() == 1).then(|| values[at_top[0]]);
+        *most.entry(m).or_insert(0.0) += 1.0 / f64::from(rounds);
     }
     (wins, most)
 }
@@ -756,6 +798,7 @@ fn averaged(picks: &Weights, sizes: &[(usize, f64)]) -> Dist {
                 winners: d.winners.iter().map(|&(v, p)| (v, p * w)).collect(),
                 nobody: d.nobody * w,
                 modes: d.modes.iter().map(|&(v, p)| (v, p * w)).collect(),
+                tied: d.tied * w,
             },
             Some(mut acc) => {
                 // Same picks, same numbers in the same order: add up in place.
@@ -766,6 +809,7 @@ fn averaged(picks: &Weights, sizes: &[(usize, f64)]) -> Dist {
                     a.1 += b.1 * w;
                 }
                 acc.nobody += d.nobody * w;
+                acc.tied += d.tied * w;
                 acc
             }
         });
@@ -1035,8 +1079,8 @@ mod tests {
             assert_eq!(b.iter().filter(|m| outcome(**m, Outcome { winner: w, most: None })).count(), 1, "{w:?}");
         }
         let m = board_most();
-        for most in [1, 2, 5, 9, 10, 49, 50, 9999] {
-            assert_eq!(m.iter().filter(|x| outcome(**x, Outcome { winner: None, most: Some(most) })).count(), 1, "{most}");
+        for most in [Some(1), Some(2), Some(5), Some(9), Some(10), Some(49), Some(50), Some(9999), None] {
+            assert_eq!(m.iter().filter(|x| outcome(**x, Outcome { winner: None, most })).count(), 1, "{most:?}");
         }
         for base in [crowd(), base(&History::default(), &History::default(), &typical_crowd(&[]))] {
             let sum: f64 = b.iter().map(|m| base.chance(*m)).sum();
@@ -1057,6 +1101,16 @@ mod tests {
         assert_eq!(most(10, None).label(), "most picked 10 or more");
         let o = Outcome { winner: Some(7), most: Some(2) };
         assert!(outcome(most(1, Some(3)), o) && !outcome(most(3, None), o));
+        assert!(!outcome(Market::MostTied, o));
+        // A tie at the top: no single most picked, and no range wins.
+        let tie = Outcome::from_counts(&[(2, 3), (5, 3), (1, 1)]);
+        assert_eq!(tie, Outcome { winner: Some(1), most: None });
+        assert!(outcome(Market::MostTied, tie) && !outcome(most(1, None), tie));
+        assert_eq!(Outcome::from_counts(&[(4, 2), (2, 3)]).most, Some(2));
+        assert_eq!(Market::parse("tied"), Some(Market::MostTied));
+        assert_eq!(Market::MostTied.key(), "tied");
+        assert_eq!(Market::MostTied.label(), "no single most picked");
+        assert!(Market::MostTied.is_most() && board_most().contains(&Market::MostTied));
         assert!(outcome(r(5, Some(9)), o) && !outcome(r(1, Some(3)), o), "winner bets go by the winner");
         // Its own book: winner bets do not move it.
         let b = crowd();
@@ -1130,10 +1184,12 @@ mod tests {
         assert!((b.nobody - played_nobody).abs() < 0.03, "nobody: {} vs {played_nobody}", b.nobody);
         for v in [1, 2, 3] {
             let formula = b.modes.iter().find(|m| m.0 == v).map_or(0.0, |m| m.1);
-            let played = most.get(&v).copied().unwrap_or(0.0);
+            let played = most.get(&Some(v)).copied().unwrap_or(0.0);
             assert!((formula - played).abs() < 0.05, "most picked {v}: formula {formula:.3}, played {played:.3}");
         }
-        let all: f64 = b.modes.iter().map(|m| m.1).sum();
+        let played_tied = most.get(&None).copied().unwrap_or(0.0);
+        assert!((b.tied - played_tied).abs() < 0.03, "tied: formula {:.3}, played {played_tied:.3}", b.tied);
+        let all: f64 = b.modes.iter().map(|m| m.1).sum::<f64>() + b.tied;
         assert!((all - 1.0).abs() < 1e-9);
     }
 

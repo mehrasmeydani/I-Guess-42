@@ -40,25 +40,41 @@ impl Cache {
     }
 }
 
-struct Canvas {
+pub(crate) struct Canvas {
+    w: usize,
+    h: usize,
     px: Vec<u8>,
 }
 
 impl Canvas {
-    fn new() -> Self {
-        let mut px = Vec::with_capacity(W * H * 3);
-        for _ in 0..W * H {
+    pub(crate) fn new(w: usize, h: usize) -> Self {
+        let mut px = Vec::with_capacity(w * h * 3);
+        for _ in 0..w * h {
             px.extend_from_slice(&BG);
         }
-        Self { px }
+        Self { w, h, px }
     }
 
-    fn rect(&mut self, x: usize, y: usize, w: usize, h: usize, c: [u8; 3]) {
-        for yy in y.min(H)..(y + h).min(H) {
-            for xx in x.min(W)..(x + w).min(W) {
-                let i = (yy * W + xx) * 3;
+    pub(crate) fn rect(&mut self, x: usize, y: usize, w: usize, h: usize, c: [u8; 3]) {
+        for yy in y.min(self.h)..(y + h).min(self.h) {
+            for xx in x.min(self.w)..(x + w).min(self.w) {
+                let i = (yy * self.w + xx) * 3;
                 self.px[i..i + 3].copy_from_slice(&c);
             }
+        }
+    }
+
+    /// Colour `c` over the pixel at (x, y), `alpha` of 255 of it: for
+    /// anti-aliased text and shapes.
+    pub(crate) fn blend(&mut self, x: usize, y: usize, c: [u8; 3], alpha: u8) {
+        if x >= self.w || y >= self.h || alpha == 0 {
+            return;
+        }
+        let i = (y * self.w + x) * 3;
+        let a = u32::from(alpha);
+        for k in 0..3 {
+            let under = u32::from(self.px[i + k]);
+            self.px[i + k] = ((u32::from(c[k]) * a + under * (255 - a) + 127) / 255) as u8;
         }
     }
 
@@ -81,10 +97,10 @@ impl Canvas {
         cx - x
     }
 
-    fn png(self) -> Vec<u8> {
+    pub(crate) fn png(self) -> Vec<u8> {
         let mut out = Vec::new();
         {
-            let mut enc = png::Encoder::new(&mut out, W as u32, H as u32);
+            let mut enc = png::Encoder::new(&mut out, self.w as u32, self.h as u32);
             enc.set_color(png::ColorType::Rgb);
             enc.set_depth(png::BitDepth::Eight);
             let mut writer = enc.write_header().expect("PNG header into a Vec");
@@ -100,7 +116,7 @@ fn text_width(s: &str, scale: usize) -> usize {
 
 /// The round's preview: `tallies` lowest value first, as the day page has.
 pub fn round_image(date: &str, tallies: &[Tally], winner: Option<i64>, players: i64) -> Vec<u8> {
-    let mut c = Canvas::new();
+    let mut c = Canvas::new(W, H);
     let pad = 72;
 
     // "i guess low", with "low" on a green block as in the header.

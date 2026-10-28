@@ -1848,9 +1848,33 @@ fn winner_cte(pool: Pool) -> String {
     )
 }
 
-/// The winner CTE, then every closed round with its winner's name; callers
-/// add their own WHERE / ORDER / LIMIT.
+/// Every closed round with its winner's name, as `r`; callers add their own
+/// WHERE / ORDER / LIMIT.
+///
+/// The global round reads them from its pots: each round's players and
+/// winner, kept when it settles, by the same rule. Working them out again
+/// from the guesses grouped every guess ever made on every visit to the
+/// results, and the global round can have thousands a day. Callers settle
+/// first, so a round that just closed is there; a round called off has no
+/// winner. The 42 round has no pots, and few players: worked out.
 fn summaries(pool: Pool) -> String {
+    if pool == Pool::Global {
+        return format!(
+            "SELECT r.* FROM (
+                 SELECT t.round_date, t.players AS total,
+                        g.value    AS winning_value,
+                        p.id       AS winner_id,
+                        p.login    AS winner_login,
+                        p.display_name AS winner_name
+                 FROM pots t
+                 LEFT JOIN global_guesses g ON g.round_date = t.round_date AND g.user_id = t.winner_id
+                                           AND t.voided = 0
+                 LEFT JOIN {} p ON p.id = g.user_id
+                 WHERE t.round_date < ?1 AND t.players > 0
+             ) r",
+            pool.players()
+        );
+    }
     format!(
         "{}
          SELECT r.round_date, r.total,
@@ -1885,6 +1909,7 @@ pub async fn closed_rounds(
         .await?;
     Ok(rows)
 }
+
 
 /// Summary for one specific closed round.
 pub async fn round_summary(
@@ -2020,6 +2045,21 @@ pub async fn leaderboard(
     open_round: &str,
     limit: i64,
 ) -> Result<Vec<LeaderboardRow>> {
+    // The global round keeps each winner in its pot when it settles, by the
+    // same rule; working every round out again from its guesses read every
+    // guess ever made. Rounds called off have no winner.
+    if pool == Pool::Global {
+        let sql = format!(
+            "SELECT p.id, p.login, p.display_name, COUNT(*) AS wins
+             FROM pots w JOIN {} p ON p.id = w.winner_id
+             WHERE w.round_date < ?1 AND w.voided = 0
+             GROUP BY p.id
+             ORDER BY wins DESC, p.login ASC
+             LIMIT ?2",
+            pool.players()
+        );
+        return Ok(sqlx::query_as::<_, LeaderboardRow>(&sql).bind(open_round).bind(limit).fetch_all(db).await?);
+    }
     let sql = format!(
         "{}
          SELECT p.id, p.login, p.display_name, COUNT(*) AS wins
@@ -2076,7 +2116,25 @@ impl PlayedRound {
 
 /// Every closed round `player` guessed in, newest first. Ghost guesses are
 /// left out, as everywhere. Read from guesses as they are: no new table.
+///
+/// The global round takes each round's winning number from its pot (see
+/// `summaries`); callers settle first.
 pub async fn played_rounds(db: &Db, pool: Pool, open_round: &str, player: i64) -> Result<Vec<PlayedRound>> {
+    if pool == Pool::Global {
+        let rows = sqlx::query_as::<_, PlayedRound>(
+            "SELECT g.round_date, g.value, wg.value AS winning_value
+             FROM global_guesses g
+             LEFT JOIN pots t ON t.round_date = g.round_date AND t.voided = 0
+             LEFT JOIN global_guesses wg ON wg.round_date = t.round_date AND wg.user_id = t.winner_id
+             WHERE g.user_id = ?2 AND g.round_date < ?1 AND g.participates = 1
+             ORDER BY g.round_date DESC",
+        )
+        .bind(open_round)
+        .bind(player)
+        .fetch_all(db)
+        .await?;
+        return Ok(rows);
+    }
     let sql = format!(
         "{}
          SELECT g.round_date, g.value, w.value AS winning_value
@@ -2185,6 +2243,12 @@ pub async fn global_play_days(db: &Db, account_id: i64) -> Result<Vec<String>> {
     .bind(account_id)
     .fetch_all(db)
     .await?)
+}
+
+/// The round date a rule change went live (`rule_changes`), if it is
+/// recorded.
+pub async fn rule_since(db: &Db, name: &str) -> Result<Option<String>> {
+    Ok(sqlx::query_scalar("SELECT since FROM rule_changes WHERE name = ?1").bind(name).fetch_optional(db).await?)
 }
 
 /// The refs of every ledger row of `kind` an account has, e.g. the streak
@@ -2370,16 +2434,34 @@ pub async fn pot(db: &Db, round_date: &str) -> Result<Option<Pot>> {
 /// Global rounds before `open_round` with guesses or stakes and no pot row
 /// yet, oldest first: settling goes in order, since each carries into the
 /// next.
+///
+/// This runs on every visit to /g/, so the dates are walked a round at a
+/// time through each table's index on them (`MIN(round_date)` above the
+/// last one): a few lookups per round, rather than reading every guess,
+/// stake and bet ever made.
 pub async fn unsettled_rounds(db: &Db, open_round: &str) -> Result<Vec<String>> {
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT round_date FROM (
-             SELECT round_date FROM global_guesses WHERE round_date < ?1
-             UNION SELECT round_date FROM ledger WHERE kind = 'stake' AND round_date < ?1
-             UNION SELECT round_date FROM bets WHERE round_date < ?1
-         )
-         WHERE round_date NOT IN (SELECT round_date FROM pots)
-         ORDER BY round_date",
-    )
+    let walk = |table: &str, cond: &str| {
+        format!(
+            "SELECT d FROM (
+                 WITH RECURSIVE w(d) AS (
+                     SELECT MIN(round_date) FROM {table} WHERE {cond} round_date < ?1
+                     UNION ALL
+                     SELECT (SELECT MIN(round_date) FROM {table} WHERE {cond} round_date > w.d AND round_date < ?1)
+                     FROM w WHERE w.d IS NOT NULL
+                 )
+                 SELECT d FROM w WHERE d IS NOT NULL
+             )"
+        )
+    };
+    let sql = format!(
+        "SELECT d FROM ({} UNION {} UNION {})
+         WHERE d NOT IN (SELECT round_date FROM pots)
+         ORDER BY d",
+        walk("global_guesses", ""),
+        walk("ledger", "kind = 'stake' AND"),
+        walk("bets", "")
+    );
+    let rows: Vec<(String,)> = sqlx::query_as(&sql)
     .bind(open_round)
     .fetch_all(db)
     .await?;
@@ -2415,14 +2497,16 @@ pub async fn settle_round(db: &Db, round_date: &str) -> Result<Option<Pot>> {
             .bind(round_date)
             .fetch_one(&mut *tx)
             .await?;
-    // The most picked number; on a tie, the lowest of them.
-    let most: Option<(i64,)> = sqlx::query_as(
-        "SELECT value FROM global_guesses WHERE round_date = ?1 AND participates = 1
-         GROUP BY value ORDER BY COUNT(*) DESC, value LIMIT 1",
+    // The most picked number, if one was picked more than any other: the
+    // top two counts tell, and a tie at the top has none.
+    let top: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT value, COUNT(*) AS n FROM global_guesses WHERE round_date = ?1 AND participates = 1
+         GROUP BY value ORDER BY n DESC, value LIMIT 2",
     )
     .bind(round_date)
-    .fetch_optional(&mut *tx)
+    .fetch_all(&mut *tx)
     .await?;
+    let most = crate::odds::Outcome::from_counts(&top).most;
     let stakes = round_stakes(&mut tx, round_date).await?;
     let carried_in = carry_into(&mut tx, round_date).await?;
     let winner_id = winner.map(|w| w.0);
@@ -2431,7 +2515,7 @@ pub async fn settle_round(db: &Db, round_date: &str) -> Result<Option<Pot>> {
     let now = ts(Utc::now());
     // The round's bets, against its winning and most picked numbers. A round
     // nobody played has no outcome to bet on: its bets are called off.
-    let outcome = crate::odds::Outcome { winner: winning_value, most: most.map(|m| m.0) };
+    let outcome = crate::odds::Outcome { winner: winning_value, most };
     settle_bets(&mut tx, round_date, (players > 0).then_some(outcome), &now).await?;
     if let Some(w) = winner_id.filter(|_| paid > 0) {
         sqlx::query(
@@ -3543,6 +3627,8 @@ mod tests {
             assert!(insert_guess(&t.db, Pool::Global, "2026-09-05", who, value, true).await.unwrap());
         }
 
+        // Global rounds are read from their pots once settled.
+        crate::economy::settle_all(&t.db, "2026-09-06").await.unwrap();
         let r = round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05")
             .await
             .unwrap()
@@ -3573,6 +3659,7 @@ mod tests {
 
         // Each pool is won on its own numbers: a 3 in one pool does not burn
         // the 3 in the other.
+        crate::economy::settle_all(&t.db, "2026-09-06").await.unwrap();
         let vienna = round_summary(&t.db, Pool::Vienna, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
         let global = round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
         assert_eq!((vienna.winning_value, vienna.winner_login.as_deref()), (Some(3), Some("megardes")));
@@ -3611,6 +3698,7 @@ mod tests {
         insert_guess(&t.db, Pool::Global, "2026-09-05", ghost, 1, false).await.unwrap();
         insert_guess(&t.db, Pool::Vienna, "2026-09-05", 7, 9, true).await.unwrap();
 
+        crate::economy::settle_all(&t.db, "2026-09-06").await.unwrap();
         let r = round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
         assert_eq!((r.winning_value, r.total), (Some(5), 1), "a ghost neither wins nor counts");
         assert_eq!(round_guesses(&t.db, Pool::Global, "2026-09-05").await.unwrap().len(), 2);
@@ -3633,6 +3721,7 @@ mod tests {
         assert_eq!(insert_demo(&t.db, Pool::Vienna, &guesses).await.unwrap(), 2);
         assert_eq!(demo_counts(&t.db).await.unwrap(), (demo::BOTS as i64, 4));
 
+        crate::economy::settle_all(&t.db, "2026-09-06").await.unwrap();
         let r = round_summary(&t.db, Pool::Global, "2026-09-06", "2026-09-05").await.unwrap().unwrap();
         assert_eq!((r.winning_value, r.winner_login.as_deref()), (Some(3), Some("bot-001")));
 

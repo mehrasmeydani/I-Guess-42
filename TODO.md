@@ -71,3 +71,22 @@ off as they are done; the code side is tracked in [SPEC.md](SPEC.md).
 - [x] Push `global` (pushed; push again before merging if it moved).
 - [ ] Merge `global` → `dev` → `main`, bump `version.txt` to 2.0.0, tag the
       merge commit, deploy.
+
+## 7. Next deploy (after v2.4)
+
+- [ ] **Profile icons: let players upload one.** Doable, but it touches a lot,
+      so it gets its own release. To decide and build:
+  - **Where it shows.** Header next to the points, leaderboards (page and
+    `/leaderboard.png`), results and day pages (the winner), `/me`, `/mod`.
+    Each table row gets a small square; the image needs a fallback (initials
+    or the 42 profile picture we already have the link to).
+  - **Upload and storage.** A form on `/account`; accept PNG/JPEG/WebP up to
+    a few MB, re-encode server-side to one small square (e.g. 128 px PNG) so
+    nothing a player uploads is ever served as is (strips metadata, defeats
+    disguised files). Stored in the database or `data/icons/`, so the
+    backup covers it; served from `/icon/{id}.png` with a cache header.
+  - **Moderation.** Moderators can remove an icon from `/mod` (and it is part
+    of a ban); the privacy page says icons are public, kept until replaced or
+    the account is deleted, and are removed on deletion.
+  - **Limits.** Rate-limit uploads; a new dependency to decode images
+    (`image` crate, decoders only).

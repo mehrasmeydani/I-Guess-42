@@ -196,6 +196,10 @@ pub fn anon_label(id: i64) -> String {
     format!("player #{:02x}{:02x}", bytes[0], bytes[1])
 }
 
+/// Rows a leaderboard table shows before "show all" opens the rest (up to
+/// the 100 it holds), in both pools.
+pub const BOARD_SHOWN: usize = 5;
+
 /// The prefix every anonymous label starts with.
 #[cfg(test)]
 pub const MASK: &str = "player #";
@@ -648,6 +652,7 @@ pub struct BetsTemplate {
     pub lo: String,
     pub hi: String,
     pub nobody_picked: bool,
+    pub tied_picked: bool,
     pub quote: Option<QuoteView>,
     /// Why what was typed is not a range.
     pub pick_error: Option<&'static str>,

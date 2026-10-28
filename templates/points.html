@@ -40,6 +40,7 @@
     <dt>each guess</dt><dd class="lose">&minus;{{ stake }}</dd>
     {% for (days, prize) in crate::economy::STREAK_LADDER %}<dt>{{ days }} days in a row</dt><dd class="win">+{{ prize }}</dd>
     {% endfor %}<dt>then every {{ crate::economy::STREAK_DAYS }} days</dt><dd class="win">+{{ crate::economy::STREAK_BONUS }}</dd>
+    <dt>missing a day or two</dt><dd>your streak waits: up to {{ crate::stats::FREEZE_DAYS }} days missed in a row keep it, without counting; one more ends it</dd>
     <dt>joining late</dt><dd>+{{ crate::economy::CATCH_UP_PER_ROUND }} for each round you missed, over your first {{ crate::economy::CATCH_UP_PARTS }} days, if you play {{ crate::economy::CATCH_UP_RATE_PCT / 10 }} days in 10: more if you play every day, less the fewer days you play</dd>
     <dt>winning a round</dt><dd>the whole pot</dd>
     <dt>a round nobody wins</dt><dd>its pot rolls over</dd>
