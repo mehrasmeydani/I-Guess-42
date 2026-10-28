@@ -57,6 +57,9 @@ fontdue = "0.9"
 serde_json = "1"
 # Already in the tree via axum; lets a test send a request through a router.
 tower = { version = "0.5", features = ["util"] }
+# Reads the leaderboard image's QR code back in a test, so its styling is
+# known to scan.
+rqrr = { version = "0.11", default-features = false }
 
 [profile.release]
 opt-level = 3

@@ -224,23 +224,78 @@ fn table(c: &mut Canvas, x: usize, title: &str, score_head: &str, now: Option<&[
     }
 }
 
-/// A QR code of `text`, dark modules on a white square with its quiet zone,
-/// as large as fits `size` pixels at whole pixels a module.
+/// The QR code's card: off-white, so it sits on the dark slide as a card
+/// rather than a hole in it, with the page's dark ink.
+const CARD: [u8; 3] = [0xf2, 0xf2, 0xf2];
+
+/// Fills what `inside` holds within the box (x0, y0)-(x1, y1), anti-aliased:
+/// each pixel is covered as much as its 4x4 samples are.
+fn fill(c: &mut Canvas, (x0, y0, x1, y1): (f32, f32, f32, f32), colour: [u8; 3], inside: impl Fn(f32, f32) -> bool) {
+    for py in y0.max(0.0) as usize..=y1.ceil() as usize {
+        for px in x0.max(0.0) as usize..=x1.ceil() as usize {
+            let mut hits = 0u32;
+            for sy in 0..4 {
+                for sx in 0..4 {
+                    if inside(px as f32 + (sx as f32 + 0.5) / 4.0, py as f32 + (sy as f32 + 0.5) / 4.0) {
+                        hits += 1;
+                    }
+                }
+            }
+            c.blend(px, py, colour, (hits * 255 / 16) as u8);
+        }
+    }
+}
+
+/// Whether (px, py) is in the square at (x, y) of side `w` with corners
+/// rounded by `r`.
+fn in_rounded(px: f32, py: f32, x: f32, y: f32, w: f32, r: f32) -> bool {
+    let (cx, cy) = (px.clamp(x + r, x + w - r), py.clamp(y + r, y + w - r));
+    (px - cx).powi(2) + (py - cy).powi(2) <= r * r
+}
+
+/// A QR code of `text` on a rounded card, as large as fits `size` pixels
+/// square: round dots for its modules, and its three corner markers as
+/// rounded squares, so it reads as part of the slide rather than a block.
+/// The usual error correction: a higher level packs in more, smaller
+/// modules, and the dots then read worse from afar, not better.
 fn qr(c: &mut Canvas, x: usize, y: usize, size: usize, text: &str) {
     let Ok(code) = qrcodegen::QrCode::encode_text(text, qrcodegen::QrCodeEcc::Medium) else {
         return;
     };
     let n = code.size() as usize;
     let quiet = 3;
-    let m = (size / (n + 2 * quiet)).max(1);
-    let drawn = m * (n + 2 * quiet);
-    let (x, y) = (x + size.saturating_sub(drawn) / 2, y + size.saturating_sub(drawn) / 2);
-    c.rect(x, y, drawn, drawn, HI);
+    let m = (size / (n + 2 * quiet)).max(1) as f32;
+    let drawn = m * (n + 2 * quiet) as f32;
+    let x0 = x as f32 + (size as f32 - drawn) / 2.0;
+    let y0 = y as f32 + (size as f32 - drawn) / 2.0;
+    fill(c, (x0, y0, x0 + drawn, y0 + drawn), CARD, |px, py| in_rounded(px, py, x0, y0, drawn, m * 2.0));
+    let at = |i: usize| (quiet + i) as f32 * m;
+
+    // The corner markers: a ring seven modules wide and a block of three
+    // inside it, both rounded - a little: scanners find the code by these
+    // markers' corners, and much rounder ones no longer read (see the test).
+    // The dots are as large as they read best at a distance, too.
+    let finders = [(0, 0), (n - 7, 0), (0, n - 7)];
+    let in_finder = |col: usize, row: usize| finders.iter().any(|&(fx, fy)| (fx..fx + 7).contains(&col) && (fy..fy + 7).contains(&row));
+    for &(fx, fy) in &finders {
+        let (ox, oy) = (x0 + at(fx), y0 + at(fy));
+        let outer = 7.0 * m;
+        fill(c, (ox, oy, ox + outer, oy + outer), BG, |px, py| {
+            in_rounded(px, py, ox, oy, outer, m * 0.8) && !in_rounded(px, py, ox + m, oy + m, outer - 2.0 * m, m * 0.5)
+        });
+        let (ix, iy) = (ox + 2.0 * m, oy + 2.0 * m);
+        fill(c, (ix, iy, ix + 3.0 * m, iy + 3.0 * m), BG, |px, py| in_rounded(px, py, ix, iy, 3.0 * m, m * 0.5));
+    }
+
+    // Every other dark module, a dot.
+    let r = m * 0.46;
     for row in 0..n {
         for col in 0..n {
-            if code.get_module(col as i32, row as i32) {
-                c.rect(x + (quiet + col) * m, y + (quiet + row) * m, m, m, BG);
+            if in_finder(col, row) || !code.get_module(col as i32, row as i32) {
+                continue;
             }
+            let (cx, cy) = (x0 + at(col) + m / 2.0, y0 + at(row) + m / 2.0);
+            fill(c, (cx - r, cy - r, cx + r, cy + r), BG, |px, py| (px - cx).powi(2) + (py - cy).powi(2) <= r * r);
         }
     }
 }
@@ -261,6 +316,30 @@ mod tests {
     }
 
     #[test]
+    fn the_qr_code_scans_to_the_site() {
+        let png = render("2026-10-27", &[], &[], "https://iguesslow.com/");
+        let mut reader = png::Decoder::new(png.as_slice()).read_info().unwrap();
+        let mut rgb = vec![0; reader.output_buffer_size()];
+        reader.next_frame(&mut rgb).unwrap();
+        let grey = |x: usize, y: usize| {
+            let i = (y * W + x) * 3;
+            ((u32::from(rgb[i]) + u32::from(rgb[i + 1]) + u32::from(rgb[i + 2])) / 3) as u8
+        };
+        // As drawn, and down to a third of the size, as a phone further away
+        // sees it: each pixel the average of a block, as a camera's are.
+        for scale in [1, 2, 3] {
+            let small = |x: usize, y: usize| {
+                let sum: u32 = (0..scale).flat_map(|dy| (0..scale).map(move |dx| (dx, dy))).map(|(dx, dy)| u32::from(grey(x * scale + dx, y * scale + dy))).sum();
+                (sum / (scale * scale) as u32) as u8
+            };
+            let mut img = rqrr::PreparedImage::prepare_from_greyscale(W / scale, H / scale, small);
+            let grids = img.detect_grids();
+            assert_eq!(grids.len(), 1, "one code found at 1/{scale}");
+            assert_eq!(grids[0].decode().map(|d| d.1).ok().as_deref(), Some("https://iguesslow.com/"), "at 1/{scale}");
+        }
+    }
+
+    #[test]
     fn a_daily_image_is_made_again_when_the_day_moves_on() {
         let daily = Daily::default();
         assert!(daily.get("2026-10-28").is_none());
@@ -269,5 +348,6 @@ mod tests {
         assert!(daily.get("2026-10-29").is_none());
     }
 }
+
 
 
