@@ -648,6 +648,7 @@ pub struct BetsTemplate {
     pub lo: String,
     pub hi: String,
     pub nobody_picked: bool,
+    pub tied_picked: bool,
     pub quote: Option<QuoteView>,
     /// Why what was typed is not a range.
     pub pick_error: Option<&'static str>,

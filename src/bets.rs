@@ -255,6 +255,7 @@ pub async fn page(
         lo,
         hi,
         nobody_picked: pick.market == Some(Market::Nobody),
+        tied_picked: pick.market == Some(Market::MostTied),
         quote,
         pick_error: pick.error(),
         on_most: pick.market.is_some_and(Market::is_most) || (pick.market.is_none() && q.on.as_deref() == Some("most")),
@@ -470,7 +471,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn most_picked_bets_settle_on_the_most_picked_number_lowest_on_a_tie() {
+    async fn most_picked_bets_settle_on_the_most_picked_number_and_a_tie_on_its_own() {
         let t = temp_db().await;
         let who: Vec<i64> = futures_join(&t.db, &["a", "b", "c", "d", "e", "f"]).await;
         // 3 three times, 1 twice, 8 once: the winner is 8, the most picked 3.
@@ -478,7 +479,7 @@ mod tests {
             plays(&t.db, *p, "2026-10-21", v).await;
         }
         let ann = who[0];
-        for (m, o) in [("most:3:3", 400), ("most:1:2", 300), ("range:8:8", 900), ("most:4:", 500)] {
+        for (m, o) in [("most:3:3", 400), ("most:1:2", 300), ("range:8:8", 900), ("most:4:", 500), ("tied", 300)] {
             assert_eq!(bet(&t.db, ann, "2026-10-21", m, 10, o).await, Placed::In, "{m}");
         }
         let a0 = db::balance(&t.db, ann).await.unwrap();
@@ -488,19 +489,25 @@ mod tests {
         assert_eq!(result("most:3:3"), "won");
         assert_eq!(result("most:1:2"), "lost");
         assert_eq!(result("most:4:"), "lost");
+        assert_eq!(result("tied"), "lost", "3 alone was the most picked");
         assert_eq!(result("range:8:8"), "won", "the winner book is judged on its own");
         assert_eq!(db::balance(&t.db, ann).await.unwrap(), a0 + 40 + 90);
 
-        // A tie for most picked goes to the lowest number.
-        for (p, v) in who.iter().take(4).zip([6, 6, 2, 2]) {
+        // A tie for most picked: neither number is it, and only "no single
+        // most picked" wins, not even a range holding both.
+        for (p, v) in who.iter().take(5).zip([6, 6, 2, 2, 9]) {
             plays(&t.db, *p, "2026-10-22", v).await;
         }
-        bet(&t.db, ann, "2026-10-22", "most:2:2", 10, 300).await;
-        bet(&t.db, ann, "2026-10-22", "most:6:6", 10, 300).await;
+        for m in ["most:2:2", "most:6:6", "most:1:9", "tied"] {
+            assert_eq!(bet(&t.db, ann, "2026-10-22", m, 10, 300).await, Placed::In, "{m}");
+        }
         settle_all(&t.db, "2026-10-23").await.unwrap();
         let slips = db::bets_of(&t.db, ann, "2026-10-22").await.unwrap();
         let result = |m: &str| slips.iter().find(|b| b.market == m).unwrap().result.clone().unwrap();
-        assert_eq!((result("most:2:2").as_str(), result("most:6:6").as_str()), ("won", "lost"));
+        assert_eq!(
+            ["most:2:2", "most:6:6", "most:1:9", "tied"].map(|m| result(m)),
+            ["lost", "lost", "lost", "won"]
+        );
     }
 
     async fn futures_join(db: &Db, names: &[&str]) -> Vec<i64> {

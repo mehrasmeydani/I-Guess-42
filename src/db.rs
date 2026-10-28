@@ -2491,14 +2491,16 @@ pub async fn settle_round(db: &Db, round_date: &str) -> Result<Option<Pot>> {
             .bind(round_date)
             .fetch_one(&mut *tx)
             .await?;
-    // The most picked number; on a tie, the lowest of them.
-    let most: Option<(i64,)> = sqlx::query_as(
-        "SELECT value FROM global_guesses WHERE round_date = ?1 AND participates = 1
-         GROUP BY value ORDER BY COUNT(*) DESC, value LIMIT 1",
+    // The most picked number, if one was picked more than any other: the
+    // top two counts tell, and a tie at the top has none.
+    let top: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT value, COUNT(*) AS n FROM global_guesses WHERE round_date = ?1 AND participates = 1
+         GROUP BY value ORDER BY n DESC, value LIMIT 2",
     )
     .bind(round_date)
-    .fetch_optional(&mut *tx)
+    .fetch_all(&mut *tx)
     .await?;
+    let most = crate::odds::Outcome::from_counts(&top).most;
     let stakes = round_stakes(&mut tx, round_date).await?;
     let carried_in = carry_into(&mut tx, round_date).await?;
     let winner_id = winner.map(|w| w.0);
@@ -2507,7 +2509,7 @@ pub async fn settle_round(db: &Db, round_date: &str) -> Result<Option<Pot>> {
     let now = ts(Utc::now());
     // The round's bets, against its winning and most picked numbers. A round
     // nobody played has no outcome to bet on: its bets are called off.
-    let outcome = crate::odds::Outcome { winner: winning_value, most: most.map(|m| m.0) };
+    let outcome = crate::odds::Outcome { winner: winning_value, most };
     settle_bets(&mut tx, round_date, (players > 0).then_some(outcome), &now).await?;
     if let Some(w) = winner_id.filter(|_| paid > 0) {
         sqlx::query(

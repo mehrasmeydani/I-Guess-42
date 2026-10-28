@@ -630,9 +630,10 @@ none. The player picks the bet themselves:
 | `range:1:B` | W exists and W ≤ B | "from" left empty, to B: "winner B or less" |
 | `range:A:A` | W = A | the same number twice |
 | `none` | nobody wins | "or: nobody wins" |
-| `most:A:B`, `most:A:` | M, the most picked number, is in the range (ties: the lowest of them) | the "most picked" switch |
+| `most:A:B`, `most:A:` | M, the most picked number, is in the range; only when one number was picked more than any other | the "most picked" switch |
+| `tied` | no single most picked number: two or more share the top count | "or: no single most picked" |
 
-1 ≤ A ≤ B ≤ 1 000 000 000. Ranges **lose** on a no-winner day. That's
+1 ≤ A ≤ B ≤ 1 000 000 000. Ranges **lose** on a no-winner day, and `most` ranges on a tie at the top. That's
 standard bookmaker behaviour and keeps `none` meaningful. The first bets were
 stored as `under:N` / `over:N`; those still read as `range:1:N−1` / `range:N:`.
 
@@ -666,8 +667,8 @@ Once per open round:
    rather than a simulation (`odds::analyse`):
    - v wins: λᵥe^(−λᵥ) × Π over u < v of (1 − λᵤe^(−λᵤ));
    - nobody wins: that product over every number;
-   - v is most picked (ties to the lowest): summed over its count k, the
-     chance every lower number has fewer than k and every higher at most k.
+   - v alone is most picked: summed over its count k, the chance every
+     other number has fewer than k; the rest of the played days are a tie.
    Exact to any precision, instant, the same on every restart. Checked in the
    tests against 20 000 rounds actually played out; on the local data it
    matched the old 40 000-round simulation to within a point everywhere.

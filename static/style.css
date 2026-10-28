@@ -1252,6 +1252,8 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
 .pick.live button { display: none; }
 .quote-error { margin-top: 16px; }
 .pick-none.on { background: var(--hi); color: var(--bg); padding: 0 8px; }
+.pick:has(input[name="on"][value="win"]:checked) .pick-none.for-most,
+.pick:has(input[name="on"][value="most"]:checked) .pick-none.for-win { display: none; }
 .betbox { padding: 16px; border: var(--rule); background: var(--panel); }
 .betbox .hint { margin-top: 8px; }
 .sec .hint { font-size: var(--fs-1); }

@@ -24,7 +24,10 @@
       <label for="hi">to</label>
       <input id="hi" name="hi" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="any" value="{{ hi }}" autocomplete="off">
       <button type="submit">see odds</button>
-      <a class="pick-none{% if nobody_picked %} on{% endif %}" href="/g/bets?m=none">or: nobody wins</a>
+      {# The outcome no range covers, for whichever the switch is on: shown
+         by the switch where :has() is supported, both where not. #}
+      <a class="pick-none for-win{% if nobody_picked %} on{% endif %}" href="/g/bets?m=none">or: nobody wins</a>
+      <a class="pick-none for-most{% if tied_picked %} on{% endif %}" href="/g/bets?m=tied">or: no single most picked</a>
     </form>
     <div id="quote" aria-live="polite">{% include "_quote.html" %}</div>
   </div>
