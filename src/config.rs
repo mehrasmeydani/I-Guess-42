@@ -76,6 +76,9 @@ pub struct Config {
     /// from the 42 client secret so it is secret and stable without one more
     /// setting.
     pub anon_key: String,
+    /// The key `/leaderboard.png?key=...` needs, for a screen or a bot. None
+    /// (unset or empty): nobody gets the image.
+    pub board_image_key: Option<String>,
     /// Who runs the site, for /imprint.
     pub imprint_name: Option<String>,
     pub imprint_address: Option<String>,
@@ -154,6 +157,7 @@ impl Config {
                     digest.iter().map(|b| format!("{b:02x}")).collect()
                 }
             },
+            board_image_key: nonempty("LEADERBOARD_IMAGE_KEY"),
             imprint_name: nonempty("IMPRINT_NAME"),
             imprint_address: nonempty("IMPRINT_ADDRESS"),
             imprint_email: nonempty("IMPRINT_EMAIL"),

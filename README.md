@@ -365,6 +365,7 @@ watching it, and a container restart drops whatever requests are in flight.
 | `IP_HASH_KEY` | no | empty: no address-derived data is stored |
 | `TRUST_PROXY` | no | `false`; compose sets it, since Caddy is in front |
 | `MODERATORS` | no | empty (`/mod` answers 404); 42 logins, comma-separated |
+| `LEADERBOARD_IMAGE_KEY` | no | empty: `/leaderboard.png` is off; set, `/leaderboard.png?key=` with it gets the 42 round's most wins as an image, anything else goes to the front page |
 | `IMPRINT_NAME` / `IMPRINT_ADDRESS` / `IMPRINT_EMAIL` | no | shown on `/imprint` in production |
 | `ENVIRONMENT` | no | `test` when `ADMIN_LOGINS` is set, else `production`; decides the test banner, the imprint and data labels |
 | `ANON_LABEL_KEY` | no | derived from `FT_CLIENT_SECRET`; keys the "player #3fa2" labels |

@@ -17,6 +17,7 @@ mod mail;
 mod moderation;
 mod oauth;
 mod odds;
+mod board_png;
 mod og;
 mod platform;
 mod points;

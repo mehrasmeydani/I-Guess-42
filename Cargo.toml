@@ -48,6 +48,9 @@ png = "0.17"
 # The QR code on the leaderboard image, pointing at the site. Pure Rust, no
 # dependencies.
 qrcodegen = "1.8"
+# Draws the leaderboard image's text in the site's monospace (DejaVu Sans
+# Mono, in src/fonts). Pure Rust.
+fontdue = "0.9"
 
 [dev-dependencies]
 # Already in the tree via reqwest; used to feed sample /v2/me bodies to tests.

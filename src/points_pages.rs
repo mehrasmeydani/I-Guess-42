@@ -195,39 +195,45 @@ async fn build_boards(state: &AppState, pool: Pool, week: bool, open: &str) -> R
 }
 
 /// `/leaderboard.png`: the 42 round's most wins and longest streaks as an
-/// image, with a QR code to the site. Made once per round, after it closes,
-/// so it changes every day at the reveal. For 42 students only, as the page
-/// is: anyone else gets the site's own preview image.
-pub async fn vienna_board_image(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
-    let viewer = current_viewer(&state, &jar).await?;
-    if let Some(away) = crate::handlers::outside_42(Pool::Vienna, viewer.as_ref(), "/static/og.png") {
-        return Ok(away);
+/// image, with a QR code
+/// to the site. Only with the key (`LEADERBOARD_IMAGE_KEY`, as `?key=`), for
+/// a screen or a bot; anyone else, signed in or not, is sent to the front
+/// page, as is everyone when no key is set. Made once per round, after it
+/// closes, so it changes every day at the reveal.
+pub async fn vienna_board_image(State(state): State<AppState>, Query(q): Query<ImageKey>) -> Result<Response, AppError> {
+    if !key_matches(state.cfg.board_image_key.as_deref(), q.key.as_deref()) {
+        return Ok(Redirect::to("/").into_response());
     }
     let open = Round::current(state.now()).key();
     let png = match state.board_png.get(&open) {
         Some(png) => png,
         None => {
             let boards = boards(&state, Pool::Vienna, false, &open).await?;
-            let wins: Vec<crate::og::BoardLine> = boards
+            let ranks = templates::ranks(&boards.wins.iter().map(|r| r.wins).collect::<Vec<_>>());
+            let wins: Vec<crate::board_png::Line> = boards
                 .wins
                 .iter()
-                .take(10)
-                .zip(templates::ranks(&boards.wins.iter().map(|r| r.wins).collect::<Vec<_>>()))
-                .map(|(r, rank)| crate::og::BoardLine { rank, login: r.login.clone(), score: r.wins })
+                .zip(ranks)
+                .take(crate::board_png::ROWS)
+                .map(|(r, rank)| crate::board_png::Line { rank, login: r.login.clone(), score: r.wins })
                 .collect();
-            let streaks: Vec<crate::og::BoardLine> = boards
+            let ranks = templates::ranks(&boards.runs.iter().map(|r| r.2).collect::<Vec<_>>());
+            let streaks: Vec<crate::board_png::StreakLine> = boards
                 .runs
                 .iter()
-                .take(10)
-                .zip(templates::ranks(&boards.runs.iter().map(|r| r.2).collect::<Vec<_>>()))
-                .map(|(r, rank)| crate::og::BoardLine { rank, login: r.0.clone(), score: r.2 })
+                .zip(ranks)
+                .take(crate::board_png::ROWS)
+                .map(|(r, rank)| crate::board_png::StreakLine {
+                    line: crate::board_png::Line { rank, login: r.0.clone(), score: r.2 },
+                    now: r.3,
+                })
                 .collect();
             // As of the round that closed last: the day before the open one.
             let closed = chrono::NaiveDate::parse_from_str(&open, "%Y-%m-%d")
                 .map(|d| (d - chrono::Duration::days(1)).format("%Y-%m-%d").to_string())
                 .unwrap_or_else(|_| open.clone());
             let url = format!("{}/", state.cfg.public_url.trim_end_matches('/'));
-            state.board_png.put(&open, crate::og::board_image(&closed, &wins, &streaks, &url))
+            state.board_png.put(&open, crate::board_png::render(&closed, &wins, &streaks, &url))
         }
     };
     Ok((
@@ -238,6 +244,21 @@ pub async fn vienna_board_image(State(state): State<AppState>, jar: CookieJar) -
         png.as_ref().clone(),
     )
         .into_response())
+}
+
+#[derive(Deserialize, Default)]
+pub struct ImageKey {
+    pub key: Option<String>,
+}
+
+/// Whether `given` is the key, when there is one. Compared as hashes, so the
+/// time it takes says nothing about how much of it was right.
+fn key_matches(key: Option<&str>, given: Option<&str>) -> bool {
+    use sha2::Digest;
+    match (key, given) {
+        (Some(k), Some(g)) => sha2::Sha256::digest(k.as_bytes()) == sha2::Sha256::digest(g.as_bytes()),
+        _ => false,
+    }
 }
 
 async fn leaderboard_in(

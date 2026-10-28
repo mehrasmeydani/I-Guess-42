@@ -3,9 +3,6 @@
 //! than one player in blue, the rest grey - under the name and the date, in a
 //! pixel font drawn here so the image needs no font files. Nothing personal
 //! is in it. Rendered on first request and kept.
-//!
-//! Also the 42 round's leaderboard as an image (`board_image`), to put up on
-//! a screen or send round: rebuilt once a day, with a QR code to the site.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -43,36 +40,14 @@ impl Cache {
     }
 }
 
-/// One image that changes once a day: kept under the day it was made for,
-/// and made again when the day moves on.
-#[derive(Default)]
-pub struct Daily {
-    last: Mutex<Option<(String, std::sync::Arc<Vec<u8>>)>>,
-}
-
-impl Daily {
-    pub fn get(&self, day: &str) -> Option<std::sync::Arc<Vec<u8>>> {
-        match &*self.last.lock().unwrap_or_else(|e| e.into_inner()) {
-            Some((d, png)) if d == day => Some(png.clone()),
-            _ => None,
-        }
-    }
-
-    pub fn put(&self, day: &str, png: Vec<u8>) -> std::sync::Arc<Vec<u8>> {
-        let png = std::sync::Arc::new(png);
-        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = Some((day.to_string(), png.clone()));
-        png
-    }
-}
-
-struct Canvas {
+pub(crate) struct Canvas {
     w: usize,
     h: usize,
     px: Vec<u8>,
 }
 
 impl Canvas {
-    fn new(w: usize, h: usize) -> Self {
+    pub(crate) fn new(w: usize, h: usize) -> Self {
         let mut px = Vec::with_capacity(w * h * 3);
         for _ in 0..w * h {
             px.extend_from_slice(&BG);
@@ -80,12 +55,26 @@ impl Canvas {
         Self { w, h, px }
     }
 
-    fn rect(&mut self, x: usize, y: usize, w: usize, h: usize, c: [u8; 3]) {
+    pub(crate) fn rect(&mut self, x: usize, y: usize, w: usize, h: usize, c: [u8; 3]) {
         for yy in y.min(self.h)..(y + h).min(self.h) {
             for xx in x.min(self.w)..(x + w).min(self.w) {
                 let i = (yy * self.w + xx) * 3;
                 self.px[i..i + 3].copy_from_slice(&c);
             }
+        }
+    }
+
+    /// Colour `c` over the pixel at (x, y), `alpha` of 255 of it: for
+    /// anti-aliased text and shapes.
+    pub(crate) fn blend(&mut self, x: usize, y: usize, c: [u8; 3], alpha: u8) {
+        if x >= self.w || y >= self.h || alpha == 0 {
+            return;
+        }
+        let i = (y * self.w + x) * 3;
+        let a = u32::from(alpha);
+        for k in 0..3 {
+            let under = u32::from(self.px[i + k]);
+            self.px[i + k] = ((u32::from(c[k]) * a + under * (255 - a) + 127) / 255) as u8;
         }
     }
 
@@ -108,7 +97,7 @@ impl Canvas {
         cx - x
     }
 
-    fn png(self) -> Vec<u8> {
+    pub(crate) fn png(self) -> Vec<u8> {
         let mut out = Vec::new();
         {
             let mut enc = png::Encoder::new(&mut out, self.w as u32, self.h as u32);
@@ -131,7 +120,11 @@ pub fn round_image(date: &str, tallies: &[Tally], winner: Option<i64>, players: 
     let pad = 72;
 
     // "i guess low", with "low" on a green block as in the header.
-    masthead(&mut c, pad, 6);
+    let s = 6;
+    let w = c.text(pad, pad, s, "i guess ", FG);
+    let low_w = text_width("low", s);
+    c.rect(pad + w - s, pad - s, low_w + s, 7 * s + 2 * s, GREEN);
+    c.text(pad + w, pad, s, "low", BG);
     let shown = crate::templates::eu(date);
     let date_w = text_width(&shown, 5);
     c.text(W - pad - date_w, pad + 4, 5, &shown, DIM);
@@ -171,126 +164,13 @@ pub fn round_image(date: &str, tallies: &[Tally], winner: Option<i64>, players: 
     c.png()
 }
 
-/// "i guess low", with "low" on a green block as in the header; at `pad`
-/// from the top left, in 5x7 pixels of `s` each.
-fn masthead(c: &mut Canvas, pad: usize, s: usize) {
-    let w = c.text(pad, pad, s, "i guess ", FG);
-    let low_w = text_width("low", s);
-    c.rect(pad + w - s, pad - s, low_w + s, 7 * s + 2 * s, GREEN);
-    c.text(pad + w, pad, s, "low", BG);
-}
-
-/// `s` cut to `max` characters, the last one a '.' when it was longer.
-fn fit(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    s.chars().take(max.saturating_sub(1)).chain(std::iter::once('.')).collect()
-}
-
-/// One leaderboard row on the image: rank, 42 login, score.
-pub struct BoardLine {
-    pub rank: i64,
-    pub login: String,
-    pub score: i64,
-}
-
-const BOARD_W: usize = 1200;
-const BOARD_H: usize = 1350;
-
-/// The 42 round's leaderboard: the most wins and the longest streaks, ten
-/// each, side by side, as of the round closed on `date`; below them how to
-/// play and a QR code to `url`. Portrait, so it fills a phone or a screen
-/// on its side. Only 42 logins and counts are in it, as on the page.
-pub fn board_image(date: &str, wins: &[BoardLine], streaks: &[BoardLine], url: &str) -> Vec<u8> {
-    let mut c = Canvas::new(BOARD_W, BOARD_H);
-    let pad = 72;
-
-    masthead(&mut c, pad, 6);
-    let shown = crate::templates::eu(date);
-    c.text(BOARD_W - pad - text_width(&shown, 5), pad + 4, 5, &shown, DIM);
-    c.text(pad, 168, 4, "leaderboard - the 42 round", DIM);
-    c.rect(pad, 228, BOARD_W - 2 * pad, 2, RULE);
-
-    let gap = 64;
-    let col = (BOARD_W - 2 * pad - gap) / 2;
-    board_column(&mut c, pad, col, "most wins", "rounds won", wins, GREEN);
-    board_column(&mut c, pad + col + gap, col, "longest streaks", "days in a row", streaks, BLUE);
-
-    // How to play, and the code to scan, under a rule.
-    let foot = 1050;
-    c.rect(pad, foot, BOARD_W - 2 * pad, 2, RULE);
-    let qr_box = 240;
-    let qr_x = BOARD_W - pad - qr_box;
-    let qr_y = foot + 32;
-    qr(&mut c, qr_x, qr_y, qr_box, url);
-    let host = url.split("://").nth(1).unwrap_or(url).trim_end_matches('/').to_lowercase();
-    let room = (qr_x - pad - 32) / 30;
-    c.text(pad, foot + 44, 4, "lowest unique number wins.", FG);
-    c.text(pad, foot + 90, 4, "one guess a day.", DIM);
-    c.text(pad, foot + 170, 5, "scan to play", GREEN);
-    c.text(pad, foot + 220, 5, &fit(&host, room), FG);
-    c.png()
-}
-
-/// A column of the board: title, what is counted, then up to ten rows, each
-/// a rank, a login, the score and a bar of it against the top one.
-fn board_column(c: &mut Canvas, x: usize, w: usize, title: &str, what: &str, rows: &[BoardLine], colour: [u8; 3]) {
-    c.text(x, 268, 5, title, FG);
-    c.text(x, 320, 3, what, DIM);
-    let top = 372;
-    if rows.is_empty() {
-        c.text(x, top, 4, "nobody yet", DIM);
-        return;
-    }
-    let s = 4;
-    let rank_w = text_width("00", s) + 24;
-    let best = rows.iter().map(|r| r.score).max().unwrap_or(1).max(1);
-    for (i, r) in rows.iter().take(10).enumerate() {
-        let y = top + i * 66;
-        c.text(x, y, s, &format!("{:02}", r.rank), if r.rank == 1 { colour } else { DIM });
-        let score = r.score.to_string();
-        let score_w = text_width(&score, s);
-        let room = (w - rank_w - score_w - 24) / (6 * s);
-        c.text(x + rank_w, y, s, &fit(&r.login.to_lowercase(), room), FG);
-        c.text(x + w - score_w, y, s, &score, FG);
-        let bar_w = (w - rank_w) * r.score.max(0) as usize / best as usize;
-        c.rect(x + rank_w, y + 36, w - rank_w, 4, RULE);
-        c.rect(x + rank_w, y + 36, bar_w.max(4), 4, colour);
-    }
-}
-
-/// A QR code of `text`, dark on light with its quiet zone, as large as fits
-/// in `size` pixels square at whole pixels a module, centred there.
-fn qr(c: &mut Canvas, x: usize, y: usize, size: usize, text: &str) {
-    let Ok(code) = qrcodegen::QrCode::encode_text(text, qrcodegen::QrCodeEcc::Medium) else {
-        return;
-    };
-    let n = code.size() as usize;
-    let quiet = 3;
-    let m = (size / (n + 2 * quiet)).max(1);
-    let drawn = m * (n + 2 * quiet);
-    let (x, y) = (x + (size - drawn.min(size)) / 2, y + (size - drawn.min(size)) / 2);
-    c.rect(x, y, drawn, drawn, FG);
-    for row in 0..n {
-        for col in 0..n {
-            if code.get_module(col as i32, row as i32) {
-                c.rect(x + (quiet + col) * m, y + (quiet + row) * m, m, m, BG);
-            }
-        }
-    }
-}
-
-/// A 5x7 glyph, top row first, the high bit leftmost. Lowercase letters,
-/// digits, and the few marks the images write.
+/// A 5x7 glyph, top row first, the high bit leftmost. Only what the
+/// preview needs: lowercase letters, digits, '-' and space.
 fn glyph(ch: char) -> Option<[u8; 7]> {
     Some(match ch {
         ' ' => [0; 7],
         '-' => [0, 0, 0, 0b11111, 0, 0, 0],
         '.' => [0, 0, 0, 0, 0, 0b01100, 0b01100],
-        '_' => [0, 0, 0, 0, 0, 0, 0b11111],
-        ':' => [0, 0b01100, 0b01100, 0, 0b01100, 0b01100, 0],
-        '/' => [0, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0],
         '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
         '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
         '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
@@ -303,30 +183,19 @@ fn glyph(ch: char) -> Option<[u8; 7]> {
         '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
         'a' => [0, 0, 0b01110, 0b00001, 0b01111, 0b10001, 0b01111],
         'b' => [0b10000, 0b10000, 0b10110, 0b11001, 0b10001, 0b10001, 0b11110],
-        'c' => [0, 0, 0b01110, 0b10000, 0b10000, 0b10001, 0b01110],
         'd' => [0b00001, 0b00001, 0b01101, 0b10011, 0b10001, 0b10001, 0b01111],
         'e' => [0, 0, 0b01110, 0b10001, 0b11111, 0b10000, 0b01110],
-        'f' => [0b00110, 0b01001, 0b01000, 0b11100, 0b01000, 0b01000, 0b01000],
         'g' => [0, 0b01111, 0b10001, 0b10001, 0b01111, 0b00001, 0b01110],
-        'h' => [0b10000, 0b10000, 0b10110, 0b11001, 0b10001, 0b10001, 0b10001],
         'i' => [0b00100, 0, 0b01100, 0b00100, 0b00100, 0b00100, 0b01110],
-        'j' => [0b00010, 0, 0b00110, 0b00010, 0b00010, 0b10010, 0b01100],
-        'k' => [0b10000, 0b10000, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010],
         'l' => [0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        'm' => [0, 0, 0b11010, 0b10101, 0b10101, 0b10001, 0b10001],
         'n' => [0, 0, 0b10110, 0b11001, 0b10001, 0b10001, 0b10001],
         'o' => [0, 0, 0b01110, 0b10001, 0b10001, 0b10001, 0b01110],
         'p' => [0, 0, 0b11110, 0b10001, 0b11110, 0b10000, 0b10000],
-        'q' => [0, 0, 0b01101, 0b10011, 0b01111, 0b00001, 0b00001],
         'r' => [0, 0, 0b10110, 0b11001, 0b10000, 0b10000, 0b10000],
         's' => [0, 0, 0b01111, 0b10000, 0b01110, 0b00001, 0b11110],
-        't' => [0b01000, 0b01000, 0b11100, 0b01000, 0b01000, 0b01001, 0b00110],
         'u' => [0, 0, 0b10001, 0b10001, 0b10001, 0b10011, 0b01101],
-        'v' => [0, 0, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
         'w' => [0, 0, 0b10001, 0b10001, 0b10101, 0b10101, 0b01010],
-        'x' => [0, 0, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001],
         'y' => [0, 0, 0b10001, 0b10001, 0b01111, 0b00001, 0b01110],
-        'z' => [0, 0, 0b11111, 0b00010, 0b00100, 0b01000, 0b11111],
         _ => return None,
     })
 }
@@ -356,29 +225,6 @@ mod tests {
                 assert!(glyph(ch).is_some(), "{ch:?} in {s:?}");
             }
         }
-    }
-
-    #[test]
-    fn the_board_is_a_png_with_every_letter_drawn() {
-        let line = |rank, login: &str, score| BoardLine { rank, login: login.into(), score };
-        let wins = [line(1, "megardes", 4), line(2, "abcdefghijklmnopqrstuvwxyz_-", 2)];
-        let png = board_image("2026-10-27", &wins, &[], "https://iguesslow.com");
-        let reader = png::Decoder::new(png.as_slice()).read_info().unwrap();
-        assert_eq!((reader.info().width, reader.info().height), (1200, 1350));
-        for ch in "abcdefghijklmnopqrstuvwxyz0123456789_-.:/".chars() {
-            assert!(glyph(ch).is_some(), "{ch:?}");
-        }
-        assert_eq!(fit("abcdef", 4), "abc.");
-        assert_eq!(fit("abc", 4), "abc");
-    }
-
-    #[test]
-    fn a_daily_image_is_made_again_when_the_day_moves_on() {
-        let daily = Daily::default();
-        assert!(daily.get("2026-10-28").is_none());
-        daily.put("2026-10-28", vec![1]);
-        assert_eq!(daily.get("2026-10-28").unwrap().as_slice(), &[1]);
-        assert!(daily.get("2026-10-29").is_none());
     }
 
     #[test]
