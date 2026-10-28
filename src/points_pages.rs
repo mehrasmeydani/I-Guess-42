@@ -105,48 +105,74 @@ pub async fn vienna_leaderboard(state: State<AppState>, jar: CookieJar, q: Query
     leaderboard_in(Pool::Vienna, state, jar, q).await
 }
 
-async fn leaderboard_in(
-    pool: Pool,
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Query(q): Query<BoardQuery>,
-) -> Result<Response, AppError> {
-    let viewer = current_viewer(&state, &jar).await?;
-    if let Some(away) = crate::handlers::outside_42(pool, viewer.as_ref(), "/g/leaderboard") {
-        return Ok(away);
+/// How long the leaderboard's tables are shown before they are worked out
+/// again. They read every guess and every line of points there is, and at
+/// thousands of players that is seconds, not milliseconds: done once in a
+/// while, not on every visit. Fresh every time in tests.
+const BOARD_FRESH: std::time::Duration =
+    if cfg!(test) { std::time::Duration::ZERO } else { std::time::Duration::from_secs(30) };
+
+/// The leaderboard's tables as everyone sees them, before the visitor's own
+/// rows are marked: points (global round only), wins, and each player's
+/// (login, display name, longest run, run still going, id).
+struct Boards {
+    points: Vec<db::PointsRow>,
+    wins: Vec<db::LeaderboardRow>,
+    runs: Vec<(String, String, i64, i64, i64)>,
+}
+
+type BoardKey = (bool, bool, String);
+
+/// The leaderboard's tables, by round, all-time or week, and open round.
+#[derive(Default)]
+pub struct BoardCache {
+    built: std::sync::Mutex<std::collections::HashMap<BoardKey, (std::time::Instant, std::sync::Arc<Boards>)>>,
+    /// Held while tables are worked out, so only one request does it.
+    building: tokio::sync::Mutex<()>,
+}
+
+/// The tables, from the cache while fresh. Out of date: one request works
+/// them out again and the rest are shown the last ones meanwhile, so a busy
+/// minute never queues up behind it. Never built: the rest wait for the
+/// first.
+async fn boards(state: &AppState, pool: Pool, week: bool, open: &str) -> Result<std::sync::Arc<Boards>, AppError> {
+    let cache = &state.boards;
+    let key: BoardKey = (pool == Pool::Global, week, open.to_string());
+    let fresh = |at: &std::time::Instant| at.elapsed() < BOARD_FRESH;
+    let last = cache.built.lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned();
+    if let Some((at, b)) = &last {
+        if fresh(at) {
+            return Ok(b.clone());
+        }
     }
-    let week = q.show.as_deref() == Some("week");
-    let rows = if pool == Pool::Global {
+    let _building = match (cache.building.try_lock(), &last) {
+        (Ok(guard), _) => guard,
+        (Err(_), Some((_, b))) => return Ok(b.clone()),
+        (Err(_), None) => cache.building.lock().await,
+    };
+    if let Some((at, b)) = cache.built.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        if fresh(at) {
+            return Ok(b.clone());
+        }
+    }
+    let built = std::sync::Arc::new(build_boards(state, pool, week, open).await?);
+    let mut all = cache.built.lock().unwrap_or_else(|e| e.into_inner());
+    all.retain(|k, _| k.2 == open);
+    all.insert(key, (std::time::Instant::now(), built.clone()));
+    Ok(built)
+}
+
+async fn build_boards(state: &AppState, pool: Pool, week: bool, open: &str) -> Result<Boards, AppError> {
+    let points = if pool == Pool::Global {
         let since = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         db::points_board(&state.db, week.then_some(since.as_str()), BOARD).await?
     } else {
         Vec::new()
     };
-    let open = Round::current(state.now()).key();
-    let named = crate::handlers::names_visible(pool, viewer.as_ref());
-    // Your own row is marked: by account in the global round, by 42 login
-    // in the 42 one.
-    let me_global = viewer.as_ref().map(|v| v.account.username.clone());
-    let me_42 = viewer.as_ref().and_then(|v| v.intra.as_ref().map(|u| u.login.clone()));
-    let wins: Vec<db::LeaderboardRow> = db::leaderboard(&state.db, pool, &open, BOARD).await?;
-    let top_wins = wins.first().map_or(1, |r| r.wins.max(1));
-    let win_ranks = templates::ranks(&wins.iter().map(|r| r.wins).collect::<Vec<_>>());
-    let wins = wins
-        .into_iter()
-        .zip(win_ranks)
-        .map(|(r, rank)| {
-            let me = match pool {
-                Pool::Global => me_global.as_deref() == Some(r.login.as_str()),
-                Pool::Vienna => me_42.as_deref() == Some(r.login.as_str()),
-            };
-            let pct = r.wins * 100 / top_wins;
-            let l = templates::LeaderView::new(r, named);
-            PointsBoardRow { name: l.login, title: l.display_name, points: l.wins.to_string(), pct, me, rank }
-        })
-        .collect();
+    let wins = db::leaderboard(&state.db, pool, open, BOARD).await?;
     // Longest streaks: each player's runs worked out from the days they
     // played, longest first, then the one still going.
-    let open_day = chrono::NaiveDate::parse_from_str(&open, "%Y-%m-%d").unwrap_or_else(|_| chrono::Utc::now().date_naive());
+    let open_day = chrono::NaiveDate::parse_from_str(open, "%Y-%m-%d").unwrap_or_else(|_| chrono::Utc::now().date_naive());
     let mut players: Vec<(i64, String, String, Vec<chrono::NaiveDate>)> = Vec::new();
     for (id, login, display_name, day) in db::play_days(&state.db, pool).await? {
         let Ok(day) = chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d") else { continue };
@@ -164,6 +190,46 @@ async fn leaderboard_in(
         .collect();
     runs.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)).then(a.0.cmp(&b.0)));
     runs.truncate(BOARD as usize);
+    Ok(Boards { points, wins, runs })
+}
+
+async fn leaderboard_in(
+    pool: Pool,
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(q): Query<BoardQuery>,
+) -> Result<Response, AppError> {
+    let viewer = current_viewer(&state, &jar).await?;
+    if let Some(away) = crate::handlers::outside_42(pool, viewer.as_ref(), "/g/leaderboard") {
+        return Ok(away);
+    }
+    let week = q.show.as_deref() == Some("week");
+    let open = Round::current(state.now()).key();
+    crate::economy::settle_first(&state.db, pool, &open).await?;
+    let boards = boards(&state, pool, week, &open).await?;
+    let rows = boards.points.clone();
+    let named = crate::handlers::names_visible(pool, viewer.as_ref());
+    // Your own row is marked: by account in the global round, by 42 login
+    // in the 42 one.
+    let me_global = viewer.as_ref().map(|v| v.account.username.clone());
+    let me_42 = viewer.as_ref().and_then(|v| v.intra.as_ref().map(|u| u.login.clone()));
+    let wins: Vec<db::LeaderboardRow> = boards.wins.clone();
+    let top_wins = wins.first().map_or(1, |r| r.wins.max(1));
+    let win_ranks = templates::ranks(&wins.iter().map(|r| r.wins).collect::<Vec<_>>());
+    let wins = wins
+        .into_iter()
+        .zip(win_ranks)
+        .map(|(r, rank)| {
+            let me = match pool {
+                Pool::Global => me_global.as_deref() == Some(r.login.as_str()),
+                Pool::Vienna => me_42.as_deref() == Some(r.login.as_str()),
+            };
+            let pct = r.wins * 100 / top_wins;
+            let l = templates::LeaderView::new(r, named);
+            PointsBoardRow { name: l.login, title: l.display_name, points: l.wins.to_string(), pct, me, rank }
+        })
+        .collect();
+    let runs = boards.runs.clone();
     let top_run = runs.first().map_or(1, |r| r.2.max(1));
     let run_ranks = templates::ranks(&runs.iter().map(|r| r.2).collect::<Vec<_>>());
     let streaks: Vec<templates::StreakBoardRow> = runs

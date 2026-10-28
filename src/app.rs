@@ -30,6 +30,8 @@ pub struct AppState {
     /// Where today's betting odds start, by the open round it was worked
     /// out for: worked out once a day.
     pub odds_base: Arc<std::sync::Mutex<Option<TodaysBase>>>,
+    /// The leaderboard's tables, worked out at most every half minute.
+    pub boards: Arc<crate::points_pages::BoardCache>,
     /// Seconds added to the wall clock, so a test instance can be pushed past
     /// a 12:42 deadline without waiting for one. Always zero unless an admin
     /// moved it, and it only affects which round is open - never session
@@ -45,6 +47,7 @@ impl AppState {
             held: Arc::new(HeldGuesses::default()),
             og: Arc::new(crate::og::Cache::default()),
             odds_base: Arc::new(std::sync::Mutex::new(None)),
+            boards: Arc::new(crate::points_pages::BoardCache::default()),
             db,
             cfg,
             http,

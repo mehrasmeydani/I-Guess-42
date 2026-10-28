@@ -48,6 +48,7 @@ pub async fn robots(State(state): State<AppState>) -> Response {
 pub async fn sitemap(State(state): State<AppState>) -> Result<Response, AppError> {
     let base = &state.cfg.public_url;
     let open = Round::current(state.now()).key();
+    crate::economy::settle_first(&state.db, Pool::Global, &open).await?;
     let mut urls: Vec<String> = ["/g/", "/g/results", "/g/trends", "/login", "/signup", "/privacy", "/imprint"]
         .iter()
         .map(|p| format!("{base}{p}"))

@@ -448,6 +448,8 @@ mod tests {
         db::insert_guess(&t.db, Pool::Global, &yesterday, cheat, 1, true).await.unwrap();
 
         let ban_form = |username: &str, reason: &str| Form(BanForm { username: username.into(), reason: reason.into() });
+        // Yesterday's round settled at 12:42, as it would have.
+        crate::economy::settle_all(&t.db, &today).await.unwrap();
         let resp = ban(State(state.clone()), jar("mod"), ban_form("cheat", "")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY, "a reason is required");
         let resp = ban(State(state.clone()), jar("mod"), ban_form("nobody", "x")).await.unwrap();

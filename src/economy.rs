@@ -78,8 +78,25 @@ const SETTLE_EVERY: Duration = Duration::from_secs(30);
 /// The sign-up bonus, if not had yet. For a verified account only; call it
 /// whenever one turns up. The daily grant comes with the day's guess
 /// (`db::lock_global_guess`).
+///
+/// Looked up before it is written: this runs with every guess and on every
+/// signed-in visit to the round, and a write that turns out to do nothing
+/// still waits its turn for the database's one writer and for the disk.
 pub async fn collect(db: &Db, account_id: i64, open_round: &str) -> Result<()> {
-    db::credit_once(db, account_id, open_round, "signup", SIGNUP_BONUS, "signup", None).await?;
+    if db::joined_global(db, account_id).await?.is_none() {
+        db::credit_once(db, account_id, open_round, "signup", SIGNUP_BONUS, "signup", None).await?;
+    }
+    Ok(())
+}
+
+/// Settles any global round that closed and is not paid out yet, before a
+/// page reads closed rounds: their winners and players come from the pots
+/// (see `db::summaries`). Cheap when there is nothing to do. Nothing for the
+/// 42 round, which has no pots.
+pub async fn settle_first(db: &Db, pool: db::Pool, open_round: &str) -> Result<()> {
+    if pool == db::Pool::Global {
+        settle_all(db, open_round).await?;
+    }
     Ok(())
 }
 
