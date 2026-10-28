@@ -72,9 +72,8 @@ impl Canvas {
         }
         let i = (y * self.w + x) * 3;
         let a = u32::from(alpha);
-        for k in 0..3 {
-            let under = u32::from(self.px[i + k]);
-            self.px[i + k] = ((u32::from(c[k]) * a + under * (255 - a) + 127) / 255) as u8;
+        for (px, ink) in self.px[i..i + 3].iter_mut().zip(c) {
+            *px = ((u32::from(ink) * a + u32::from(*px) * (255 - a) + 127) / 255) as u8;
         }
     }
 

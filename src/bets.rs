@@ -505,7 +505,7 @@ mod tests {
         let slips = db::bets_of(&t.db, ann, "2026-10-22").await.unwrap();
         let result = |m: &str| slips.iter().find(|b| b.market == m).unwrap().result.clone().unwrap();
         assert_eq!(
-            ["most:2:2", "most:6:6", "most:1:9", "tied"].map(|m| result(m)),
+            ["most:2:2", "most:6:6", "most:1:9", "tied"].map(result),
             ["lost", "lost", "lost", "won"]
         );
     }
