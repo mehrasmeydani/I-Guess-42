@@ -2245,6 +2245,12 @@ pub async fn global_play_days(db: &Db, account_id: i64) -> Result<Vec<String>> {
     .await?)
 }
 
+/// The round date a rule change went live (`rule_changes`), if it is
+/// recorded.
+pub async fn rule_since(db: &Db, name: &str) -> Result<Option<String>> {
+    Ok(sqlx::query_scalar("SELECT since FROM rule_changes WHERE name = ?1").bind(name).fetch_optional(db).await?)
+}
+
 /// The refs of every ledger row of `kind` an account has, e.g. the streak
 /// bonuses it claimed.
 pub async fn ledger_refs(db: &Db, account_id: i64, kind: &str) -> Result<Vec<String>> {

@@ -976,7 +976,8 @@ details.expand[open] summary .when-open { display: inline; }
 .leaders-table .score b { color: var(--state); font-variant-numeric: tabular-nums; }
 .leaders-table .minibar { background: var(--state); }
 .leaders-table .r1 .who { color: var(--hi); font-weight: 700; }
-/* A leaderboard shows its top 15; the checkbox before it shows the rest. */
+/* A leaderboard shows its top few (templates::BOARD_SHOWN); the checkbox
+   before it shows the rest. */
 .board-more:not(:checked) ~ .table-wrap tr.more { display: none; }
 .board-more-label { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; color: var(--fg); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .board-more-label:hover { color: var(--hi); }

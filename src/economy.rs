@@ -154,8 +154,12 @@ pub async fn catch_up(db: &Db, account_id: i64, round: &str) -> Result<i64> {
     Ok(0)
 }
 
-/// Streak bonuses earned and not claimed yet: the days that completed ten
-/// in a row (today's guess counts), each as its ledger ref "streak:<day>".
+/// Streak bonuses earned and not claimed yet: the days that reached a
+/// prize (today's guess counts), each as its ledger ref "streak:<day>".
+///
+/// Days from when the streak freeze went live count their runs with it;
+/// days before keep the runs they had without it. The freeze joins up old
+/// streaks too, but that pays nothing for days already gone.
 pub async fn unclaimed_streaks(db: &Db, account_id: i64) -> Result<Vec<Streak>> {
     let days: Vec<chrono::NaiveDate> = db::global_play_days(db, account_id)
         .await?
@@ -163,8 +167,15 @@ pub async fn unclaimed_streaks(db: &Db, account_id: i64) -> Result<Vec<Streak>> 
         .filter_map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
         .collect();
     let claimed = db::ledger_refs(db, account_id, "streak").await?;
-    Ok(crate::stats::streak_runs(&days)
+    let since = db::rule_since(db, "streak_freeze")
+        .await?
+        .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok());
+    let before = crate::stats::streak_runs_bridging(&days, 0);
+    let after = crate::stats::streak_runs(&days);
+    Ok(before
         .into_iter()
+        .zip(after)
+        .map(|((d, old), (_, new))| (d, if since.is_some_and(|s| d >= s) { new } else { old }))
         .map(|(d, run)| Streak { day: d.format("%Y-%m-%d").to_string(), run, prize: streak_prize(run) })
         .filter(|s| s.prize > 0 && !claimed.contains(&s.ledger_ref()))
         .collect())
@@ -284,6 +295,30 @@ mod tests {
         // Never missing a day pays what the old 1000-every-ten did, on average.
         let first_hundred: i64 = (1..=100).map(streak_prize).sum();
         assert!(first_hundred >= 100 * 100, "{first_hundred}");
+    }
+
+    #[tokio::test]
+    async fn a_freeze_joins_old_streaks_but_pays_only_from_when_it_went_live() {
+        let (_t, state) = app(&[]).await;
+        let ann = player(&state.db, "ann").await;
+        let today = Round::current(state.now()).date;
+        let day = |back: i64| (today - chrono::Duration::days(back)).format("%Y-%m-%d").to_string();
+        // Two days, one missed, a third: three in a row with the freeze.
+        for back in [5, 4, 2] {
+            plays(&state.db, ann, &day(back), 2).await;
+        }
+        let since = |d: String| {
+            let db = state.db.clone();
+            async move {
+                sqlx::query("UPDATE rule_changes SET since = ?1 WHERE name = 'streak_freeze'").bind(d).execute(&db).await.unwrap();
+            }
+        };
+        // The freeze went live after that third day: it was a 1 then, so no prize.
+        since(day(1)).await;
+        assert!(unclaimed_streaks(&state.db, ann).await.unwrap().is_empty());
+        // Live by then: the third day earns the first rung.
+        since(day(2)).await;
+        assert_eq!(unclaimed_streaks(&state.db, ann).await.unwrap(), vec![Streak { day: day(2), run: 3, prize: STREAK_LADDER[0].1 }]);
     }
 
     #[tokio::test]
