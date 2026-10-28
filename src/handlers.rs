@@ -1894,8 +1894,8 @@ mod tests {
                     .unwrap(),
             )
             .await;
-            assert!(vienna.contains(r#"<p class="sealed-value">4</p>"#));
-            assert!(global_page(&state, Some("s")).await.contains(r#"<p class="sealed-value">9</p>"#));
+            assert!(vienna.contains(r#"<span class="peek-num">4</span>"#));
+            assert!(global_page(&state, Some("s")).await.contains(r#"<span class="peek-num">9</span>"#));
         }
 
         #[tokio::test]
@@ -2324,6 +2324,7 @@ mod round_page_tests {
         let html = page(&state, jar(&session), Some("saved")).await;
         assert!(html.contains("you're in"));
         assert!(html.contains(r#"<div class="sealed fresh">"#), "stamped on just now");
+        assert!(html.contains(r#"class="sealed-value peek" aria-pressed="true""#), "shown just after locking");
         assert!(html.contains(r#"<span class="stamp">sealed</span>"#));
         assert!(html.contains("reveal 12:42 &middot; <a href="), "{html}");
         assert!(!html.contains("countdown-mirror"), "one clock: the one at the top");
@@ -2333,7 +2334,8 @@ mod round_page_tests {
         // Back later: the same box, from what the server holds, no slam.
         let html = page(&state, jar(&session), None).await;
         assert!(html.contains(r#"<div class="sealed">"#));
-        assert!(html.contains(r#"<p class="sealed-value">7</p>"#));
+        assert!(html.contains(r#"<span class="peek-num">7</span>"#));
+        assert!(html.contains(r#"class="sealed-value peek" aria-pressed="false""#), "covered until tapped");
     }
 
     #[tokio::test]

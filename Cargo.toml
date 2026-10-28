@@ -45,6 +45,9 @@ hmac = "0.12"
 regex = "1"
 # Encodes the per-round link-preview image (og.rs). Pure Rust, small.
 png = "0.17"
+# The QR code on the leaderboard image, pointing at the site. Pure Rust, no
+# dependencies.
+qrcodegen = "1.8"
 
 [dev-dependencies]
 # Already in the tree via reqwest; used to feed sample /v2/me bodies to tests.

@@ -77,4 +77,9 @@
     {% if streaks.len() > 15 %}<label class="board-more-label" for="more-streaks"><span class="show">show all {{ streaks.len() }} &darr;</span><span class="hide">show top 15 &uarr;</span></label>{% endif %}
   {% endif %}
 </section>
+{% if !pool.is_global() %}
+{# The top ten of both as one picture, with a QR code to the site: made
+   again at each reveal. #}
+<p class="dim"><a href="/leaderboard.png" download="i-guess-low-leaderboard.png">the leaderboard as an image &darr;</a></p>
+{% endif %}
 {% endblock %}

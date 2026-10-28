@@ -267,6 +267,14 @@ a.tag { color: var(--fg); text-decoration: underline; }
 /* Sized to the number, centred, with room above for the stamp. */
 .sealed { position: relative; display: inline-block; min-width: 9rem; margin-top: 16px; padding: 24px 32px; border: 2px solid var(--state); text-align: center; }
 .sealed-value { margin: 0; color: var(--hi); font-size: clamp(2.6rem, 10vw, 5rem); font-weight: 700; line-height: 1; word-break: break-all; }
+/* The number is covered until tapped (app.js), so it is not on show when
+   the page is. No script: shown, and no hint. */
+.peek, .peek:hover { display: block; width: 100%; padding: 0; border: 0; background: none; color: var(--hi); white-space: normal; }
+.peek-mask, .peek-hint { display: none; }
+.js .peek-hint { display: block; margin-top: 12px; color: var(--dim); font-size: var(--fs-1); font-weight: 400; }
+.js .peek[aria-pressed="false"] .peek-num, .js .peek[aria-pressed="false"] .when-shown { display: none; }
+.js .peek[aria-pressed="false"] .peek-mask { display: inline; color: var(--dim); }
+.js .peek[aria-pressed="true"] .when-hidden { display: none; }
 .stamp {
   position: absolute;
   /* Straddles the corner: half over the frame, half off it. */

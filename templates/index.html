@@ -100,10 +100,16 @@
   {% match my_guess_label %}
     {% when Some with (g) %}
       {# In place of the input, from what the server holds: the number in
-         its sealed box, stamped on the moment it is locked. #}
+         its sealed box, stamped on the moment it is locked. Covered until
+         tapped, so showing someone the site does not show them your
+         number; shown at once just after locking it. Without a script it
+         is never covered: there would be no way to uncover it. #}
       <h2 class="section-title"{% if just_locked %} role="status"{% endif %}>locked: your number</h2>
       <div class="sealed{% if just_locked %} fresh{% endif %}">
-        <p class="sealed-value">{{ g }}</p>
+        <button type="button" class="sealed-value peek" aria-pressed="{% if just_locked %}true{% else %}false{% endif %}">
+          <span class="peek-num">{{ g }}</span><span class="peek-mask" aria-hidden="true">??</span>
+          <span class="peek-hint"><span class="when-hidden">tap to show</span><span class="when-shown">tap to hide</span></span>
+        </button>
         <span class="stamp">sealed</span>
       </div>
       <p class="locked-line">reveal {{ close_time }} &middot; <a href="{{ calendar_href }}" download>add to calendar</a></p>

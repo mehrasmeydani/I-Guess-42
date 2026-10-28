@@ -254,6 +254,14 @@ async fn the_leaderboard_ranks_points_first_then_wins() {
     assert!(html.contains(">most wins") && !html.contains("most points"));
     let away = board(Pool::Vienna, None).await;
     assert_eq!(location(&away), "/g/leaderboard");
+
+    // Its image, for 42 students too; anyone else gets the site's preview.
+    let image = crate::points_pages::vienna_board_image(State(state.clone()), jar("s")).await.unwrap();
+    assert_eq!(image.headers()["content-type"], "image/png");
+    let png = axum::body::to_bytes(image.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    let away = crate::points_pages::vienna_board_image(State(state.clone()), CookieJar::new()).await.unwrap();
+    assert_eq!(location(&away), "/static/og.png");
 }
 
 #[tokio::test]

@@ -1,6 +1,7 @@
 //! The pages about points in the global round: your own history at
 //! `/g/points`, and the leaderboards at `/g/leaderboard` (points, then
-//! wins) and `/leaderboard` (the 42 round: wins).
+//! wins) and `/leaderboard` (the 42 round: wins), with the 42 one as an
+//! image at `/leaderboard.png`.
 
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -191,6 +192,52 @@ async fn build_boards(state: &AppState, pool: Pool, week: bool, open: &str) -> R
     runs.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)).then(a.0.cmp(&b.0)));
     runs.truncate(BOARD as usize);
     Ok(Boards { points, wins, runs })
+}
+
+/// `/leaderboard.png`: the 42 round's most wins and longest streaks as an
+/// image, with a QR code to the site. Made once per round, after it closes,
+/// so it changes every day at the reveal. For 42 students only, as the page
+/// is: anyone else gets the site's own preview image.
+pub async fn vienna_board_image(State(state): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
+    let viewer = current_viewer(&state, &jar).await?;
+    if let Some(away) = crate::handlers::outside_42(Pool::Vienna, viewer.as_ref(), "/static/og.png") {
+        return Ok(away);
+    }
+    let open = Round::current(state.now()).key();
+    let png = match state.board_png.get(&open) {
+        Some(png) => png,
+        None => {
+            let boards = boards(&state, Pool::Vienna, false, &open).await?;
+            let wins: Vec<crate::og::BoardLine> = boards
+                .wins
+                .iter()
+                .take(10)
+                .zip(templates::ranks(&boards.wins.iter().map(|r| r.wins).collect::<Vec<_>>()))
+                .map(|(r, rank)| crate::og::BoardLine { rank, login: r.login.clone(), score: r.wins })
+                .collect();
+            let streaks: Vec<crate::og::BoardLine> = boards
+                .runs
+                .iter()
+                .take(10)
+                .zip(templates::ranks(&boards.runs.iter().map(|r| r.2).collect::<Vec<_>>()))
+                .map(|(r, rank)| crate::og::BoardLine { rank, login: r.0.clone(), score: r.2 })
+                .collect();
+            // As of the round that closed last: the day before the open one.
+            let closed = chrono::NaiveDate::parse_from_str(&open, "%Y-%m-%d")
+                .map(|d| (d - chrono::Duration::days(1)).format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|_| open.clone());
+            let url = format!("{}/", state.cfg.public_url.trim_end_matches('/'));
+            state.board_png.put(&open, crate::og::board_image(&closed, &wins, &streaks, &url))
+        }
+    };
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "image/png"),
+            (axum::http::header::CACHE_CONTROL, "private, max-age=600"),
+        ],
+        png.as_ref().clone(),
+    )
+        .into_response())
 }
 
 async fn leaderboard_in(

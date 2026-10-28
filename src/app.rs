@@ -27,6 +27,9 @@ pub struct AppState {
     pub held: Arc<HeldGuesses>,
     /// Rendered link-preview images of closed rounds.
     pub og: Arc<crate::og::Cache>,
+    /// The 42 round's leaderboard as an image, by the open round it was
+    /// made in: made again once a day.
+    pub board_png: Arc<crate::og::Daily>,
     /// Where today's betting odds start, by the open round it was worked
     /// out for: worked out once a day.
     pub odds_base: Arc<std::sync::Mutex<Option<TodaysBase>>>,
@@ -46,6 +49,7 @@ impl AppState {
             limits: Arc::new(Limits::default()),
             held: Arc::new(HeldGuesses::default()),
             og: Arc::new(crate::og::Cache::default()),
+            board_png: Arc::new(crate::og::Daily::default()),
             odds_base: Arc::new(std::sync::Mutex::new(None)),
             boards: Arc::new(crate::points_pages::BoardCache::default()),
             db,
