@@ -41,7 +41,7 @@ jobs:
     name: cargo audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Informational advisories are reported but do not fail the check.
       # Note: on pull requests from forks the token cannot create a check, and
