@@ -230,6 +230,7 @@ async fn index_in(
             .map(|n| Notice::error(crate::copy::already_locked(n))),
         code => notice_for(code).filter(|_| !just_locked),
     };
+    let custom_sessions = crate::custom::open_links(&state, &jar, viewer.as_ref()).await?;
     Ok(templates::render(&IndexTemplate {
         pool,
         streak_bonus,
@@ -248,6 +249,7 @@ async fn index_in(
         stake_label: (pool == Pool::Global).then(|| crate::templates::points_label(&crate::economy::GUESS_STAKE)),
         bets_link: pool == Pool::Global,
         my_bets,
+        custom_sessions,
         round_key,
         time_left: crate::round::clock(seconds_left),
         time_left_spoken: crate::round::spoken_duration(seconds_left),
@@ -885,7 +887,7 @@ pub struct GuessForm {
 }
 
 /// Accepts digits with the separators people naturally type.
-fn parse_guess(raw: &str) -> Result<i64, &'static str> {
+pub(crate) fn parse_guess(raw: &str) -> Result<i64, &'static str> {
     let cleaned: String = raw
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '_' && *c != ',' && *c != '\u{202f}')

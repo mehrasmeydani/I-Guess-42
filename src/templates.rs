@@ -354,6 +354,8 @@ pub struct IndexTemplate {
     /// The player's open bets on today's round: "2 bets · could pay 340 pts".
     pub my_bets: Option<String>,
     pub guess_count: i64,
+    /// Custom sessions open now: a button to each.
+    pub custom_sessions: Vec<CustomLink>,
     pub last_round: Option<RoundView>,
     /// How much of the announcement window is left, in seconds, or `None`
     /// once it is over. While it is `Some`, the round in `last_round` is
@@ -1167,6 +1169,118 @@ pub struct ModTemplate {
     /// Accounts warned and not banned yet.
     pub warned: Vec<String>,
     pub banned: Vec<crate::db::ModAccount>,
+}
+
+/// A custom session open now, linked from the round page.
+pub struct CustomLink {
+    pub name: String,
+    pub href: String,
+    /// When it closes, "14:30".
+    pub closes: String,
+}
+
+/// One custom session on the moderators' list.
+pub struct CustomListRow {
+    pub name: String,
+    pub href: String,
+    pub open: bool,
+    /// When it closes or closed.
+    pub when: String,
+    pub players: i64,
+}
+
+/// One number in a closed custom session.
+#[derive(Clone)]
+pub struct CustomPick {
+    pub name: String,
+    pub value_label: String,
+    /// "won", "once" (unique, not lowest) or "taken".
+    pub fate: &'static str,
+    /// Played without an account.
+    pub guest: bool,
+    /// The viewer's own.
+    pub mine: bool,
+}
+
+#[derive(Template)]
+#[template(path = "mod_sessions.html")]
+pub struct CustomModTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub notice: Option<Notice>,
+    pub sessions: Vec<CustomListRow>,
+    pub max_minutes: i64,
+}
+
+#[derive(Template)]
+#[template(path = "mod_session.html")]
+pub struct CustomQrTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub name: String,
+    pub code: String,
+    /// The address the QR code holds.
+    pub link: String,
+    /// The QR code, as SVG markup made here (custom::qr_svg), never input.
+    pub qr: String,
+    pub open: bool,
+    pub closes: String,
+    /// The countdown and its bar, as on the round page.
+    pub time_left: String,
+    pub time_left_spoken: String,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub server_now: String,
+    pub progress_pct: i64,
+    pub joined: i64,
+    pub guessed: i64,
+    pub winner: Option<CustomPick>,
+    pub rows: Vec<CustomPick>,
+}
+
+#[derive(Template)]
+#[template(path = "session.html")]
+pub struct CustomPlayTemplate {
+    pub pool: Pool,
+    pub user: Option<UserView>,
+    pub test_mode: bool,
+    pub impersonating: bool,
+    pub notice: Option<Notice>,
+    pub name: String,
+    /// The page's own address, for its forms.
+    pub href: String,
+    pub open: bool,
+    /// When it closes or closed, "14:30".
+    pub closes: String,
+    /// The countdown and its bar, as on the round page.
+    pub time_left: String,
+    pub time_left_spoken: String,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub server_now: String,
+    pub progress_pct: i64,
+    pub joined: i64,
+    pub guessed: i64,
+    /// The number was locked just now: shown at once, stamped.
+    pub just_locked: bool,
+    /// Seconds left of the result's pop-up after the end, as on the round
+    /// page after 12:42; `None` once it is over.
+    pub announce_left: Option<i64>,
+    /// The name this browser joined under, from its cookie.
+    pub my_name: Option<String>,
+    /// What was typed in the name form, kept when it is refused.
+    pub typed_name: String,
+    /// The guest form starts open: it was the one refused.
+    pub guest_open: bool,
+    /// The signed-in account's username, to play under.
+    pub username: Option<String>,
+    pub my_guess: Option<String>,
+    pub winner: Option<CustomPick>,
+    pub rows: Vec<CustomPick>,
 }
 
 #[derive(Template)]

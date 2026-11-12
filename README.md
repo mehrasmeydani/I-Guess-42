@@ -37,6 +37,24 @@ One person has one account however many ways they sign in; the account page
 including the points and betting still to come. What is left to do by hand before
 it goes live is in [TODO.md](TODO.md).
 
+## Custom sessions
+
+A moderator (named in `MODERATORS`) can open a round of its own for a room -
+a talk, an event, a class - at `/mod/sessions`: a name and how many minutes
+it stays open, up to a week. They get a QR code to show the room.
+
+- Whoever scans it signs in and plays under their username, makes an
+  account, or plays as a **guest** under a name for that session only (not
+  someone's username). Then one number, final, as in the daily rounds.
+- A cookie remembers each browser, so players come back to their own
+  number and then to the result. The round page shows a button to each open
+  session **only to those who joined it**; nobody else learns it exists.
+- The page is the round page over the session's own length: the clock and
+  bar, the sealed number, the rules, and the result over the page when it
+  ends. Lowest unique number wins; no points, pot or bets.
+- The moderator can end a session early; the result shows on its page and
+  on theirs.
+
 ## Stack
 
 | | |

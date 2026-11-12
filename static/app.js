@@ -1,7 +1,9 @@
 // The countdown to the round's close. The server sends the deadline and its
 // own clock; the gap between that clock and this machine's is measured once
 // and again whenever the tab comes back into view, so a visitor's wrong
-// clock, or a laptop that slept, never moves the deadline.
+// clock, or a laptop that slept, never moves the deadline. A custom session
+// uses it too: data-opens-at makes the bar run over the session's length
+// instead of a day, and data-reload loads the page again at zero.
 (function () {
   var el = document.querySelector('.countdown[data-closes-at]');
   if (!el) return;
@@ -11,6 +13,8 @@
   if (!isFinite(closesAt) || !isFinite(offset)) return;
 
   var DAY = 24 * 60 * 60 * 1000;
+  var opensAt = Date.parse(el.dataset.opensAt);
+  var SPAN = isFinite(opensAt) && closesAt > opensAt ? closesAt - opensAt : DAY;
   var bar = document.querySelector('.meter');
   var barText = document.querySelector('.meter-bar');
   var pctLabel = document.querySelector('.meter-pct');
@@ -54,7 +58,7 @@
   // As templates::meter: floor(pct * cells / 100) filled.
   function paint(ms) {
     if (!bar || !barText) return;
-    var pct = Math.min(100, Math.max(0, Math.floor((DAY - ms) * 100 / DAY)));
+    var pct = Math.min(100, Math.max(0, Math.floor((SPAN - ms) * 100 / SPAN)));
     bar.setAttribute('aria-valuenow', pct);
     bar.setAttribute('aria-valuetext', pct + '% of the round gone');
     var filled = Math.floor(pct * CELLS / 100);
@@ -83,6 +87,11 @@
     el.textContent = 'revealing…';
     el.setAttribute('aria-label', 'round closed, revealing the numbers');
     if (stateEl) stateEl.textContent = 'closed';
+    // A session: its own page shows the result, once the server agrees.
+    if ('reload' in el.dataset) {
+      setTimeout(function () { location.reload(); }, 1500);
+      return;
+    }
     var closedRound = (document.querySelector('input[name=round]') || {}).value
       || el.dataset.closesAt.slice(0, 10);
     var base = location.pathname.indexOf('/g') === 0 ? '/g' : '';

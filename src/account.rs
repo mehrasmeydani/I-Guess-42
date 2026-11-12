@@ -513,12 +513,13 @@ mod tests {
 #[derive(Deserialize, Default)]
 pub struct WelcomeQuery {
     /// Where to go once the name is picked; only ever a page of the global
-    /// round, so this cannot be turned into a redirect elsewhere.
+    /// round or a custom session, so this cannot be turned into a redirect
+    /// elsewhere.
     pub then: Option<String>,
 }
 
 fn after_welcome(then: Option<&str>) -> String {
-    then.filter(|t| t.starts_with("/g?") || *t == "/g" || t.starts_with("/g/") && !t.starts_with("//"))
+    then.filter(|t| t.starts_with("/g?") || *t == "/g" || t.starts_with("/g/") || crate::custom::is_session_page(t))
         .unwrap_or("/g")
         .to_string()
 }

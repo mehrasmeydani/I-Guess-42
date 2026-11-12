@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Sessions &middot; i guess low{% endblock %}
+{% block h1 %}custom sessions{% endblock %}
+
+{% block content %}
+<p class="dim"><a href="/mod">&larr; moderation</a></p>
+
+<section class="sec" style="--b: 0">
+  <h2 class="rule"><span>open a session</span></h2>
+  {% include "_notice.html" %}
+  <form class="authform" method="post" action="/mod/sessions">
+    <label for="cs-name">name</label>
+    <input id="cs-name" name="name" type="text" autocomplete="off" required maxlength="60" placeholder="friday talk">
+    <label for="cs-minutes">open for, in minutes</label>
+    <input id="cs-minutes" name="minutes" type="number" inputmode="numeric" min="1" max="{{ max_minutes }}" value="15" required>
+    <p class="hint">starts now · you get a QR code to show the room · no account needed to play ·
+      lowest unique number wins · numbers shown when it ends</p>
+    <button type="submit" class="primary">open it</button>
+  </form>
+</section>
+
+<section class="sec" style="--b: 1">
+  <h2 class="rule"><span>lately</span><span class="tag">{{ sessions.len() }}</span></h2>
+  {% if sessions.is_empty() %}
+    <p class="dim">none yet</p>
+  {% else %}
+    <table class="history logins">
+      <tbody>
+        {% for s in sessions %}
+          <tr>
+            <td><a href="{{ s.href }}"><b>{{ s.name }}</b></a></td>
+            <td class="dim">{% if s.open %}<span class="chip">[open]</span> closes {{ s.when }}{% else %}ended {{ s.when }}{% endif %}</td>
+            <td class="num">{{ s.players }} {% if s.players == 1 %}player{% else %}players{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endblock %}

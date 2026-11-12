@@ -37,7 +37,7 @@ pub async fn manifest() -> Response {
 
 pub async fn robots(State(state): State<AppState>) -> Response {
     let body = format!(
-        "User-agent: *\nDisallow: /admin\nDisallow: /mod\nDisallow: /account\nDisallow: /api/\nDisallow: /verify\nDisallow: /reset\n\nSitemap: {}/sitemap.xml\n",
+        "User-agent: *\nDisallow: /admin\nDisallow: /mod\nDisallow: /s/\nDisallow: /account\nDisallow: /api/\nDisallow: /verify\nDisallow: /reset\n\nSitemap: {}/sitemap.xml\n",
         state.cfg.public_url
     );
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response()
