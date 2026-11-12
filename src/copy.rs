@@ -138,6 +138,14 @@ pub const NEED_REASON: &str = "reason required";
 pub const NEED_NOTE: &str = "note required · the player sees it";
 pub const NO_SUCH_ACCOUNT: &str = "no account by that name";
 pub const NOT_YOURSELF: &str = "can't ban yourself";
+// custom sessions
+pub const SESSION_NAME_BAD: &str = "name: 1 to 60 characters";
+pub const SESSION_LENGTH_BAD: &str = "length: 1 to 10 080 minutes (a week)";
+pub const PLAYER_NAME_BAD: &str = "name: 1 to 20 characters";
+pub const PLAYER_NAME_TAKEN: &str = "name taken in this session · pick another";
+pub const GUEST_NAME_IS_USERNAME: &str = "that's someone's username · pick another, or sign in";
+pub const USERNAME_TAKEN_BY_GUEST: &str = "a guest took your username here · play as a guest under another";
+pub const SESSION_OVER: &str = "session over · no more guesses";
 pub const AMOUNT_BAD: &str = "amount: whole number, negative to take away";
 pub const AMOUNT_RANGE: &str = "amount: -1 000 000 to 1 000 000, not 0";
 pub const ROUND_DATE: &str = "round: a date like 2026-10-21";

@@ -5,6 +5,7 @@ mod auth;
 mod config;
 mod copy;
 mod credentials;
+mod custom;
 mod db;
 mod demo;
 mod economy;
@@ -163,6 +164,16 @@ async fn main() -> Result<()> {
         .route("/mod/rename", post(moderation::rename))
         .route("/mod/void", post(moderation::void))
         .route("/mod/points", get(moderation::points))
+        .route("/mod/sessions", get(custom::list).post(custom::create))
+        .route("/mod/sessions/{code}", get(custom::show))
+        .route("/mod/sessions/{code}/qr.svg", get(custom::qr))
+        .route("/mod/sessions/{code}/end", post(custom::end))
+        // Custom sessions: open to anyone with the link, no account needed.
+        .route("/s/{code}", get(custom::page))
+        .route("/s/{code}/join", post(custom::join))
+        .route("/s/{code}/signin", get(custom::signin))
+        .route("/s/{code}/signup", get(custom::signup))
+        .route("/s/{code}/guess", post(custom::guess))
         .route("/privacy", get(moderation::privacy))
         .route("/imprint", get(moderation::imprint))
         .route("/healthz", get(handlers::healthz))

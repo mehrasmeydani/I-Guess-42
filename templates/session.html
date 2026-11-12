@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} &middot; i guess low{% endblock %}
+{% block h1 %}{{ name }}{% endblock %}
+{% block path %}{{ href }}{% endblock %}
+{% block og_title %}i guess low · {{ name }}{% endblock %}
+{% block twitter_title %}i guess low · {{ name }}{% endblock %}
+
+{% block content %}
+{# Laid out as the round page (index.html), piece for piece: the result
+   announced over the page after the end, the clock and its bar, the
+   figures, the box or the sealed number, the tagline, the rules. No
+   points, pot or bets: a session pays nothing. #}
+
+{# The result, over the page for half an hour after the end, as the round
+   page does after 12:42. Same dismiss checkbox and the same app.js. #}
+{% match announce_left %}
+  {% when Some with (left) %}
+    <div class="announce" data-left="{{ left }}">
+      <input type="checkbox" id="announce-done" class="announce-x sr" aria-label="dismiss the result" data-round="{{ href }}">
+      <div class="announce-card" role="status">
+        <p class="announce-when">{{ name }} just ended</p>
+        {% match winner %}
+          {% when Some with (w) %}
+            <p class="announce-num"><b class="win">{{ w.value_label }}</b></p>
+            <p class="announce-who">{{ w.name }} had it alone &middot; {{ rows.len() }} played</p>
+          {% when None %}
+            <p class="announce-num"><b class="lose">&times;</b></p>
+            <p class="announce-who">nobody won &middot; {{ rows.len() }} played</p>
+        {% endmatch %}
+        <p class="announce-links">
+          <a href="#picks">every pick &rarr;</a>
+          <label class="announce-close" for="announce-done">dismiss</label>
+        </p>
+      </div>
+    </div>
+  {% when None %}
+{% endmatch %}
+
+<section class="sec hero" style="--b: 0" aria-labelledby="round-h">
+  <h2 class="rule" id="round-h"><span>{{ name }}</span>{% if open %}<span class="tag live state">open</span>{% else %}<span class="tag state">closed</span>{% endif %}</h2>
+  {% if open %}
+  {# The round page's clock and bar, over this session's own length; at
+     zero the page loads again with the result (data-reload). #}
+  <div class="clock-row">
+  <p class="countdown" data-opens-at="{{ starts_at }}" data-closes-at="{{ ends_at }}" data-server-now="{{ server_now }}" data-reload
+     aria-label="closes in {{ time_left_spoken }}">{{ time_left }}</p>
+  </div>
+  <p class="meter" role="progressbar" aria-label="session gone by"
+     aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress_pct }}"
+     aria-valuetext="{{ progress_pct }}% of the round gone"><span class="meter-bar" aria-hidden="true">{{ crate::templates::meter(progress_pct) }}</span> <span class="meter-pct" aria-hidden="true">{{ progress_pct }}%</span></p>
+  {% endif %}
+  <div class="figures">
+    <p><b>{{ joined }}</b><span>{% if joined == 1 %}player{% else %}players{% endif %} this session</span></p>
+    {% match my_guess %}
+      {% when Some with (g) %}
+        {% if open %}<p class="you in"><b>you're in</b><span>your number is locked</span></p>
+        {% else %}<p class="you"><b>{{ g }}</b><span>your pick</span></p>{% endif %}
+      {% when None %}
+        {% if open %}
+          <p class="you"><b>not yet</b><span>{% if my_name.is_some() %}your number goes below{% else %}pick how you play below{% endif %} &darr;</span></p>
+        {% else %}
+          <p><b>{{ guessed }}</b><span>{% if guessed == 1 %}number{% else %}numbers{% endif %} in</span></p>
+        {% endif %}
+    {% endmatch %}
+  </div>
+</section>
+
+<section class="sec play" style="--b: 1">
+  {% include "_notice.html" %}
+  {% if open %}
+    {% match my_name %}
+      {% when None %}
+        {# Step one is who you play as: your account, under its username, or
+           a guest under a name for this session. A plain text field for
+           that name, not the big number box: the box is for the guess. #}
+        <ol class="session-steps" aria-label="how to play">
+          <li class="on" aria-current="step"><b>1</b> who you are</li>
+          <li><b>2</b> your number</li>
+        </ol>
+        <div class="session-choices">
+          {% match username %}
+            {% when Some with (u) %}
+              <form method="post" action="{{ href }}/join">
+                <input type="hidden" name="mode" value="account">
+                <button type="submit" class="primary">play as {{ u }} &rarr;</button>
+              </form>
+              <p class="hint">your username, as in the daily round</p>
+            {% when None %}
+              <h2 class="section-title">how do you want to play?</h2>
+              <div class="session-signin">
+                <a class="btn primary" href="{{ href }}/signin">sign in</a>
+                <a class="btn" href="{{ href }}/signup">create account</a>
+              </div>
+              <p class="hint">play under your username · you come back here after</p>
+          {% endmatch %}
+          {# Opens without a script; open already when the name was refused. #}
+          <details class="session-guest"{% if guest_open %} open{% endif %}>
+            <summary class="btn">{% if username.is_some() %}or play as a guest{% else %}play as a guest{% endif %}</summary>
+            <form class="authform session-join" method="post" action="{{ href }}/join">
+              <input type="hidden" name="mode" value="guest">
+              <label for="name">a name for this session</label>
+              <input id="name" name="name" type="text" autocomplete="nickname" maxlength="20" spellcheck="false" placeholder="e.g. ana" value="{{ typed_name }}" required>
+              <p class="hint">no account · only for this session · shown next to your number when it ends</p>
+              <button type="submit" class="primary">next: pick a number &rarr;</button>
+            </form>
+          </details>
+        </div>
+      {% when Some with (n) %}
+        {% match my_guess %}
+          {% when Some with (g) %}
+            {# The round page's sealed box: covered until tapped, so showing
+               someone the page does not show them your number; shown at once
+               just after locking it. #}
+            <h2 class="section-title"{% if just_locked %} role="status"{% endif %}>locked: your number</h2>
+            <div class="sealed{% if just_locked %} fresh{% endif %}">
+              <button type="button" class="sealed-value peek" aria-pressed="{% if just_locked %}true{% else %}false{% endif %}">
+                <span class="peek-num">{{ g }}</span><span class="peek-mask" aria-hidden="true">??</span>
+                <span class="peek-hint"><span class="when-hidden">tap to show</span><span class="when-shown">tap to hide</span></span>
+              </button>
+              <span class="stamp">sealed</span>
+            </div>
+            <p class="locked-line">playing as {{ n }} &middot; reveal {{ closes }}</p>
+          {% when None %}
+            <ol class="session-steps" aria-label="how to play">
+              <li class="done"><b>&#10003;</b> {{ n }}</li>
+              <li class="on" aria-current="step"><b>2</b> your number</li>
+            </ol>
+            <h2 class="section-title"><label for="guess">your number</label></h2>
+            <form class="guessform" method="post" action="{{ href }}/guess">
+              {# The round page's blinking cursor, gone once the field has focus. #}
+              <span class="guess-field">
+                <input id="guess" name="guess" type="text" inputmode="numeric" enterkeyhint="go"
+                       pattern="[0-9 ,_]*" autocomplete="off" spellcheck="false" placeholder=" " required>
+              </span>
+              <button type="submit" class="primary">lock it in</button>
+            </form>
+        {% endmatch %}
+    {% endmatch %}
+  {% else %}
+    <h2 class="section-title" id="picks">result</h2>
+    {% include "_session_picks.html" %}
+  {% endif %}
+</section>
+
+<p class="premise">lowest unique number wins</p>
+
+<section class="sec" style="--b: 2">
+  <h2 class="section-title">rules</h2>
+  <ol class="rules">
+    <li><b>01</b> one whole number above 0. once this session.</li>
+    <li><b>02</b> all numbers revealed at {{ closes }}.</li>
+    <li><b>03</b> <span>lowest number only one person picks wins.<br>match anyone &rarr; you both lose it.</span></li>
+  </ol>
+</section>
+{% endblock %}

@@ -1,0 +1,21 @@
+{# Who won a closed custom session, and every pick in it. #}
+{# The winner as the round page says yesterday's. #}
+{% match winner %}
+  {% when Some with (w) %}<p class="verdict"><b class="win">{{ w.value_label }}</b> <span>{{ w.name }} won &middot; {{ rows.len() }} played</span></p>
+  {% when None %}<p class="verdict"><b class="lose">&times;</b> <span>{% if rows.is_empty() %}nobody played{% else %}nobody won &middot; {{ rows.len() }} played{% endif %}</span></p>
+{% endmatch %}
+{% if !rows.is_empty() %}
+  <table class="grid narrow session-picks">
+    <caption class="sr">every pick</caption>
+    <thead><tr><th scope="col">player</th><th scope="col" class="num">number</th><th scope="col">result</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+        <tr class="{{ r.fate }}{% if r.mine %} mine-row{% endif %}">
+          <td>{{ r.name }}{% if r.guest %} <span class="dim">guest</span>{% endif %}{% if r.mine %} <span class="dim">(you)</span>{% endif %}</td>
+          <td class="num">{{ r.value_label }}</td>
+          <td>{% if r.fate == "won" %}won{% else if r.fate == "taken" %}taken{% else %}unique, not lowest{% endif %}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}

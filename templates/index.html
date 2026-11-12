@@ -57,6 +57,16 @@
   {% when None %}
 {% endmatch %}
 
+{# Open custom sessions this browser joined (its cookie): one button each.
+   Nobody else sees them; a session is reached by its QR code first. #}
+{% if !custom_sessions.is_empty() %}
+<section class="sessions-open" aria-label="live sessions">
+  {% for s in custom_sessions %}
+    <a class="btn primary session-btn" href="{{ s.href }}">join {{ s.name }} &rarr;<span class="session-btn-when">until {{ s.closes }}</span></a>
+  {% endfor %}
+</section>
+{% endif %}
+
 {# The order: how long is left, the box, the tagline, the rules, yesterday. Nothing explains strategy:
    working out that low numbers get crowded is the game (R22.3). #}
 <section class="sec hero" style="--b: 0" aria-labelledby="round-h">

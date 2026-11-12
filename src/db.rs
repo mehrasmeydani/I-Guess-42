@@ -2224,6 +2224,211 @@ pub async fn global_rounds_before(db: &Db, round_date: &str) -> Result<i64> {
         .await?)
 }
 
+// ---------------------------------------------------------------- custom sessions
+
+/// A round a moderator opened for a set time; see `custom.rs`.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CustomSession {
+    pub id: i64,
+    pub code: String,
+    pub name: String,
+    /// When it opened, for how much of it has gone by.
+    pub created_at: String,
+    pub ends_at: String,
+}
+
+impl CustomSession {
+    pub fn starts(&self) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(&self.created_at).map(|t| t.with_timezone(&Utc)).unwrap_or_default()
+    }
+
+    pub fn ends(&self) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(&self.ends_at).map(|t| t.with_timezone(&Utc)).unwrap_or_default()
+    }
+
+    pub fn is_open(&self, now: DateTime<Utc>) -> bool {
+        now < self.ends()
+    }
+}
+
+/// Someone who joined a custom session, known by their cookie or, if they
+/// joined signed in, their account.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CustomPlayer {
+    pub id: i64,
+    pub name: String,
+    pub guess: Option<i64>,
+}
+
+/// One number in a closed custom session.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CustomPickRow {
+    pub name: String,
+    pub guess: i64,
+    /// Joined without an account.
+    pub guest: bool,
+}
+
+/// Opens a session until `ends_at`. `false` if the code is taken, which
+/// the caller answers by drawing another.
+pub async fn create_custom_session(
+    db: &Db,
+    code: &str,
+    name: &str,
+    created_by: i64,
+    ends_at: DateTime<Utc>,
+) -> Result<bool> {
+    let done = sqlx::query(
+        "INSERT INTO custom_sessions (code, name, created_by, created_at, ends_at)
+         VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (code) DO NOTHING",
+    )
+    .bind(code)
+    .bind(name)
+    .bind(created_by)
+    .bind(ts(Utc::now()))
+    .bind(ts(ends_at))
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+pub async fn custom_session(db: &Db, code: &str) -> Result<Option<CustomSession>> {
+    Ok(sqlx::query_as("SELECT id, code, name, created_at, ends_at FROM custom_sessions WHERE code = ?1")
+        .bind(code)
+        .fetch_optional(db)
+        .await?)
+}
+
+/// The sessions a browser's token or an account joined that are still open
+/// at `now`, the soonest to close first.
+pub async fn open_custom_sessions_of(
+    db: &Db,
+    token: Option<&str>,
+    account_id: Option<i64>,
+    now: DateTime<Utc>,
+) -> Result<Vec<CustomSession>> {
+    Ok(sqlx::query_as(
+        "SELECT s.id, s.code, s.name, s.created_at, s.ends_at FROM custom_sessions s
+         WHERE s.ends_at > ?3 AND EXISTS (
+             SELECT 1 FROM custom_session_players p WHERE p.session_id = s.id
+             AND (p.token = ?1 OR p.account_id = ?2))
+         ORDER BY s.ends_at, s.id",
+    )
+    .bind(token)
+    .bind(account_id)
+    .bind(ts(now))
+    .fetch_all(db)
+    .await?)
+}
+
+/// The latest sessions, open or not, newest first, with how many joined.
+pub async fn recent_custom_sessions(db: &Db, limit: i64) -> Result<Vec<(CustomSession, i64)>> {
+    let rows: Vec<(i64, String, String, String, String, i64)> = sqlx::query_as(
+        "SELECT s.id, s.code, s.name, s.created_at, s.ends_at,
+                (SELECT COUNT(*) FROM custom_session_players p WHERE p.session_id = s.id)
+         FROM custom_sessions s ORDER BY s.id DESC LIMIT ?1",
+    )
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, code, name, created_at, ends_at, players)| (CustomSession { id, code, name, created_at, ends_at }, players))
+        .collect())
+}
+
+/// Closes a session now, if it has not closed already.
+pub async fn end_custom_session(db: &Db, session_id: i64) -> Result<()> {
+    let now = ts(Utc::now());
+    sqlx::query("UPDATE custom_sessions SET ends_at = ?1 WHERE id = ?2 AND ends_at > ?1")
+        .bind(&now)
+        .bind(session_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// The player in this session a cookie's token belongs to or, failing
+/// that, the account joined as: the browser first, so a guest who signs in
+/// afterwards stays the guest they joined as.
+pub async fn custom_player(db: &Db, session_id: i64, token: Option<&str>, account_id: Option<i64>) -> Result<Option<CustomPlayer>> {
+    Ok(sqlx::query_as(
+        "SELECT id, name, guess FROM custom_session_players
+         WHERE session_id = ?1 AND (token = ?2 OR account_id = ?3)
+         ORDER BY token = ?2 DESC LIMIT 1",
+    )
+    .bind(session_id)
+    .bind(token)
+    .bind(account_id)
+    .fetch_optional(db)
+    .await?)
+}
+
+/// Whether `name` is an account's username: a guest may not take one, so
+/// nobody plays a session as someone they are not.
+pub async fn is_username(db: &Db, name: &str) -> Result<bool> {
+    Ok(sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM accounts WHERE username = ?1 COLLATE NOCASE)")
+        .bind(name)
+        .fetch_one(db)
+        .await?)
+}
+
+/// Joins a session under `name`, as `account_id` or as a guest. `false` if
+/// someone in it has the name, or the token or account joined it already.
+pub async fn join_custom_session(db: &Db, session_id: i64, token: &str, account_id: Option<i64>, name: &str) -> Result<bool> {
+    let done = sqlx::query(
+        "INSERT INTO custom_session_players (session_id, token, account_id, name, joined_at)
+         VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT DO NOTHING",
+    )
+    .bind(session_id)
+    .bind(token)
+    .bind(account_id)
+    .bind(name)
+    .bind(ts(Utc::now()))
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Locks a player's number in, while the session is open. `false` if they
+/// had one already or the session has closed: a guess is final.
+pub async fn custom_guess(db: &Db, player_id: i64, value: i64) -> Result<bool> {
+    let now = ts(Utc::now());
+    let done = sqlx::query(
+        "UPDATE custom_session_players SET guess = ?1, guessed_at = ?2
+         WHERE id = ?3 AND guess IS NULL
+           AND (SELECT ends_at FROM custom_sessions s WHERE s.id = session_id) > ?2",
+    )
+    .bind(value)
+    .bind(&now)
+    .bind(player_id)
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// How many joined a session, and how many of them have a number in.
+pub async fn custom_counts(db: &Db, session_id: i64) -> Result<(i64, i64)> {
+    Ok(sqlx::query_as(
+        "SELECT COUNT(*), COUNT(guess) FROM custom_session_players WHERE session_id = ?1",
+    )
+    .bind(session_id)
+    .fetch_one(db)
+    .await?)
+}
+
+/// Every number in a session, by who picked it, lowest first. Only for a
+/// closed session: numbers are secret until the end.
+pub async fn custom_picks(db: &Db, session_id: i64) -> Result<Vec<CustomPickRow>> {
+    Ok(sqlx::query_as(
+        "SELECT name, guess, account_id IS NULL AS guest FROM custom_session_players
+         WHERE session_id = ?1 AND guess IS NOT NULL ORDER BY guess, guessed_at, id",
+    )
+    .bind(session_id)
+    .fetch_all(db)
+    .await?)
+}
+
 /// What an account has had of one kind of ledger row, all told.
 #[cfg(test)]
 pub async fn ledger_total(db: &Db, account_id: i64, kind: &str) -> Result<i64> {

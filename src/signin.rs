@@ -66,6 +66,13 @@ pub(crate) async fn signed_in_to(state: &AppState, jar: CookieJar, account_id: i
     db::create_session(&state.db, &token, account_id, auth::SESSION_TTL_DAYS).await?;
     let mut jar = jar.add(auth::session_cookie(token, state.cfg.secure_cookies));
     let mut to = to.to_string();
+    // Came from a custom session's page: back to it, past the round - via
+    // the username for a new account.
+    let (taken, back) = crate::custom::take_return(jar);
+    jar = taken;
+    if let Some(back) = back {
+        to = if to == "/welcome" { format!("/welcome?then={back}") } else { back };
+    }
     if let Some(held_token) = crate::held::token(&jar) {
         // Always cleared, whatever becomes of it.
         jar = jar.remove(crate::held::clearing_cookie());

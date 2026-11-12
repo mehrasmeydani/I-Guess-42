@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} &middot; i guess low{% endblock %}
+{% block h1 %}session {{ name }}{% endblock %}
+
+{% block content %}
+<p class="dim"><a href="/mod/sessions">&larr; sessions</a></p>
+
+<section class="sec hero" style="--b: 0">
+  <h2 class="rule"><span>{{ name }}</span>{% if open %}<span class="tag live">open</span>{% else %}<span class="tag">over</span>{% endif %}</h2>
+  {% if open %}
+    {# The round page's clock and bar; at zero the page loads again with
+       the result. #}
+    <p class="countdown" data-opens-at="{{ starts_at }}" data-closes-at="{{ ends_at }}" data-server-now="{{ server_now }}" data-reload
+       aria-label="closes in {{ time_left_spoken }}">{{ time_left }}</p>
+    <p class="meter" role="progressbar" aria-label="session gone by"
+       aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress_pct }}"
+       aria-valuetext="{{ progress_pct }}% of the round gone"><span class="meter-bar" aria-hidden="true">{{ crate::templates::meter(progress_pct) }}</span> <span class="meter-pct" aria-hidden="true">{{ progress_pct }}%</span></p>
+    <p class="dim">closes {{ closes }}</p>
+    {# Scan to join. The SVG is made by custom::qr_svg, never from input. #}
+    <div class="qr-card">{{ qr|safe }}</div>
+    <p class="qr-link"><a href="{{ link }}">{{ link }}</a></p>
+    <p class="dim"><a href="/mod/sessions/{{ code }}/qr.svg" download>save the QR code</a></p>
+  {% else %}
+    <p class="dim">ended {{ closes }}</p>
+  {% endif %}
+  <div class="figures">
+    <p><b>{{ joined }}</b><span>joined</span></p>
+    <p><b>{{ guessed }}</b><span>numbers locked</span></p>
+  </div>
+</section>
+
+{% if open %}
+<section class="sec" style="--b: 1">
+  <form method="post" action="/mod/sessions/{{ code }}/end" class="inline">
+    <button type="submit" class="danger">end it now</button>
+  </form>
+  <p class="hint">numbers are revealed to everyone when it ends</p>
+</section>
+{% else %}
+<section class="sec" style="--b: 1">
+  <h2 class="section-title">result</h2>
+  {% include "_session_picks.html" %}
+</section>
+{% endif %}
+{% endblock %}

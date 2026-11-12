@@ -1303,3 +1303,37 @@ p.dim, .hint, .auth-sub, .auth-fine, .auth-foot, .chart-summary, .explain, .mess
   .pick-none { flex-basis: 100%; margin-left: 0; }
   .betform input[type="text"] { flex: 1; width: auto; }
 }
+
+/* Custom sessions: the round page's buttons to the open ones, and the QR
+   code a moderator shows the room. */
+.sessions-open { display: grid; gap: 8px; margin: 0 0 24px; }
+.session-btn { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; }
+.session-btn-when { font-weight: 400; opacity: 0.85; }
+.qr-card { width: min(100%, 420px); margin: 24px 0 8px; padding: 0; background: #fff; }
+.qr-card svg { display: block; width: 100%; height: auto; }
+.qr-link { margin: 0; word-break: break-all; }
+.session-picks { margin-top: 16px; }
+.session-picks tr.won td { color: var(--state); font-weight: 700; }
+.session-picks tr.taken td { color: var(--dim); }
+.session-picks tr.mine-row td:first-child { text-decoration: underline; }
+/* A session's two steps, name then number, so the name form never reads as
+   a first guess. */
+.session-steps { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0 0 8px; padding: 0; list-style: none; color: var(--dim); font-size: var(--fs-1); }
+.session-steps b { display: inline-block; min-width: 1.6em; margin-right: 4px; padding: 0 4px; border: 1px solid var(--edge-strong); text-align: center; }
+.session-steps .on { color: var(--hi); }
+.session-steps .on b { border-color: var(--action); background: var(--action); color: #fff; }
+.session-steps .done b { border-color: var(--state); color: var(--state); }
+.session-join { margin-top: 8px; }
+.session-steps + .section-title { margin-top: 16px; }
+/* Who you play a session as: sign in or make an account, or a guest. */
+.session-choices { display: grid; gap: 8px; max-width: 440px; }
+.session-choices .section-title { margin-top: 8px; }
+.session-signin { display: flex; flex-wrap: wrap; gap: 8px; }
+.session-signin .btn { flex: 1 1 10rem; text-align: center; }
+.session-guest { margin-top: 16px; }
+.session-choices form button { width: 100%; }
+.session-guest > summary { display: flex; justify-content: center; gap: 1ch; margin: 0; }
+.session-guest > summary::before { width: auto; }
+.session-guest[open] > summary,
+.session-guest[open] > summary:hover { margin: 0; background: transparent; border-color: var(--edge); color: var(--dim); }
+.session-guest .authform { margin-top: 8px; }
